@@ -1,0 +1,9 @@
+{
+  "name": "underdog-esports-academy",
+  "version": "2.5.0",
+  "description": "Tier-1 Esports Coaching Portal & Live Tactical Whiteboard with Supabase Realtime",
+  "scripts": {
+    "start": "node backend/server.js",
+    "backend": "node backend/server.js"
+  }
+}

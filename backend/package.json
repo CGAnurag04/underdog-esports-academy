@@ -1,0 +1,9 @@
+{
+  "name": "underdog-esports-backend",
+  "version": "2.5.0",
+  "description": "Underdog Esports Academy Companion Server with Local Wi-Fi Hosting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

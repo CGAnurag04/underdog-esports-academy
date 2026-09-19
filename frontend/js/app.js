@@ -1,0 +1,12532 @@
+/* ==========================================================================
+   UNDERDOG ESPORTS ACADEMY - SUPABASE CLOUD & REALTIME MODULE
+   Cross-Device Cloud Sync, Multiplayer Tactical Rooms & Live Scrims
+   ========================================================================== */
+
+(function () {
+  'use strict';
+
+  class UnderdogSupabase {
+    constructor() {
+      this.client = null;
+      this.activeChannel = null;
+      this.scrimChannel = null;
+      this.isConnected = false;
+      this.config = this.loadConfig();
+
+      if (this.config.url && this.config.anonKey) {
+        this.init(this.config.url, this.config.anonKey);
+      }
+    }
+
+    loadConfig() {
+      try {
+        const saved = localStorage.getItem('underdog_supabase_config');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved supabase config:', e);
+      }
+      return {
+        url: 'https://iwggpixdxhdetncnossa.supabase.co',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Z2dwaXhkeGhkZXRuY25vc3NhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDE3MDUsImV4cCI6MjEwNTQxNzcwNX0.LYQaNMtFngED1TqvbujkWkX3qNfIxXntzysg_qkaLtI'
+      };
+    }
+
+    saveConfig(url, anonKey) {
+      this.config = { url: url.trim(), anonKey: anonKey.trim() };
+      localStorage.setItem('underdog_supabase_config', JSON.stringify(this.config));
+      return this.init(this.config.url, this.config.anonKey);
+    }
+
+    init(url, anonKey) {
+      if (!window.supabase || !window.supabase.createClient) {
+        console.warn('Supabase JS library not loaded in window.supabase');
+        return false;
+      }
+      try {
+        this.client = window.supabase.createClient(url, anonKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true
+          },
+          realtime: {
+            params: {
+              eventsPerSecond: 15
+            }
+          }
+        });
+        this.isConnected = true;
+        console.log('⚡ Underdog Supabase Client Initialized:', url);
+        this.updateStatusBadge(true);
+        return true;
+      } catch (err) {
+        console.error('Supabase init failed:', err);
+        this.isConnected = false;
+        this.updateStatusBadge(false);
+        return false;
+      }
+    }
+
+    updateStatusBadge(connected) {
+      const badge = document.getElementById('cloudStatusBadge');
+      const dot = document.getElementById('cloudStatusDot');
+      const text = document.getElementById('cloudStatusText');
+      if (badge && dot && text) {
+        if (connected) {
+          badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-sub font-bold uppercase tracking-wider cursor-pointer hover:bg-emerald-500/20 transition-all';
+          dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+          text.textContent = 'Cloud Live 🟢';
+        } else {
+          badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-sub font-bold uppercase tracking-wider cursor-pointer hover:bg-amber-500/20 transition-all';
+          dot.className = 'w-2 h-2 rounded-full bg-amber-400';
+          text.textContent = 'Local Mode 🟡';
+        }
+      }
+    }
+
+    // --- REALTIME SQUAD TACTICAL ROOM ---
+    joinTacticalRoom(roomCode, onActionReceived) {
+      if (!this.client) return null;
+      if (this.activeChannel) {
+        this.client.removeChannel(this.activeChannel);
+      }
+
+      const channelName = `squad_room_${roomCode.toUpperCase()}`;
+      console.log(`Connecting to Tactical Room: ${channelName}`);
+
+      this.activeChannel = this.client.channel(channelName, {
+        config: { broadcast: { self: false } }
+      });
+
+      this.activeChannel
+        .on('broadcast', { event: 'tactical_action' }, (payload) => {
+          if (typeof onActionReceived === 'function') {
+            onActionReceived(payload.payload);
+          }
+        })
+        .subscribe((status) => {
+          console.log(`Tactical room [${roomCode}] status:`, status);
+        });
+
+      return this.activeChannel;
+    }
+
+    broadcastTacticalAction(actionType, data) {
+      if (!this.activeChannel) return;
+      this.activeChannel.send({
+        type: 'broadcast',
+        event: 'tactical_action',
+        payload: {
+          action: actionType,
+          data: data,
+          sender: window.app?.currentUser?.ign || 'Teammate',
+          timestamp: Date.now()
+        }
+      }).catch(err => console.error('Broadcast tactical action error:', err));
+    }
+
+    leaveTacticalRoom() {
+      if (this.activeChannel && this.client) {
+        this.client.removeChannel(this.activeChannel);
+        this.activeChannel = null;
+      }
+    }
+
+    // --- REALTIME SCRIM LOBBY ---
+    joinScrimLobby(lobbyCode, onScoreUpdate) {
+      if (!this.client) return null;
+      if (this.scrimChannel) {
+        this.client.removeChannel(this.scrimChannel);
+      }
+
+      const channelName = `scrim_lobby_${lobbyCode.toUpperCase()}`;
+      this.scrimChannel = this.client.channel(channelName, {
+        config: { broadcast: { self: false } }
+      });
+
+      this.scrimChannel
+        .on('broadcast', { event: 'scrim_update' }, (payload) => {
+          if (typeof onScoreUpdate === 'function') {
+            onScoreUpdate(payload.payload);
+          }
+        })
+        .subscribe((status) => {
+          console.log(`Scrim lobby [${lobbyCode}] status:`, status);
+        });
+
+      return this.scrimChannel;
+    }
+
+    broadcastScrimUpdate(lobbyData) {
+      if (!this.scrimChannel) return;
+      this.scrimChannel.send({
+        type: 'broadcast',
+        event: 'scrim_update',
+        payload: {
+          lobby: lobbyData,
+          sender: window.app?.currentUser?.ign || 'Host',
+          timestamp: Date.now()
+        }
+      }).catch(err => console.error('Broadcast scrim update error:', err));
+    }
+
+    // --- CLOUD USER DATA PERSISTENCE ---
+    async saveUserDataToCloud(userId, dataType, payload) {
+      if (!this.client) return false;
+      try {
+        const { error } = await this.client
+          .from('user_cloud_data')
+          .upsert({
+            user_id: userId,
+            data_type: dataType,
+            payload: payload,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id,data_type' });
+
+        if (error) throw error;
+        console.log(`Saved ${dataType} to Supabase cloud!`);
+        return true;
+      } catch (err) {
+        console.warn('Cloud save error:', err.message);
+        return false;
+      }
+    }
+
+    async loadUserDataFromCloud(userId, dataType) {
+      if (!this.client) return null;
+      try {
+        const { data, error } = await this.client
+          .from('user_cloud_data')
+          .select('payload')
+          .eq('user_id', userId)
+          .eq('data_type', dataType)
+          .single();
+
+        if (error) return null;
+        return data?.payload || null;
+      } catch (err) {
+        console.warn('Cloud load error:', err.message);
+        return null;
+      }
+    }
+  }
+
+  // Expose globally
+  window.underdogSupabase = new UnderdogSupabase();
+})();
+
+
+/* ==========================================================================
+   UNDERDOG ESPORTS ACADEMY - Complete Standalone Client Application
+   Zero CORS / Zero External Bundle Dependencies - Runs offline & locally
+   ========================================================================== */
+
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // PRO ESPORTS ROTATIONS & TACTICS DATABASE (Referencing World Champions & Pros)
+  // ---------------------------------------------------------------------------
+  const PRO_ROTATIONS = {
+    // === BGMI / PUBG MOBILE PRO ROTATIONS ===
+    "bgmi_soul_river": {
+      id: "bgmi_soul_river",
+      game: "bgmi",
+      map: "erangel",
+      team: "Team Soul / BGIS Champions",
+      proPlayers: "Manya (IGL), Justin (Support), Goblin (Entry), Spower (Rusher)",
+      title: "Rozhok River Choke: 3-1 Split & Shallow Water Ford",
+      phase: "Phase 3 (Circle Shifts South to Farm/Pochinki)",
+      summary: "Erangel's most dangerous choke point. Rather than taking the deathtrap Rozhok metal bridge, Soul sends a Buggy scout to clear the shallow water ford while 2 Dacias hold the reverse slope.",
+      tokens: [
+        { x: 0.45, y: 0.35, label: "SCT", role: "Buggy Scout (Justin)", color: "#00f0ff" },
+        { x: 0.48, y: 0.28, label: "IGL", role: "Manya (IGL Convoy)", color: "#f59e0b" },
+        { x: 0.50, y: 0.29, label: "ENT", role: "Goblin (Rusher)", color: "#ef4444" },
+        { x: 0.52, y: 0.27, label: "SUP", role: "Spower (Anchor)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.48, fromY: 0.24, toX: 0.45, toY: 0.35, color: "#00f0ff", width: 4, label: "1. Shallow Ford Scout" },
+        { fromX: 0.50, fromY: 0.28, toX: 0.47, toY: 0.37, color: "#f59e0b", width: 4, label: "2. Main Convoy Boost" },
+        { fromX: 0.47, fromY: 0.37, toX: 0.48, toY: 0.45, color: "#10b981", width: 4, label: "3. Pochinki Ridge Hold" }
+      ],
+      dangerZones: [
+        { x: 0.52, y: 0.36, radius: 0.06, label: "Rozhok Bridge Camp Trap" },
+        { x: 0.53, y: 0.41, radius: 0.05, label: "School Roof Sightline" }
+      ],
+      utilities: [
+        { x: 0.46, y: 0.36, type: "smoke", label: "River Smoke Wall" },
+        { x: 0.47, y: 0.38, type: "smoke", label: "Cross Cover" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Amateur squads drive all 4 players in a single UAZ straight across the Rozhok metal bridge or open road. Tier-1 teams set up crossfire ambushes with M416 + DMRs, blowing tires and wiping the squad in under 3 seconds.",
+        proExecution: [
+          "Minute 2:45 (Phase 2 closing): Scout takes fastest vehicle (Buggy) along western sunken village shallow water. Crosses without firing a bullet.",
+          "Scout secures the southern dirt bank and confirms zero audio in the Water City warehouse compound.",
+          "Main convoy (2 Dacias) accelerates at full boost behind the scout's verified path. Never stop on the riverbed.",
+          "Immediately secure the two-story white compound overlooking the Pochinki north ridge."
+        ],
+        voiceComms: "Manya: 'Buggy push left river dip only! Justin, take the shallow water, do NOT take the bridge! Goblin, hold your Dacia 50 meters back. If Justin calls clear, double boost across. 2 smokes on the dirt slope, go go go!'"
+      }
+    },
+
+    "bgmi_godl_radars": {
+      id: "bgmi_godl_radars",
+      game: "bgmi",
+      map: "erangel",
+      team: "GodLike Esports / Jonathan Meta",
+      proPlayers: "Jonathan (Fragger), ClutchGod (IGL), ZGOD (Support)",
+      title: "Pochinki to Radars Hill: 2-2 Vehicle Wall & Ridge Lock",
+      phase: "Phase 4 (Endgame Compound & Hill Squeeze)",
+      summary: "GodLike's aggressive ridge-holding technique. Uses 2 vehicles parked bumper-to-bumper to create indestructible artificial cover on open grass.",
+      tokens: [
+        { x: 0.48, y: 0.47, label: "ENT", role: "Jonathan (Frontline Jiggle)", color: "#ef4444" },
+        { x: 0.50, y: 0.48, label: "IGL", role: "ClutchGod (Callout)", color: "#f59e0b" },
+        { x: 0.47, y: 0.49, label: "SUP", role: "ZGOD (Nade Cook)", color: "#10b981" },
+        { x: 0.52, y: 0.47, label: "SCT", role: "DMR Support", color: "#00f0ff" }
+      ],
+      arrows: [
+        { fromX: 0.45, fromY: 0.50, toX: 0.48, toY: 0.47, color: "#ef4444", width: 4, label: "High Ridge Crash" }
+      ],
+      dangerZones: [
+        { x: 0.53, y: 0.41, radius: 0.06, label: "School Roof Sightline" },
+        { x: 0.45, y: 0.50, radius: 0.05, label: "Pochinki CQB Fire" }
+      ],
+      utilities: [
+        { x: 0.48, y: 0.46, type: "vehicle_wall", label: "Dacia V-Wall" },
+        { x: 0.49, y: 0.48, type: "smoke", label: "Heal Pocket" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs caught in the open grass prone (snake) in bushes. A Tier-1 team on high ground with 3x/4x scopes easily spots grass rendering limits at 100m+ and wipes them with headshots.",
+        proExecution: [
+          "Crash vehicles into a 'V-Shape' against the hill crest. Shoot your own vehicle tires so enemy cannot shoot your feet under the chassis.",
+          "Jonathan holds the right head-glitch angle with UMP45 / M416 spray, knocking anyone attempting to cross from School.",
+          "ZGOD pre-cooks 1.5s grenades into the reverse dip to prevent flankers from closing in.",
+          "Never rotate on foot in Phase 4 without laying down a 3-smoke continuous chain."
+        ],
+        voiceComms: "ClutchGod: 'Crash ridge now! Blow the front tires, make the wall! Jonathan watch School flank, ZGOD cook nade into the south dip! Nobody prone in grass, hold the hard angle!'"
+      }
+    },
+
+    // === FREE FIRE PRO ROTATIONS ===
+    "ff_evos_peak": {
+      id: "ff_evos_peak",
+      game: "freefire",
+      map: "bermuda",
+      team: "EVOS Esports / Magic Squad (FFWS Champions)",
+      proPlayers: "TheCruz (Rusher), Dewa (IGL), Ygor (Sniper), Bops (Support)",
+      title: "Peak Central Fortress: 360° Interlocking Gloo Cage",
+      phase: "Phase 3 to 4 Safe Zone",
+      summary: "Peak is the king of Bermuda high ground. EVOS and Magic Squad use high-ground elevation and interlocking gloo walls to dominate the entire map.",
+      tokens: [
+        { x: 0.58, y: 0.52, label: "IGL", role: "Dewa (Zone Anchor)", color: "#f59e0b" },
+        { x: 0.56, y: 0.50, label: "RUS", role: "TheCruz (Shotgun Rusher)", color: "#ef4444" },
+        { x: 0.60, y: 0.53, label: "SNP", role: "Ygor (M82B Sniper)", color: "#00f0ff" },
+        { x: 0.57, y: 0.54, label: "SUP", role: "Bops (Nairi + Dimitri)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.32, fromY: 0.62, toX: 0.56, toY: 0.50, color: "#ef4444", width: 4, label: "Clock Tower Ascent" },
+        { fromX: 0.60, fromY: 0.53, toX: 0.56, toY: 0.63, color: "#00f0ff", width: 3, label: "M82B Gatekeep" }
+      ],
+      dangerZones: [
+        { x: 0.55, y: 0.64, radius: 0.08, label: "Bimasakti Open Kill-Box" },
+        { x: 0.43, y: 0.70, radius: 0.07, label: "Factory Rushers Approach" }
+      ],
+      utilities: [
+        { x: 0.57, y: 0.51, type: "gloo", label: "Nairi Gloo Bunker" },
+        { x: 0.59, y: 0.53, type: "gloo", label: "360 Wall Interlock" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs climb Peak slowly along the open road without gloo walls ready. Teams holding the Peak mansion spot them from 100m away and double-tap headshot them with Woodpecker/AC80 before they can deploy cover.",
+        proExecution: [
+          "Early drop at Rim Nam / Plantation to secure 8+ Gloo Walls and double shotguns.",
+          "Fast sprint via the western staircase ridge before the 2-minute mark to claim Peak top mansion.",
+          "Deploy 360-degree Gloo wall interlocking perimeter on the balcony to shut down teams climbing from Clock Tower and Bimasakti.",
+          "Homer drone release + Tatsuya dash into the tree-line whenever an enemy team starts crossing the open lawn."
+        ],
+        voiceComms: "TheCruz: 'Peak roof is ours! Ygor, take the balcony with M82B and punish the squad in Bimasakti strip. Bops, drop Nairi wall behind us, Dimitri ready for instant revive!'"
+      }
+    },
+
+    "ff_total_mill": {
+      id: "ff_total_mill",
+      game: "freefire",
+      map: "bermuda",
+      team: "Total Gaming Esports / Mafia Pro Sniper Play",
+      proPlayers: "Mafia (Sniper King / Iris Wall-Bang), AZTEC (Entry Rusher), FozyAjay (Captain)",
+      title: "Mill High-Ground Gatekeep: M82B Anti-Gloo Wall Sniping",
+      phase: "Phase 2 Edge Squeeze",
+      summary: "Mill's multi-layered stairs and rooftop vantage allow an underdog squad to gatekeep 3 rotating teams coming from Bullseye and Keraton.",
+      tokens: [
+        { x: 0.92, y: 0.48, label: "SNP", role: "Mafia (M82B / AWM Anti-Gloo)", color: "#00f0ff" },
+        { x: 0.90, y: 0.51, label: "RUS", role: "AZTEC (Charge Buster Breach)", color: "#ef4444" },
+        { x: 0.93, y: 0.53, label: "IGL", role: "FozyAjay (Edge Watch & Dimitri)", color: "#f59e0b" }
+      ],
+      arrows: [
+        { fromX: 0.74, fromY: 0.38, toX: 0.89, toY: 0.49, color: "#00f0ff", width: 3, label: "Keraton Choke Catch" }
+      ],
+      dangerZones: [
+        { x: 0.78, y: 0.40, radius: 0.07, label: "Lower Yard Open Ambush" }
+      ],
+      utilities: [
+        { x: 0.91, y: 0.50, type: "gloo", label: "Staircase Block" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdog players place a gloo wall and stand stationary right behind the center of it to medkit. A pro sniper with M82B fires directly through the gloo wall canvas for an instant kill.",
+        proExecution: [
+          "Hold the top staircase railing. Block the stairs with 1 horizontal gloo wall so rushing enemies are forced into a single-file jump.",
+          "When enemies deploy gloo walls below Mill, use M82B to wall-bang their head hitbox based on sound cues.",
+          "Never heal directly behind the center of your gloo wall; always heal behind the side edge."
+        ],
+        voiceComms: "Mafia: 'Two squads fighting at lower Keraton! Don't push down, hold Mill roof! I have 14 M82B shots — let them put gloo walls, Iris active ready, I'll wall-bang both knocks!'"
+      }
+    },
+
+    "ff_magic_brasilia": {
+      id: "ff_magic_brasilia",
+      game: "freefire",
+      map: "purgatory",
+      team: "Magic Squad / FFWS Champions",
+      proPlayers: "Ygor (IGL), Bops (Rusher), Tiago (Support), Pedro (Sniper)",
+      title: "Brasilia Central 3-Way River Chokehold",
+      phase: "Phase 3 Safe Zone (Central River Shift)",
+      summary: "Brasilia is the dead-center urban fortress of Purgatory. Magic Squad holds the two-story pink compound on the east river bluff to gatekeep squads crossing from Marbleworks and Golf Course.",
+      tokens: [
+        { x: 0.52, y: 0.52, label: "IGL", role: "Ygor (Bluff Master)", color: "#f59e0b" },
+        { x: 0.50, y: 0.50, label: "RUS", role: "Bops (Tatsuya Entry)", color: "#ef4444" },
+        { x: 0.54, y: 0.54, label: "SNP", role: "Pedro (M82B River Watch)", color: "#00f0ff" },
+        { x: 0.51, y: 0.55, label: "SUP", role: "Tiago (Nairi Wall Stack)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.35, fromY: 0.52, toX: 0.49, toY: 0.51, color: "#ef4444", width: 4, label: "Marbleworks Cross Catch" },
+        { fromX: 0.54, fromY: 0.54, toX: 0.38, toY: 0.64, color: "#00f0ff", width: 3, label: "Golf Bridge Gatekeep" }
+      ],
+      dangerZones: [
+        { x: 0.38, y: 0.52, radius: 0.07, label: "River Open Water Trap" },
+        { x: 0.58, y: 0.42, radius: 0.06, label: "Fields High Ground Sightline" }
+      ],
+      utilities: [
+        { x: 0.51, y: 0.51, type: "gloo", label: "Pink Roof Gloo Bunker" },
+        { x: 0.53, y: 0.53, type: "gloo", label: "River Stairs Interlock" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs try to cross the Purgatory central river by swimming or running across the exposed asphalt bridge in Phase 3. Teams in Brasilia wipe them instantly with AC80/M82B while they have zero cover.",
+        proExecution: [
+          "Take zip-lines from Campsite or Ski Lodge early to enter Brasilia before the 3-minute mark.",
+          "Claim the two-story house on grid E-5 overlooking the eastern river bend.",
+          "Pedro locks onto the water crossing with M82B; anyone attempting to swim is eliminated in 2 shots.",
+          "Deploy double gloo walls on the staircase to prevent rushers from breaching the second floor."
+        ],
+        voiceComms: "Ygor: 'Lock Brasilia pink house! Tiago, two Nairi walls on the bottom staircase. Pedro, watch the river crossing from Marbleworks — don't let anyone step on the asphalt!'"
+      }
+    },
+
+    "ff_evos_refinery": {
+      id: "ff_evos_refinery",
+      game: "freefire",
+      map: "kalahari",
+      team: "EVOS Phoenix / Global Kings",
+      proPlayers: "TheCruz (Rusher), Dewa (IGL), Moshi (Sniper), Rasyah (Support)",
+      title: "Refinery Top Gantry: 360° Anti-Zipline Kill-Box",
+      phase: "Phase 2 to 3 (Kalahari High-Ground Control)",
+      summary: "Refinery is the supreme high-ground fortress in Kalahari. EVOS anchors on the top metallic catwalks, intercepting squads climbing the 4 ziplines from Bayfront and Mammoth.",
+      tokens: [
+        { x: 0.46, y: 0.52, label: "IGL", role: "Dewa (Center Catwalk)", color: "#f59e0b" },
+        { x: 0.44, y: 0.50, label: "RUS", role: "TheCruz (Zipline Drop)", color: "#ef4444" },
+        { x: 0.48, y: 0.53, label: "SNP", role: "Moshi (High Crane AWM)", color: "#00f0ff" },
+        { x: 0.45, y: 0.54, label: "SUP", role: "Rasyah (Dimitri Anchor)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.28, fromY: 0.65, toX: 0.44, toY: 0.53, color: "#00f0ff", width: 3, label: "Mammoth Zipline Catch" },
+        { fromX: 0.56, fromY: 0.42, toX: 0.47, toY: 0.50, color: "#ef4444", width: 3, label: "Bayfront Push Defense" }
+      ],
+      dangerZones: [
+        { x: 0.46, y: 0.52, radius: 0.08, label: "Refinery Lower Ground Death-Box" },
+        { x: 0.58, y: 0.60, radius: 0.07, label: "Command Post Sightline" }
+      ],
+      utilities: [
+        { x: 0.45, y: 0.51, type: "gloo", label: "Catwalk Railing Gloo" },
+        { x: 0.47, y: 0.53, type: "gloo", label: "Ladder Barrier" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs push Refinery from the ground floor and get trapped in the open industrial pit. Teams on the upper catwalks drop grenades and shoot downward at 90-degree angles with zero return fire risk.",
+        proExecution: [
+          "Take the south-west zipline from Mammoth directly to the upper gantry platform.",
+          "Hold the crane ladders with a horizontal gloo wall block.",
+          "Moshi holds the 360-degree sniper line over Bayfront and Foundation.",
+          "If pushed on the catwalk, TheCruz uses Tatsuya dash to reposition behind the center industrial cylinders."
+        ],
+        voiceComms: "Dewa: 'Refinery top is ours! Moshi, watch the zipline from Bayfront! TheCruz, hold the ladder drop with M1887. If they take the cable, knock them mid-air!'"
+      }
+    },
+
+    // === FREE FIRE: NeXTerra Pro Rotation ===
+    "ff_falcons_nexterra": {
+      id: "ff_falcons_nexterra",
+      game: "freefire",
+      map: "nexterra",
+      team: "Team Falcons / FFWS World Champions",
+      proPlayers: "Dewa (IGL), TheCruz (Rusher), Moshi (Sniper), Rasyah (Support)",
+      title: "Grav Labs 0-G Flank: Jump-Pad Elevation & Drone Ambush",
+      phase: "Phase 3 (South-West Grav Labs to Plazaria Push)",
+      summary: "NeXTerra's Grav Labs (lower-left circular facility) features anti-gravity float physics and jump pads. Team Falcons uses anti-gravity height to launch Homer drones and Tatsuya dashes toward Plazaria and Deca Square.",
+      tokens: [
+        { x: 0.18, y: 0.76, label: "IGL", role: "Dewa (Grav Labs Core)", color: "#f59e0b" },
+        { x: 0.22, y: 0.73, label: "RUS", role: "TheCruz (Jump Pad Shotgun)", color: "#ef4444" },
+        { x: 0.16, y: 0.78, label: "SNP", role: "Moshi (High Platform AC80)", color: "#00f0ff" },
+        { x: 0.20, y: 0.75, label: "SUP", role: "Rasyah (Dimitri / Nairi)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.18, fromY: 0.74, toX: 0.35, toY: 0.72, color: "#ef4444", width: 4, label: "Plazaria Push Angle" },
+        { fromX: 0.18, fromY: 0.76, toX: 0.50, toY: 0.80, color: "#00f0ff", width: 3, label: "Deca Square Gatekeep" }
+      ],
+      dangerZones: [
+        { x: 0.18, y: 0.76, radius: 0.08, label: "Grav Labs 0-G Basin" },
+        { x: 0.55, y: 0.80, radius: 0.09, label: "Deca Square Open Plaza" }
+      ],
+      utilities: [
+        { x: 0.21, y: 0.73, type: "gloo", label: "Jump Pad Landing Gloo" },
+        { x: 0.34, y: 0.72, type: "gloo", label: "Plazaria Entry Barrier" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs enter the Zero-G zone without activating Homer or Tatsuya, becoming slow floating targets in mid-air with zero lateral dodge capability.",
+        proExecution: [
+          "Take the lower-left Grav Labs circular platform to gain zero-gravity elevation.",
+          "Place a pre-emptive Gloo Wall at the landing point before touch-down to absorb incoming sniper fire.",
+          "Moshi holds the eastern ridge looking over Plazaria and Farmtopia.",
+          "TheCruz triggers Homer drone into the low-gravity basin to slow enemy retreat speeds by 60%."
+        ],
+        voiceComms: "Dewa: 'Hit the jump pad now! TheCruz, pop Nairi wall on landing! Moshi, punish the squad floating in the core! Don't jump unless your dash is ready!'"
+      }
+    },
+
+    // === FREE FIRE: Solara Pro Rotation (Official OB49) ===
+    "ff_buriram_solara": {
+      id: "ff_buriram_solara",
+      game: "freefire",
+      map: "solara",
+      team: "Buriram United Esports / SEA Champions",
+      proPlayers: "Moshi (Sniper God), Dewa (IGL), TheCruz (Entry), Rasyah (Support)",
+      title: "Central Triangle Fortress & Slide Rail Gatekeep",
+      phase: "Phase 3 (Slide Rail Ring Rotation toward Bloomtown)",
+      summary: "Solara's official yellow Slide Rail System connects the island. Buriram anchors the Central Triangle Fortress (grid N, E-F) overlooking Bloomtown and the southern river bridges, wiping squads riding the rail network.",
+      tokens: [
+        { x: 0.58, y: 0.61, label: "SNP", role: "Moshi (Triangle Fortress High)", color: "#00f0ff" },
+        { x: 0.42, y: 0.68, label: "IGL", role: "Dewa (Bloomtown North Edge)", color: "#f59e0b" },
+        { x: 0.40, y: 0.72, label: "RUS", role: "TheCruz (Jacaranda Street CQB)", color: "#ef4444" },
+        { x: 0.60, y: 0.64, label: "SUP", role: "Rasyah (Rail Junction Anchor)", color: "#10b981" }
+      ],
+      arrows: [
+        { fromX: 0.58, fromY: 0.61, toX: 0.44, toY: 0.68, color: "#00f0ff", width: 3, label: "Fortress Sniper Arc" },
+        { fromX: 0.60, fromY: 0.64, toX: 0.82, toY: 0.84, color: "#ef4444", width: 4, label: "Slide Rail East Intercept" }
+      ],
+      dangerZones: [
+        { x: 0.58, y: 0.61, radius: 0.08, label: "Triangle Fortress Crossfire" },
+        { x: 0.42, y: 0.70, radius: 0.09, label: "Bloomtown Dense Alleys" }
+      ],
+      utilities: [
+        { x: 0.57, y: 0.62, type: "gloo", label: "On-Rail Gloo Shield" },
+        { x: 0.43, y: 0.67, type: "gloo", label: "Street Chokepoint Wall" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdogs ride the Slide Rail in a straight line without placing on-rail Gloo Shields. Enemy squads holding the Central Triangle Fortress easily track rail velocity and knock riders off the line.",
+        proExecution: [
+          "Use the on-rail Gloo Wall deploy mechanic while sliding to create moving mobile cover.",
+          "Moshi holds the Central Triangle Fortress high platform to gatekeep squads crossing from Bloomtown and the canal.",
+          "TheCruz clears Bloomtown's jacaranda streets with M1887 shotgun and Tatsuya dashes.",
+          "Dewa monitors rail-sensor color changes to detect enemy squads rotating along the southern rail loop."
+        ],
+        voiceComms: "Moshi: 'I have Central Triangle Fortress high-ground locked! Enemy squad on the Slide Rail coming from the east! Pop on-rail Gloo, Dewa cut them off at the Bloomtown bridge!'"
+      }
+    },
+
+    // === HONOR OF KINGS PRO ROTATIONS ===
+    "hok_wolves_tyrant": {
+      id: "hok_wolves_tyrant",
+      game: "hok",
+      map: "hok_gorge",
+      team: "Wolves Esports / KIC World Champions",
+      proPlayers: "Fly (Clash Lane MVP), HuaHai (Jungler), QingRong (Mid)",
+      title: "2:00 Shadow Tyrant Setup & River Bush Vision Trap",
+      phase: "Minute 1:45 to 2:15 (First Dragon Spawn)",
+      summary: "How Wolves and eStar Pro turn the first 2:00 Tyrant into a game-winning snowball with 3v5 river bush vision control.",
+      tokens: [
+        { x: 0.68, y: 0.58, label: "JG", role: "HuaHai (Smite / Tyrant Focus)", color: "#f59e0b" },
+        { x: 0.60, y: 0.50, label: "MID", role: "QingRong (Poke & Stun)", color: "#a855f7" },
+        { x: 0.64, y: 0.55, label: "SUP", role: "Roamer (Vision Bush Anchor)", color: "#10b981" },
+        { x: 0.44, y: 0.26, label: "CLS", role: "Fly (Clash Lane Teleport)", color: "#00f0ff" }
+      ],
+      arrows: [
+        { fromX: 0.54, fromY: 0.48, toX: 0.60, toY: 0.50, color: "#a855f7", width: 3, label: "Mid Fast Wave Roam" },
+        { fromX: 0.44, fromY: 0.26, toX: 0.66, toY: 0.54, color: "#00f0ff", width: 3, label: "Clash Teleport Flank" }
+      ],
+      dangerZones: [
+        { x: 0.72, y: 0.52, radius: 0.06, label: "Enemy River Face-Check Bush" }
+      ],
+      utilities: [
+        { x: 0.65, y: 0.56, type: "ward", label: "River Vision Line" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdog junglers start attacking the dragon alone at 2:00 with zero vision in river bushes. The enemy jungler and mid laner jump out of the bush, steal the dragon with Smite, and wipe your team.",
+        proExecution: [
+          "At 1:40, Mid Lane clears wave and immediately rotates through the blue jungle to the river bush.",
+          "Roamer (Tank) sits in the Tyrant pit pixel bush to provide vision and block enemy face-checks.",
+          "Jungler initiates Tyrant at 2:02; Clash Laner teleports via the lane portal if enemy contest is spotted, securing a 5v4 surprise surround.",
+          "Do not use Smite (Punish) early; save it for when Tyrant hits 1,400 HP."
+        ],
+        voiceComms: "Fly: 'Tyrant in 10 seconds! Roamer lock the river bush, QingRong check with S1. HuaHai start Tyrant, I have portal teleport ready. If they contest, I'm dropping right behind their marksman!'"
+      }
+    },
+
+    "hok_estar_dive": {
+      id: "hok_estar_dive",
+      game: "hok",
+      map: "hok_gorge",
+      team: "eStar Pro / Dynasty Macro",
+      proPlayers: "Sun (Roamer), HuaHai (Assassin), YN (Marksman)",
+      title: "1:15 Farm Lane 4-Man Tower Collapse",
+      phase: "Minute 1:15 to 1:40 (Level 4 Spike)",
+      summary: "A crushing 4-man bottom dive before the enemy team can rotate, giving your Marksman first tower gold and infinite lead.",
+      tokens: [
+        { x: 0.88, y: 0.62, label: "ADC", role: "YN (Consort Yu Wave Push)", color: "#00f0ff" },
+        { x: 0.84, y: 0.60, label: "SUP", role: "Sun (Tank Tower Agro)", color: "#10b981" },
+        { x: 0.80, y: 0.56, label: "JG", role: "HuaHai (Red Start Flank)", color: "#f59e0b" },
+        { x: 0.74, y: 0.52, label: "MID", role: "Mid Mage Roam", color: "#a855f7" }
+      ],
+      arrows: [
+        { fromX: 0.72, fromY: 0.48, toX: 0.84, toY: 0.58, color: "#f59e0b", width: 4, label: "4-Man Jungle Pincer" }
+      ],
+      dangerZones: [
+        { x: 0.89, y: 0.61, radius: 0.05, label: "Enemy Outer Tower Aggro" }
+      ],
+      utilities: [
+        { x: 0.82, y: 0.58, type: "ward", label: "Bush Cut-Off" }
+      ],
+      breakdown: {
+        whyUnderdogsFail: "Underdog bot laners push minions under enemy tower alone, take 3 tower shots, and die. A pro dive alternates tower aggro between Tank and Assassin while minions absorb damage.",
+        proExecution: [
+          "Jungler completes Red Buff jungle route at 1:12 right beside bottom river.",
+          "Roamer engages first to soak tower aggro with shield/damage reduction skill.",
+          "Assassin dashes in from behind river bush, executes enemy Marksman in 0.8 seconds, and flashes out before taking lethal damage.",
+          "Take first tower shield gold at 1:35 and immediately swap lanes to top."
+        ],
+        voiceComms: "HuaHai: 'Farm lane has no flash! Sun tank one tower shot, YN keep the wave pushed! Diving in 3... 2... 1... Knocked! Back off tower, reset and take first turret!'"
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // GAME SPECIFIC STATIC DATA
+  // ---------------------------------------------------------------------------
+  const GAMES_DATA = {
+    bgmi: {
+      id: "bgmi",
+      title: "BGMI / PUBG Mobile Esports",
+      bannerSubtitle: "From T3 Discord Scrims to BGIS / BGMS Tier-1 Lobby Domination",
+      accentColor: "#f59e0b",
+      roles: [
+        {
+          id: "igl",
+          name: "In-Game Leader (IGL)",
+          tagline: "The Brain of the Roster",
+          summary: "Responsible for circle prediction, compound pathfinding, split calls, and high-pressure endgame rotations.",
+          coreDuties: [
+            "Track flight path and predict enemy drop clusters (School/Pochinki/Novorepnoye).",
+            "Phase 1 & 2: Secure 3-4 vehicles (Dacia/Buggy) early and establish split scouting.",
+            "Phase 4 Shift Read: Determine whether to play edge compound or hard crash center dip.",
+            "Endgame Smoke Lines: Dictate micro-smokes and crosshair focus during Phase 6/7 pinches."
+          ],
+          proTips: [
+            "Never crash a blind compound without a Buggy scout doing a drive-by audio check.",
+            "Always calculate the 'Weak Side' of the zone — the side with the water or blue zone that eliminates flankers."
+          ]
+        },
+        {
+          id: "entry-fragger",
+          name: "Entry Fragger / Rusher",
+          tagline: "The First Bullet & Space Creator",
+          summary: "The spearhead who opens knocks, masters close-quarters desync peeking, and breaches enemy compounds.",
+          coreDuties: [
+            "First person to breach stairs/doors with pre-firing and jiggle movement.",
+            "Master the DBS / UMP45 / M416 switch in under 0.3 seconds.",
+            "Call knock locations instantly ('One knocked on top balcony, low HP!').",
+            "Control crosshair placement at head height around every corner."
+          ],
+          proTips: [
+            "Don't commit to a 50/50 open aim duel if you don't have hard cover within one slide/crouch step.",
+            "Master crouch-spam + hipfire spray: keeps your head hitbox shifting while maintaining 70%+ bullet spread density."
+          ]
+        },
+        {
+          id: "support-anchor",
+          name: "Support & Anchor",
+          tagline: "The Lifeline & Utility Specialist",
+          summary: "Controls grenades, smokes, and health economy. Provides immediate trade-knocks when the entry pushes.",
+          coreDuties: [
+            "Carry 5-6 Smokes and 3-4 Frag Grenades minimum per match.",
+            "Cook grenades to 1.5 - 2.0 seconds before impact for zero-reaction airbursts.",
+            "Provide suppressive DMR/AR fire to pin enemies while entry fraggers close the distance.",
+            "Guard the team's rear and vehicles from third-party backstabs."
+          ],
+          proTips: [
+            "Underdogs die to third parties because nobody watches the back. An anchor's eyes are always on the blue zone edge.",
+            "Use molotovs not for damage, but to deny cover (force players out of small shacks or stairs)."
+          ]
+        },
+        {
+          id: "scout-sniper",
+          name: "Scout / Long-Range DMR",
+          tagline: "Vision & Intel Gatherer",
+          summary: "Pushes ahead in a high-speed vehicle to secure vision hills and tags enemies with Mini14/SLR.",
+          coreDuties: [
+            "Fast-drive Buggy to survey high ridge positions before team convoy commits.",
+            "Continuous kill feed tracking: Note which squads are fighting and who is losing players.",
+            "Apply long-range pressure with 6x Mini14 / SLR to drain enemy helmet/vest durability and heals.",
+            "Mark safe vehicle parking spots inside compounds that shield tires from bullet poke."
+          ],
+          proTips: [
+            "If you spot a team rotating, do not shoot immediately if you can't knock them. Intel is worth more than a 30-damage poke."
+          ]
+        }
+      ],
+      tactics: [
+        {
+          id: "hard-soft-shifts",
+          title: "Hard Shifts vs Soft Shifts: How Underdogs Win Rotations",
+          category: "Macro & Zone Prediction",
+          readTime: "6 min read",
+          description: "Amateur teams panic when the zone hard-shifts across the river or opposite mountain. Here is the tier-1 decision framework.",
+          content: [
+            {
+              heading: "1. The 70/30 Land vs Water Rule",
+              text: "When the zone circle includes river or sea (e.g., Georgopol river or Military Island channel), the next shift almost ALWAYS pulls towards the landmass that holds >60% of the circle area. Don't gamble on islands unless land is completely blocked."
+            },
+            {
+              heading: "2. The 'Water City / Rozhok' River Dilemma",
+              text: "If Erangel circle shifts south across the river, NEVER take the open metal bridge in Phase 3 or later — Tier-2 and Tier-1 teams set up crossfire ambushes. Instead: Send a scout with buggy to cross the sunken town shallow water, or commit to a full squad vehicle drive through the western lip before chokeholds form."
+            },
+            {
+              heading: "3. Center Compound vs Edge Play",
+              text: "If you have 4 vehicles and full armor at Phase 2, crash the dead center compound immediately. Even if surrounded, a two-story house grants 360-degree vision and guarantees Phase 4 placement points. If low on heals or vehicles, play the 'Slow Edge' trailing the blue zone."
+            }
+          ]
+        },
+        {
+          id: "compound-crash-mastery",
+          title: "The 4-Second Compound Breach Protocol",
+          category: "Combat Execution",
+          readTime: "5 min read",
+          description: "How to crash a fortified enemy squad house without losing members to staircase sprays.",
+          content: [
+            {
+              heading: "Step 1: The Vehicle Wall-Crash",
+              text: "Never park directly in front of the door. Ram the Dacia or UAZ perpendicularly against the compound wall to create instant external head-glitch cover and block ground-floor window sightlines."
+            },
+            {
+              heading: "Step 2: Utility Cross-Bombardment",
+              text: "Do NOT run up the stairs immediately. Anchor cooks grenade for 2 seconds into the main top-floor bedroom window; Rusher banks a stun or molotov off the staircase ceiling. Wait for the explosion sound or burning ticks before stepping onto the staircase."
+            },
+            {
+              heading: "Step 3: The 2-Man Synchronized Pinch",
+              text: "Never push single file. Player 1 (Entry) jumps and pre-fires the corner; Player 2 stays 1.5 meters behind aiming upper torso. If Player 1 gets knocked, Player 2 instantly finishes the enemy before they can re-chamber or retreat."
+            }
+          ]
+        },
+        {
+          id: "recoil-gyro-mechanics",
+          title: "Recoil & Gyroscope Calibration Masterclass",
+          category: "Mechanics",
+          readTime: "7 min read",
+          description: "Stop pulling your screen down with your thumb. Switch to full Gyroscope for laser sprays at 150m+.",
+          content: [
+            {
+              heading: "Why Full Gyroscope is Mandatory for Esports",
+              text: "Thumb dragging reaches a physical limit when spraying a 40-round M416 clip. Gyroscope uses phone tilt, leaving your right thumb completely free to crouch, jump, lean, and switch targets instantaneously."
+            },
+            {
+              heading: "The 3x / 6x Scope Down-Step Technique",
+              text: "Pros rarely spray with a raw 6x scope. Mount a 6x scope on an M416 or AUG, open scope settings, and dial the slider down to 3x zoom. This retains the clean, thin reticle of the 6x while utilizing the ultra-stable recoil pattern of the 3x scope."
+            },
+            {
+              heading: "Attachment Hierarchy for Scrims",
+              text: "Muzzle: Compensator > Flash Hider > Suppressor (Suppressor increases horizontal shake!). Grip: Ergonomic / Half Grip for sprays; Angled Foregrip for fast ADS; Vertical Foregrip if you struggle with pulling down."
+            }
+          ]
+        }
+      ],
+      metaWeapons: [
+        {
+          name: "M416 + 6x (Adjusted to 3x)",
+          tier: "S-Tier (Esports Staple)",
+          type: "Assault Rifle (5.56mm)",
+          verdict: "The absolute baseline for mid-to-long range vehicle spray tracking. Zero erratic horizontal bloom when equipped with Compensator & Half Grip.",
+          recoilDifficulty: "Medium",
+          esportsUsage: "96% of competitive rosters"
+        },
+        {
+          name: "UMP45 / Thompson",
+          tier: "S-Tier (Close-Quarter Meta)",
+          type: "SMG (.45 ACP)",
+          verdict: "Out-damages 5.56 ARs at 0-15 meters due to limb damage multipliers and virtually nonexistent hipfire spread during aggressive jiggling.",
+          recoilDifficulty: "Very Easy",
+          esportsUsage: "Entry Fraggers & House Breachers"
+        },
+        {
+          name: "DBS Shotgun",
+          tier: "S-Tier (Compound Defense)",
+          type: "Double-Barrel Pump Shotgun",
+          verdict: "Two quick pumps wipe out level 3 armor instantly at doorway distance. Lethal when holding staircase angles.",
+          recoilDifficulty: "Easy (Crosshair reliant)",
+          esportsUsage: "Staircase defense & tight rooms"
+        },
+        {
+          name: "Mini14 / SLR",
+          tier: "A-Tier (DMR Long Poke)",
+          type: "Designated Marksman Rifle",
+          verdict: "Essential for poking rotating vehicles and farming placement damage. Mini14 has highest bullet velocity (less bullet drop prediction needed).",
+          recoilDifficulty: "Medium-High",
+          esportsUsage: "Scouts & Support players"
+        }
+      ]
+    },
+
+    freefire: {
+      id: "freefire",
+      title: "Free Fire Esports Pro Hub",
+      bannerSubtitle: "From Ranked Heroic to FFIC / FFWS Esports World Series Domination",
+      accentColor: "#ef4444",
+      roles: [
+        {
+          id: "ff-rusher",
+          name: "Frontline Rusher",
+          tagline: "Headshot Demons & Space Invaders",
+          summary: "Masters lightning-fast gloo wall placement, 1-tap drag headshots with shotgun/SMG, and breaks open enemy compounds.",
+          coreDuties: [
+            "Master 0.15s sit-down gloo wall deployment immediately following a shot.",
+            "Primary user of Shotgun (M1887 / Charge Buster) or SMG (MP40 / Bizon).",
+            "Coordinate active ability trigger (Tatsuya dash / Homer drone) to disorient opponents.",
+            "Initiate close-range 1v1 duels and instantly call for team trade-kill backup."
+          ],
+          proTips: [
+            "Never run in a straight line towards an enemy holding cover. Use 'Z-zag' sprint with switch-weapon cancellation to bait their first shot, then drag-headshot while they are in shot recovery animation."
+          ]
+        },
+        {
+          id: "ff-igl",
+          name: "Captain / IGL",
+          tagline: "Zone Architect & Safe Zone Rotator",
+          summary: "Calculates the high-ground advantage in Bermuda/Purgatory, manages squad utility, and controls circle edge entry.",
+          coreDuties: [
+            "Select safe drop spots (e.g., Rim Nam Village, Moathouse, Brasilia split).",
+            "Monitor blue zone shrinkage speed and enforce 30-second early departure.",
+            "Control Gloo Wall economy: Distribute gloo walls so all 4 members have at least 3 walls for Phase 4.",
+            "Designate target priority during multi-squad crossfires."
+          ],
+          proTips: [
+            "In Free Fire tournament lobbies, 80% of squads die outside the zone trying to loot late. Prioritize position over a level 3 vest."
+          ]
+        },
+        {
+          id: "ff-sniper",
+          name: "Sniper / Long-Range Marksman",
+          tagline: "Armor Piercer & Knock Finisher",
+          summary: "Double AWM / M82B master who pierces through enemy gloo walls and prevents opponent revives.",
+          coreDuties: [
+            "Equip M82B (Barrett) to shoot through gloo walls and hit enemies healing behind them.",
+            "Master quick-switch double sniper technique (no reload delay animation).",
+            "Maintain high-ground vantage to break vehicle rotations (Monster Truck / Jeep).",
+            "Instantly confirm knocks into eliminations to deny Dimitri / Thiva self-revives."
+          ],
+          proTips: [
+            "M82B penetrates gloo walls. When you see an enemy place a gloo wall after taking damage, predict their head behind the center crest and fire immediately for a wall-bang kill."
+          ]
+        },
+        {
+          id: "ff-support",
+          name: "Support / Medic & Utility",
+          tagline: "The Unbreakable Foundation",
+          summary: "Equipped with healing characters (Dimitri, Olivia, Nairi) and flash grenades; ensures the squad survives lethal pushes.",
+          coreDuties: [
+            "Deploys Nairi reinforced gloo walls that heal over time under enemy fire.",
+            "Activates Dimitri healing / self-revival aura when teammates get knocked.",
+            "Carries Grenade Launcher / Frag Grenades to clear enemy gloo clusters.",
+            "Provides smoke grenade cover for open-ground revive attempts."
+          ],
+          proTips: [
+            "Always stack Nairi with gloo walls. If enemy rushers try to spray your wall down with ARs, Nairi restores your gloo HP and recovers your shield."
+          ]
+        }
+      ],
+      tactics: [
+        {
+          id: "fast-sitdown-gloo",
+          title: "The 0.15s Sit-Down Gloo Wall Drill",
+          category: "Mechanics Masterclass",
+          readTime: "4 min read",
+          description: "How pro esports rushers deploy defensive cover the exact microsecond they fire a bullet.",
+          content: [
+            {
+              heading: "Why Sit-Down Gloo Wall is Faster",
+              text: "When you stand, the gloo wall spawns 2-3 meters forward, often leaving your feet exposed or spawning behind the enemy. Pressing Crouch snaps the gloo placement anchor right against your toes, creating an impenetrable 100% barrier."
+            },
+            {
+              heading: "The 3-Step Execution Sequence",
+              text: "1. Fire (Drag Right Fire Button Upwards for headshot) -> 2. Drag Down + Tap Gloo Wall icon with Left Index -> 3. Tap Crouch + Left Fire Button simultaneously. With 15 minutes of daily training grounds drill, this becomes pure muscle memory."
+            },
+            {
+              heading: "The 360-Degree Cage Emergency Move",
+              text: "If caught in an open field surrounded by 2 squads: Tap Gloo -> Hold Left Fire Button -> Spin camera 360 degrees using high General Sensitivity. Deploys 3 connected gloo walls forming a bunker."
+            }
+          ]
+        },
+        {
+          id: "drag-headshot-physics",
+          title: "Drag Headshot Mechanics: Straight, Rotation & J-Drag",
+          category: "Aim Science",
+          readTime: "5 min read",
+          description: "Free Fire's auto-aim locks onto the chest. Here is how to break the chest lock and force the crosshair onto the head.",
+          content: [
+            {
+              heading: "1. Straight Up-Drag (Mid-to-Long Range)",
+              text: "When the enemy is stationary or running straight at you: Drag the fire button straight upwards with moderate speed. If you drag too fast, bullets fly above their head; if too slow, it sticks to their vest."
+            },
+            {
+              heading: "2. Rotation Drag (Moving Enemies)",
+              text: "If the enemy is running left to right: Curve your drag trajectory in an arc matching their sprint vector. If running right, drag down-then-swoop right-upwards."
+            },
+            {
+              heading: "3. J-Drag (Extreme Close Range)",
+              text: "When an opponent is within 3 meters: Drag the fire button down slightly to release chest lock, then snap violently upwards in the shape of a 'J'. This produces 100% red numbers with M1887 or Shotguns."
+            }
+          ]
+        },
+        {
+          id: "character-combos-meta",
+          title: "Tier-1 Tournament Character Skill Combos (OB46/OB47 Meta)",
+          category: "Meta Loadouts",
+          readTime: "6 min read",
+          description: "Underdogs often run random characters. In competitive FFWS, squad skill combinations must be strictly synchronized.",
+          content: [
+            {
+              heading: "Preset A: The M590 Apex Rusher (Tatsuya + Jota + Luqueta)",
+              text: "Active: Tatsuya (Double rapid dash to bypass enemy crosshairs and close distance) | Passives: Jota (HP recovery on every shotgun pellet hit + 20% on knock) + Hayato Awakened (Bushido armor pen + frontal damage shield) + Luqueta (+50 Max HP upon 2 knocks, elevating HP to 250) or Luna (+8-15% firing rate). This turns the M590 and M1887 into unstoppable 1-tap engines."
+            },
+            {
+              heading: "Preset B: The Immortal Sonitri Defense (Dimitri + Thiva + Nairi)",
+              text: "Active: Dimitri (3.5 HP/s self-revival aura) | Passives: Thiva (Instant 1.0s revive speed + 60 HP to revived ally) + Nairi (Gloo walls recover 40 HP/s and absorb extreme fire) + Sonia (3s invulnerability shield upon fatal damage). A squad running this combo cannot be eliminated in standard crossfires."
+            },
+            {
+              heading: "Preset C: The Anti-Revive Sniper & Wall-Banger (Chrono + Rafael)",
+              text: "Active: Chrono (Time Turner 800HP forcefield for open-ground sniper trades) | Passives: Rafael (Automatic silencer on snipers & knocks bleed out in 4.5s, hard-countering Dimitri) + Maro (+25% damage at distance) + Laura (+50% ADS accuracy). Equipped with M82B, snipers penetrate gloo walls with ease."
+            }
+          ]
+        }
+      ],
+      metaWeapons: [
+        {
+          name: "M590 (Powerhouse Shotgun)",
+          tier: "S-Tier (#1 Top Close-Range Meta)",
+          type: "Shotgun / Explosive Burst",
+          verdict: "The undisputed king of close-quarters combat in Free Fire right now. Deals 80-100 base body damage + 15-20 bonus shockwave burst. When combined with jump-shot peek-and-fire, it knocks Level 3 armored players in a single clean blast.",
+          recoilDifficulty: "Medium (Master peek-and-fire switch)",
+          esportsUsage: "Mandatory primary for tournament Rushers"
+        },
+        {
+          name: "M1887 (Double Barrel)",
+          tier: "S-Tier (Classic 2-Tap King)",
+          type: "Shotgun",
+          verdict: "Extremely high burst speed. Two clean J-drag shots break any vest and down the enemy in 0.4s when fired with fast weapon switch cancel.",
+          recoilDifficulty: "High (Requires fast switch)",
+          esportsUsage: "Elite Shotgun Duelists"
+        },
+        {
+          name: "MP40 / Bizon",
+          tier: "S-Tier (SMG Spray)",
+          type: "Submachine Gun",
+          verdict: "Insane fire rate that easily converts rotation drag into consecutive headshots.",
+          recoilDifficulty: "Low",
+          esportsUsage: "Close-to-mid range sweepers"
+        },
+        {
+          name: "M82B (Barrett)",
+          tier: "S-Tier (Anti-Gloo Sniper)",
+          type: "Sniper Rifle",
+          verdict: "The only weapon that penetrates gloo walls and deals 80% damage to vehicles.",
+          recoilDifficulty: "Medium",
+          esportsUsage: "Designated team sniper"
+        },
+        {
+          name: "Woodpecker / AC80",
+          tier: "A-Tier (Armor Piercing DMR)",
+          type: "Marksman Rifle",
+          verdict: "Every second consecutive hit deals devastating bonus critical damage; one-taps level 2 helmets.",
+          recoilDifficulty: "Medium",
+          esportsUsage: "Mid-lane support fire"
+        }
+      ]
+    },
+
+    hok: {
+      id: "hok",
+      title: "Honor of Kings (HoK) Esports Academy",
+      bannerSubtitle: "From King Rank to KIC (Honor of Kings International Championship) Dominance",
+      accentColor: "#38bdf8",
+      roles: [
+        {
+          id: "hok-jungle",
+          name: "Jungler & Tempo Commander",
+          tagline: "The Match Dictator",
+          summary: "Controls smite (Punish), clears jungle camps on exact timers, executes 1:30 ganks, and secures Tyrant/Overlord.",
+          coreDuties: [
+            "Clear all 6 jungle camps within 1:15 to hit Level 4 before lane heroes.",
+            "Secure the 2:00 minute Primal Tyrant (Damage Buff) or Overlord (Vanguard wave pressure).",
+            "Invade opposing jungle when enemy Jungler shows on the opposite side of the map.",
+            "Flank the backline in 5v5 teamfights to assassinate the enemy Farm Lane Marksman."
+          ],
+          proTips: [
+            "Always check enemy jungler's buff at 0:45 with your Roamer. If enemy started Blue Buff, their 1:30 gank WILL hit your Clash Lane. Ping your teammate to retreat early!"
+          ]
+        },
+        {
+          id: "hok-roamer",
+          name: "Roamer / Support",
+          tagline: "The Fog of War Controller",
+          summary: "Provides vision in river bushes, assists Mid Lane with fast wave clearing, peels for Marksman, and initiates teamfights.",
+          coreDuties: [
+            "0:00 - 0:30: Help Mid Lane clear first wave immediately to unlock level 2 roam priority.",
+            "Check river bushes before dragon spawns; never face-check without using a probe skill.",
+            "Buy Active Support item (e.g., Star Spring / Genesis shield) to counter burst damage.",
+            "Body-block skillshots aimed at your squishy Farm Lane marksman."
+          ],
+          proTips: [
+            "Do NOT sit in Farm Lane babysitting your marksman for 10 minutes. A pro Roamer controls the river vision line and prevents enemy ganks before they even enter the lane."
+          ]
+        },
+        {
+          id: "hok-mid",
+          name: "Mid Lane / Mage",
+          tagline: "The Map Pivot & AOE Control",
+          summary: "Clears middle minion wave in 4 seconds, then rotates to side lanes to create 3v2 or 4v2 numbers advantages.",
+          coreDuties: [
+            "Clear mid wave rapidly with AOE skills, then immediately vanish into the fog of war.",
+            "Control the River Sprite at 1:00 for bonus team gold and XP.",
+            "Zone enemy carries away from dragon pits with control spells (stuns, freezes, walls).",
+            "Position safely in teamfights behind the frontline tank/roamer."
+          ],
+          proTips: [
+            "Never rotate through the open river if the enemy jungler is missing. Take the safe path behind your own jungle walls to avoid bush ambushes."
+          ]
+        },
+        {
+          id: "hok-farm",
+          name: "Farm Lane / Marksman",
+          tagline: "The Inevitable Late Game Win Condition",
+          summary: "Farms gold relentlessly, destroys towers, and outputs continuous physical DPS from the safe edge of teamfights.",
+          coreDuties: [
+            "Focus on last-hitting minions for 50% bonus gold.",
+            "Respect the 4-minute mark: Never over-extend past river before the 4-minute tower protection shields drop.",
+            "Positioning rule: Hit the closest target in front of you; do NOT dive into the enemy backline.",
+            "Keep Flash or Purify ready to react to assassin engage."
+          ],
+          proTips: [
+            "Underdog marksmen throw games by getting caught 1v1 in side lanes at minute 12. Group with your Roamer and stay behind your frontline at all times."
+          ]
+        },
+        {
+          id: "hok-clash",
+          name: "Clash Lane / Solo Top",
+          tagline: "The Unmovable Wall & Split-Push Menace",
+          summary: "Masters 1v1 micro-trading, controls teleportation portals, cuts minion waves, and dives the enemy backline.",
+          coreDuties: [
+            "Win Level 2 trade: Clear the melee minion first to hit level 2 ahead of opponent.",
+            "Use the teleportation flower/portal to instantly flank bottom-lane teamfights.",
+            "Split-push side lane towers to force multiple enemies to respond.",
+            "In late game teamfights, bypass the enemy tank and pin down the enemy Mid/ADC."
+          ],
+          proTips: [
+            "If you see 4 enemies showing in Farm Lane on the minimap, do not freeze: push your lane aggressively and take the Clash tier-1 tower or steal their top jungle."
+          ]
+        }
+      ],
+      tactics: [
+        {
+          id: "first-4-minutes-macro",
+          title: "The First 4 Minutes: Wave Control & Gold Efficiency",
+          category: "Macro Strategy",
+          readTime: "6 min read",
+          description: "How esports teams build a 2,000 gold lead without taking a single coin-flip teamfight.",
+          content: [
+            {
+              heading: "1. The 4-Minute Tower Protection Shield",
+              text: "During the first 4:00 minutes, outer towers have a 50% damage reduction shield. Diving under tower is suicide. Focus on last hits, clearing the 1:00 River Sprite, and securing jungle farm instead of forcing early tower dives."
+            },
+            {
+              heading: "2. Freezing vs Bouncing Waves",
+              text: "When ahead in lane: Only hit the minion at 5% HP. This keeps the wave near your tower, starving the enemy of gold and forcing them into a vulnerable over-extended position for your Jungler to gank."
+            },
+            {
+              heading: "3. The 2:00 Dragon Decision",
+              text: "At 2:00, the first Tyrant and Overlord spawn. Tyrant gives team-wide bonus attack/damage; Overlord spawns dragon vanguards that push minion waves automatically. Pro priority: Take Tyrant if looking to fight; take Overlord if your lanes are being pushed."
+            }
+          ]
+        },
+        {
+          id: "jungler-pathing-mastery",
+          title: "Jungle Pathing: Red Start vs Blue Start & Counter-Invades",
+          category: "Jungle Playbook",
+          readTime: "7 min read",
+          description: "Pathing route optimization to achieve Level 4 and gank before the enemy laner can react.",
+          content: [
+            {
+              heading: "Path A: Red Buff Start (Gank Farm Lane)",
+              text: "Order: Red Buff -> Small Bird -> Boar -> Blue Buff -> Wolves -> Lizard. Completes at 1:20 right beside Farm Lane bush. This matches the exact moment enemy Marksman pushes forward for minion trade."
+            },
+            {
+              heading: "Path B: Blue Buff Start (Level 4 CDR Rush)",
+              text: "Ideal for mana-hungry / cooldown reliant assassins (e.g., Lam, Nakoruru). Grants 20% CDR early, allowing fast skill cycles to clear entire jungle by 1:12."
+            },
+            {
+              heading: "When to Steal Enemy Buff (Level 1 Invade)",
+              text: "If your squad drafts an aggressive Level 1 Roamer (Donghuang, Da Qiao, Zhang Fei): Invade enemy Red Buff as 3 players (Mid, Roamer, Jungler) at 0:35 while the enemy jungler is solo."
+            }
+          ]
+        }
+      ],
+      metaWeapons: [
+        {
+          name: "Lam (Assassin / Jungle)",
+          tier: "S+ Tier (Tournament Permaban)",
+          type: "Jungle Assassin",
+          verdict: "Insane dive speed in river swimming form. Skill 2 multi-dash deals continuous burst damage and provides untargetable invulnerability frames.",
+          recoilDifficulty: "High Micro",
+          esportsUsage: "Mandatory Ban/Pick in KIC"
+        },
+        {
+          name: "Consort Yu (Marksman / Farm)",
+          tier: "S Tier (Anti-Assassin Carry)",
+          type: "Farm Lane Marksman",
+          verdict: "Skill 2 grants physical damage immunity and movement speed boost, making her virtually unkillable against AD assassins like Wukong or Nakoruru.",
+          recoilDifficulty: "Low Micro",
+          esportsUsage: "Top Tier Pro Marksman"
+        },
+        {
+          name: "Mai Shiranui (Mage / Mid)",
+          tier: "S Tier (High Mobility Playmaker)",
+          type: "Mid Lane Mage",
+          verdict: "High-burst poke fan with zero mana costs. Chained knock-ups and dash combos can 100-to-0 multiple squishies in a single flank.",
+          recoilDifficulty: "High Micro",
+          esportsUsage: "Pro Mid-Laners"
+        }
+      ]
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // INTERACTIVE TACTICAL WHITEBOARD CONTROLLER
+  // ---------------------------------------------------------------------------
+  class TacticalWhiteboard {
+    constructor(canvasId) {
+      this.canvas = document.getElementById(canvasId);
+      if (!this.canvas) return;
+      this.ctx = this.canvas.getContext('2d');
+
+      this.currentMap = 'erangel';
+      this.currentTool = 'freedraw';
+      this.currentColor = '#00f0ff';
+      this.brushSize = 4;
+      this.activePreset = null;
+
+      this.isDrawing = false;
+      this.startX = 0;
+      this.startY = 0;
+
+      this.history = [];
+      this.historyStep = -1;
+      this.tokens = [];
+      this.userElements = [];
+      this.currentStroke = null;
+      this.pinRoles = ['IGL', 'RUS', 'SUP', 'SCT'];
+      this.currentPinRoleIndex = 0;
+      this.selectedPinRole = 'IGL';
+      // Safe Zone Simulator State (Feature 2)
+      this.safeZone = {
+        enabled: true,
+        phase: 1, // 1 to 5
+        cx: 0.5, // 0..1 normalized center X
+        cy: 0.5, // 0..1 normalized center Y
+        r: 0.38, // normalized radius relative to min(width, height)
+        blueCx: 0.5,
+        blueCy: 0.5,
+        blueR: 0.48, // outer radiation blue zone
+        isDragging: false,
+        isResizing: false,
+        dragMode: null // 'move' | 'resize'
+      };
+      this.isSimulatingShrink = false;
+      this.shrinkAnimId = null;
+
+
+      this.proOverlays = null;
+      this.mapImages = {};
+      this.mapStyle = 'satellite';
+      this.loadMapImages();
+
+      this.initCanvasSize();
+      this.bindEvents();
+    }
+
+    loadMapImages() {
+      const paths = {
+        erangel: 'assets/maps/erangel_map.jpg',
+        bermuda: 'assets/maps/bermuda_map.jpg',
+        nexterra: 'assets/maps/nexterra_map.jpg',
+        solara: 'assets/maps/solara_map.jpg',
+        purgatory: 'assets/maps/purgatory_map.jpg',
+        kalahari: 'assets/maps/kalahari_map.jpg',
+        hok_gorge: 'assets/maps/hok_gorge_map.jpg'
+      };
+      for (const [key, src] of Object.entries(paths)) {
+        const img = new Image();
+        img.src = src;
+        img.onload = () => {
+          this.mapImages[key] = img;
+          if (this.currentMap === key && this.mapStyle === 'satellite') {
+            this.redrawAll();
+          }
+        };
+      }
+    }
+
+    initCanvasSize() {
+      const container = this.canvas.parentElement;
+      const availableWidth = container && container.clientWidth > 120 ? container.clientWidth - 16 : 800;
+      const width = Math.min(availableWidth, 920);
+      const height = Math.min(width * 0.62, 540);
+      this.canvas.width = Math.max(width, 360);
+      this.canvas.height = Math.max(height, 300);
+    }
+
+    setMap(mapName) {
+      this.currentMap = mapName;
+      this.activePreset = null;
+      this.proOverlays = null;
+      this.clearAll();
+    }
+
+    setTool(tool) {
+      this.currentTool = tool;
+    }
+
+    setColor(color) {
+      this.currentColor = color;
+    }
+
+    loadPreset(presetId) {
+      const preset = PRO_ROTATIONS[presetId];
+      if (!preset) return;
+      this.activePreset = preset;
+      this.currentMap = preset.map;
+
+      // Update map selector dropdown in UI if present
+      // SQUAD LIVE SYNC ROOM CONTROLS
+      document.getElementById('createTacticalRoomBtn')?.addEventListener('click', () => {
+        const randomCode = 'UDG' + Math.floor(100 + Math.random() * 900);
+        const input = document.getElementById('tacticalRoomCodeInput');
+        if (input) input.value = randomCode;
+      });
+
+      document.getElementById('joinTacticalRoomBtn')?.addEventListener('click', () => {
+        const roomCode = document.getElementById('tacticalRoomCodeInput')?.value?.trim();
+        if (!roomCode) {
+          alert('Please enter or generate a Room Code first!');
+          return;
+        }
+        if (!window.underdogSupabase || !window.underdogSupabase.isConnected) {
+          alert('Please configure your Supabase Project URL & Anon Key first! (Click "Local Mode 🟡" in the top bar)');
+          this.showSupabaseSetupModal();
+          return;
+        }
+        window.underdogSupabase.joinTacticalRoom(roomCode, (payload) => {
+          this.whiteboard.applyRemoteAction(payload);
+        });
+        const label = document.getElementById('activeTacticalRoomLabel');
+        const dot = document.getElementById('tacticalRoomLiveDot');
+        if (label) {
+          label.innerText = 'Connected: Room [' + roomCode.toUpperCase() + '] 🟢';
+          label.className = 'text-[10px] font-mono text-emerald-400 font-bold';
+        }
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+      });
+
+      const mapSelect = document.getElementById('mapSelect');
+      if (mapSelect) mapSelect.value = preset.map;
+
+      this.proOverlays = {
+        tokens: preset.tokens || [],
+        arrows: preset.arrows || [],
+        dangerZones: preset.dangerZones || [],
+        utilities: preset.utilities || []
+      };
+
+      this.tokens = [];
+      this.redrawAll();
+      this.saveState();
+      this.renderPresetCard(preset);
+    }
+
+    renderPresetCard(preset) {
+      const cardContainer = document.getElementById('proRotationCardContainer');
+      if (!cardContainer) return;
+
+      cardContainer.innerHTML = `
+        <div class="cyber-panel p-5 rounded-xl border border-amber-500/40 animate-fade-in mt-4">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">${preset.team}</span>
+                <span class="text-xs text-slate-400 font-mono">${preset.phase}</span>
+              </div>
+              <h4 class="text-lg font-heading font-bold text-white mt-1">${preset.title}</h4>
+              <div class="text-xs text-primary font-sub">Pro Players: <strong>${preset.proPlayers}</strong></div>
+            </div>
+            <div class="cyber-badge bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 text-xs px-3 py-1">
+              Active Strategy Overlay
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div class="bg-slate-900/80 p-3.5 rounded-lg border border-slate-800 space-y-2">
+              <div class="font-sub font-bold text-emerald-400 uppercase text-xs">Phase-by-Phase Pro Execution:</div>
+              <ul class="space-y-1.5 text-slate-300 list-disc list-inside leading-relaxed">
+                ${preset.breakdown.proExecution.map(step => `<li>${step}</li>`).join('')}
+              </ul>
+            </div>
+
+            <div class="bg-slate-900/80 p-3.5 rounded-lg border border-slate-800 space-y-3">
+              <div>
+                <div class="font-sub font-bold text-rose-400 uppercase text-xs mb-1">Why Underdogs Throw Here:</div>
+                <p class="text-slate-300 leading-relaxed">${preset.breakdown.whyUnderdogsFail}</p>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded border border-amber-500/30">
+                <div class="font-sub font-bold text-amber-400 uppercase text-[11px] mb-0.5">IGL Voice Comms Script:</div>
+                <p class="text-slate-300 font-mono text-[11px] italic leading-normal">"${preset.breakdown.voiceComms}"</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- SAFE ZONE SIMULATOR CONTROLS (FEATURE 2) ---
+    setZonePhase(phase) {
+      this.safeZone.phase = phase;
+      const minDim = Math.min(this.canvas.width, this.canvas.height);
+
+      if (phase === 1) {
+        this.safeZone.r = 0.38;
+        this.safeZone.blueR = 0.48;
+      } else if (phase === 2) {
+        this.safeZone.r = 0.28;
+        this.safeZone.blueR = 0.38;
+      } else if (phase === 3) {
+        this.safeZone.r = 0.19;
+        this.safeZone.blueR = 0.28;
+      } else if (phase === 4) {
+        this.safeZone.r = 0.12;
+        this.safeZone.blueR = 0.19;
+      } else if (phase === 5) {
+        this.safeZone.r = 0.06;
+        this.safeZone.blueR = 0.12;
+      }
+
+      // Update UI active buttons
+      document.querySelectorAll('.wb-zone-phase-btn').forEach(btn => {
+        const p = parseInt(btn.getAttribute('data-phase'), 10);
+        if (p === phase) {
+          btn.classList.add('bg-blue-600', 'text-white', 'shadow');
+          btn.classList.remove('bg-slate-900', 'text-slate-300');
+        } else {
+          btn.classList.remove('bg-blue-600', 'text-white', 'shadow');
+          btn.classList.add('bg-slate-900', 'text-slate-300');
+        }
+      });
+
+      this.redrawAll();
+      this.broadcastAction('zone_update', { phase, safeZone: this.safeZone });
+    }
+
+    applyHardShift(dir) {
+      const step = this.safeZone.blueR * 0.52;
+      if (dir === 'N') {
+        this.safeZone.cy = Math.max(0.18, this.safeZone.blueCy - step);
+      } else if (dir === 'S') {
+        this.safeZone.cy = Math.min(0.82, this.safeZone.blueCy + step);
+      } else if (dir === 'W') {
+        this.safeZone.cx = Math.max(0.18, this.safeZone.blueCx - step);
+      } else if (dir === 'E') {
+        this.safeZone.cx = Math.min(0.82, this.safeZone.blueCx + step);
+      } else if (dir === 'CENTER') {
+        this.safeZone.cx = 0.5;
+        this.safeZone.cy = 0.5;
+        this.safeZone.blueCx = 0.5;
+        this.safeZone.blueCy = 0.5;
+      }
+      this.redrawAll();
+    }
+
+    simulateZoneShrink() {
+      if (this.isSimulatingShrink) return;
+      this.isSimulatingShrink = true;
+
+      const btnText = document.getElementById('wbSimulateShrinkBtnText');
+      if (btnText) btnText.innerText = 'SHRINKING... ⚡';
+
+      const startBlueCx = this.safeZone.blueCx;
+      const startBlueCy = this.safeZone.blueCy;
+      const startBlueR = this.safeZone.blueR;
+
+      const targetCx = this.safeZone.cx;
+      const targetCy = this.safeZone.cy;
+      const targetR = this.safeZone.r;
+
+      const startTime = performance.now();
+      const duration = 3200; // 3.2 seconds animation
+
+      const animate = (currentTime) => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Smooth easeInOutQuad
+        const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+        this.safeZone.blueCx = startBlueCx + (targetCx - startBlueCx) * ease;
+        this.safeZone.blueCy = startBlueCy + (targetCy - startBlueCy) * ease;
+        this.safeZone.blueR = startBlueR + (targetR - startBlueR) * ease;
+
+        this.redrawAll();
+
+        if (progress < 1) {
+          this.shrinkAnimId = requestAnimationFrame(animate);
+        } else {
+          this.isSimulatingShrink = false;
+          this.safeZone.blueCx = targetCx;
+          this.safeZone.blueCy = targetCy;
+          this.safeZone.blueR = targetR;
+
+          // Automatically advance to next phase if not at last
+          if (this.safeZone.phase < 5) {
+            this.setZonePhase(this.safeZone.phase + 1);
+          } else {
+            this.redrawAll();
+          }
+
+          if (btnText) {
+            btnText.innerText = 'ZONE CLOSED! ✅';
+            setTimeout(() => {
+              btnText.innerText = 'Simulate Shrink';
+            }, 1800);
+          }
+        }
+      };
+
+      this.shrinkAnimId = requestAnimationFrame(animate);
+    }
+
+    toggleSafeZone() {
+      this.safeZone.enabled = !this.safeZone.enabled;
+      this.redrawAll();
+    }
+
+    renderSafeZoneOverlay() {
+      if (!this.safeZone.enabled) return;
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+      const minDim = Math.min(w, h);
+
+      const bluePx = this.safeZone.blueCx * w;
+      const bluePy = this.safeZone.blueCy * h;
+      const blueRad = Math.max(10, this.safeZone.blueR * minDim);
+
+      const safePx = this.safeZone.cx * w;
+      const safePy = this.safeZone.cy * h;
+      const safeRad = Math.max(8, this.safeZone.r * minDim);
+
+      this.ctx.save();
+
+      // 1. Electric Blue Radiation Zone Ring & Hazard Outside
+      this.ctx.strokeStyle = '#3b82f6';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.shadowColor = '#60a5fa';
+      this.ctx.shadowBlur = 10;
+      this.ctx.beginPath();
+      this.ctx.arc(bluePx, bluePy, blueRad, 0, Math.PI * 2);
+      this.ctx.stroke();
+
+      // Subtle Outer Radiation Hazard Layer
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(30, 58, 138, 0.22)';
+      this.ctx.beginPath();
+      this.ctx.rect(0, 0, w, h);
+      this.ctx.arc(bluePx, bluePy, blueRad, 0, Math.PI * 2, true);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Blue Zone Label
+      this.ctx.fillStyle = '#93c5fd';
+      this.ctx.font = 'bold 9px "Chakra Petch", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⚡ BLUE ZONE RADIATION PERIMETER', bluePx, Math.max(14, bluePy - blueRad - 6));
+
+      // 2. Safe Zone (White Neon Circle)
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 3;
+      this.ctx.shadowColor = '#ffffff';
+      this.ctx.shadowBlur = 12;
+      this.ctx.beginPath();
+      this.ctx.arc(safePx, safePy, safeRad, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.shadowBlur = 0;
+
+      // Safe Zone Center Crosshair / Bullseye
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.beginPath();
+      this.ctx.arc(safePx, safePy, 5, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.strokeStyle = '#00f0ff';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.arc(safePx, safePy, 12, 0, Math.PI * 2);
+      this.ctx.stroke();
+
+      // Safe Zone Perimeter Resize Knob
+      const resizeKnobX = safePx + safeRad;
+      const resizeKnobY = safePy;
+      this.ctx.fillStyle = '#fbbf24';
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(resizeKnobX, resizeKnobY, 6, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Safe Zone Badge Label
+      this.ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 1;
+      const badgeText = `⚪ SAFE ZONE PHASE ${this.safeZone.phase}`;
+      this.ctx.font = '900 10px "Chakra Petch", sans-serif';
+      const bWidth = this.ctx.measureText(badgeText).width + 16;
+      this.ctx.beginPath();
+      this.ctx.roundRect(safePx - bWidth / 2, Math.max(4, safePy - safeRad - 22), bWidth, 18, 4);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(badgeText, safePx, Math.max(16, safePy - safeRad - 10));
+
+      // Shift Direction Vector Arrow (if safe zone has shifted from blue zone center)
+      const dist = Math.hypot(safePx - bluePx, safePy - bluePy);
+      if (dist > 15) {
+        this.ctx.save();
+        this.ctx.strokeStyle = '#fbbf24';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([4, 4]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(bluePx, bluePy);
+        this.ctx.lineTo(safePx, safePy);
+        this.ctx.stroke();
+        this.ctx.restore();
+      }
+
+      this.ctx.restore();
+    }
+
+    bindEvents() {
+      window.addEventListener('resize', () => {
+        this.initCanvasSize();
+        this.redrawAll();
+      });
+
+      const getPos = (e) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY;
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      };
+
+      // Helper to check hit near safe zone center or resize handle
+      const checkSafeZoneHit = (pos) => {
+        if (!this.safeZone.enabled) return null;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const minDim = Math.min(w, h);
+        const safePx = this.safeZone.cx * w;
+        const safePy = this.safeZone.cy * h;
+        const safeRad = this.safeZone.r * minDim;
+
+        // Check resize knob hit (within 18px)
+        const knobDist = Math.hypot(pos.x - (safePx + safeRad), pos.y - safePy);
+        if (knobDist < 18) return 'resize';
+
+        // Check center anchor hit (within 26px)
+        const centerDist = Math.hypot(pos.x - safePx, pos.y - safePy);
+        if (centerDist < 26) return 'move';
+
+        // If tool is 'safezone', clicking anywhere inside the safe zone moves it
+        if (this.currentTool === 'safezone' && centerDist < safeRad) return 'move';
+
+        return null;
+      };
+
+      const eraseAt = (pos) => {
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const radius = 25;
+        let modified = false;
+
+        this.userElements = this.userElements.filter(el => {
+          if (el.type === 'token' || el.type === 'utility' || el.type === 'text') {
+            const ex = el.normX * w;
+            const ey = el.normY * h;
+            if (Math.hypot(ex - pos.x, ey - pos.y) < radius) {
+              modified = true;
+              return false;
+            }
+          } else if (el.type === 'freedraw') {
+            const hit = el.points.some(pt => Math.hypot(pt.nx * w - pos.x, pt.ny * h - pos.y) < radius);
+            if (hit) {
+              modified = true;
+              return false;
+            }
+          } else if (el.type === 'arrow' || el.type === 'line' || el.type === 'rot_arrow') {
+            const fx = el.fromNormX * w;
+            const fy = el.fromNormY * h;
+            const tx = el.toNormX * w;
+            const ty = el.toNormY * h;
+            const midX = (fx + tx) / 2;
+            const midY = (fy + ty) / 2;
+            if (Math.hypot(midX - pos.x, midY - pos.y) < radius || Math.hypot(tx - pos.x, ty - pos.y) < radius) {
+              modified = true;
+              return false;
+            }
+          } else if (el.type === 'line') {
+          this.drawLine(el.fromNormX * w, el.fromNormY * h, el.toNormX * w, el.toNormY * h, el.color, el.width || 3);
+        } else if (el.type === 'rot_arrow') {
+          this.drawRotationArrow(el.fromNormX * w, el.fromNormY * h, el.toNormX * w, el.toNormY * h, el.color, el.width || 4);
+        } else if (el.type === 'circle') {
+            const fx = el.fromNormX * w;
+            const fy = el.fromNormY * h;
+            if (Math.hypot(fx - pos.x, fy - pos.y) < radius) {
+              modified = true;
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (modified) {
+          this.redrawAll();
+        }
+      };
+
+      const startDraw = (e) => {
+        e.preventDefault();
+        const pos = getPos(e);
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const minDim = Math.min(w, h);
+        this.startX = pos.x;
+        this.startY = pos.y;
+        this.currentPos = pos;
+
+        // Check Safe Zone Drag / Resize Hit
+        const zoneHit = checkSafeZoneHit(pos);
+        if (zoneHit) {
+          this.safeZone.dragMode = zoneHit;
+          if (zoneHit === 'move') {
+            this.safeZone.isDragging = true;
+            this.safeZone.dragOffsetX = pos.x - this.safeZone.cx * w;
+            this.safeZone.dragOffsetY = pos.y - this.safeZone.cy * h;
+          } else if (zoneHit === 'resize') {
+            this.safeZone.isResizing = true;
+          }
+          return;
+        }
+
+        // Eraser Tool
+        if (this.currentTool === 'eraser') {
+          this.isDrawing = true;
+          eraseAt(pos);
+          return;
+        }
+
+        if (this.currentTool === 'token') {
+          const role = this.selectedPinRole || this.pinRoles[this.currentPinRoleIndex % this.pinRoles.length];
+          this.currentPinRoleIndex++;
+          this.userElements.push({
+            type: 'token',
+            normX: pos.x / w,
+            normY: pos.y / h,
+            label: role,
+            color: this.currentColor
+          });
+          this.saveState();
+          this.redrawAll();
+          return;
+        }
+
+        if (this.currentTool === 'utility' || this.currentTool === 'gloo') {
+          this.userElements.push({
+            type: 'utility',
+            utilityType: this.currentTool === 'gloo' ? 'GLOO' : 'SMOKE',
+            normX: pos.x / w,
+            normY: pos.y / h,
+            color: this.currentTool === 'gloo' ? '#f59e0b' : '#38bdf8'
+          });
+          this.saveState();
+          this.redrawAll();
+          return;
+        }
+
+        if (this.currentTool === 'text') {
+          const note = prompt("Enter tactical callout (e.g. 'Hold Ridge', 'Nade Stack', 'Bridge Ambush'):", "Hold Ridge");
+          if (note && note.trim()) {
+            this.userElements.push({
+              type: 'text',
+              normX: pos.x / w,
+              normY: pos.y / h,
+              text: note.trim(),
+              color: this.currentColor
+            });
+            this.saveState();
+            this.redrawAll();
+          }
+          return;
+        }
+
+        this.isDrawing = true;
+        if (this.currentTool === 'freedraw') {
+          this.currentStroke = {
+            type: 'freedraw',
+            points: [{ nx: pos.x / w, ny: pos.y / h }],
+            color: this.currentColor,
+            width: this.brushSize
+          };
+          this.ctx.beginPath();
+          this.ctx.moveTo(pos.x, pos.y);
+        }
+      };
+
+      const draw = (e) => {
+        const pos = getPos(e);
+        this.currentPos = pos;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const minDim = Math.min(w, h);
+
+        // Handle Safe Zone Dragging
+        if (this.safeZone.isDragging) {
+          e.preventDefault();
+          this.safeZone.cx = Math.max(0.08, Math.min(0.92, (pos.x - this.safeZone.dragOffsetX) / w));
+          this.safeZone.cy = Math.max(0.08, Math.min(0.92, (pos.y - this.safeZone.dragOffsetY) / h));
+          this.redrawAll();
+          return;
+        }
+
+        // Handle Safe Zone Resizing
+        if (this.safeZone.isResizing) {
+          e.preventDefault();
+          const safePx = this.safeZone.cx * w;
+          const safePy = this.safeZone.cy * h;
+          const newRadius = Math.hypot(pos.x - safePx, pos.y - safePy) / minDim;
+          this.safeZone.r = Math.max(0.04, Math.min(0.48, newRadius));
+          this.redrawAll();
+          return;
+        }
+
+        if (!this.isDrawing) return;
+        e.preventDefault();
+
+        // Eraser while dragging
+        if (this.currentTool === 'eraser') {
+          eraseAt(pos);
+          return;
+        }
+
+        if (this.currentTool === 'freedraw' && this.currentStroke) {
+          this.currentStroke.points.push({ nx: pos.x / this.canvas.width, ny: pos.y / this.canvas.height });
+          this.ctx.strokeStyle = this.currentColor;
+          this.ctx.lineWidth = this.brushSize;
+          this.ctx.lineCap = 'round';
+          this.ctx.lineJoin = 'round';
+          this.ctx.lineTo(pos.x, pos.y);
+          this.ctx.stroke();
+        } else if (this.currentTool === 'arrow' || this.currentTool === 'circle' || this.currentTool === 'line' || this.currentTool === 'rot_arrow') {
+          this.redrawAll();
+          if (this.currentTool === 'arrow') {
+            this.drawArrow(this.startX, this.startY, pos.x, pos.y, this.currentColor, this.brushSize);
+          } else if (this.currentTool === 'line') {
+            this.drawLine(this.startX, this.startY, pos.x, pos.y, this.currentColor, this.brushSize);
+          } else if (this.currentTool === 'rot_arrow') {
+            this.drawRotationArrow(this.startX, this.startY, pos.x, pos.y, this.currentColor, this.brushSize + 1);
+          } else if (this.currentTool === 'circle') {
+            this.drawCircle(this.startX, this.startY, pos.x, pos.y, this.currentColor, this.brushSize);
+          }
+        }
+      };
+
+      const stopDraw = (e) => {
+        // Stop Safe Zone Drag/Resize
+        if (this.safeZone.isDragging || this.safeZone.isResizing) {
+          this.safeZone.isDragging = false;
+          this.safeZone.isResizing = false;
+          this.safeZone.dragMode = null;
+          return;
+        }
+
+        if (!this.isDrawing) return;
+        e.preventDefault();
+        this.isDrawing = false;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+
+        if (this.currentTool === 'eraser') {
+          this.saveState();
+          return;
+        }
+
+        if (this.currentTool === 'freedraw' && this.currentStroke) {
+          if (this.currentStroke.points.length > 1) {
+            this.userElements.push(this.currentStroke);
+            this.saveState();
+          }
+          this.currentStroke = null;
+        } else if (this.currentTool === 'arrow' && this.currentPos) {
+          const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
+          if (dist > 5) {
+            this.userElements.push({
+              type: 'arrow',
+              fromNormX: this.startX / w,
+              fromNormY: this.startY / h,
+              toNormX: this.currentPos.x / w,
+              toNormY: this.currentPos.y / h,
+              color: this.currentColor,
+              width: this.brushSize
+            });
+            this.saveState();
+          }
+        } else if (this.currentTool === 'line' && this.currentPos) {
+          const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
+          if (dist > 5) {
+            this.userElements.push({
+              type: 'line',
+              fromNormX: this.startX / w,
+              fromNormY: this.startY / h,
+              toNormX: this.currentPos.x / w,
+              toNormY: this.currentPos.y / h,
+              color: this.currentColor,
+              width: this.brushSize
+            });
+            this.saveState();
+          }
+        } else if (this.currentTool === 'rot_arrow' && this.currentPos) {
+          const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
+          if (dist > 5) {
+            this.userElements.push({
+              type: 'rot_arrow',
+              fromNormX: this.startX / w,
+              fromNormY: this.startY / h,
+              toNormX: this.currentPos.x / w,
+              toNormY: this.currentPos.y / h,
+              color: this.currentColor,
+              width: this.brushSize + 1
+            });
+            this.saveState();
+          }
+        } else if (this.currentTool === 'circle' && this.currentPos) {
+          const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
+          if (dist > 4) {
+            this.userElements.push({
+              type: 'circle',
+              fromNormX: this.startX / w,
+              fromNormY: this.startY / h,
+              toNormX: this.currentPos.x / w,
+              toNormY: this.currentPos.y / h,
+              color: this.currentColor,
+              width: this.brushSize
+            });
+            this.saveState();
+          }
+        }
+        this.redrawAll();
+      };
+
+      this.canvas.addEventListener('mousedown', startDraw);
+      this.canvas.addEventListener('mousemove', draw);
+      this.canvas.addEventListener('mouseup', stopDraw);
+      this.canvas.addEventListener('mouseleave', stopDraw);
+
+      this.canvas.addEventListener('touchstart', startDraw, { passive: false });
+      this.canvas.addEventListener('touchmove', draw, { passive: false });
+      this.canvas.addEventListener('touchend', stopDraw, { passive: false });
+    }
+
+    drawLine(fromx, fromy, tox, toy, color, width) {
+      this.ctx.save();
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = width;
+      this.ctx.lineCap = 'round';
+      this.ctx.beginPath();
+      this.ctx.moveTo(fromx, fromy);
+      this.ctx.lineTo(tox, toy);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
+    drawRotationArrow(fromx, fromy, tox, toy, color, width) {
+      this.ctx.save();
+      this.ctx.setLineDash([8, 6]);
+      this.drawArrow(fromx, fromy, tox, toy, color, width, 'ROTATION');
+      this.ctx.restore();
+    }
+
+    drawMapBackground() {
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+      this.ctx.clearRect(0, 0, w, h);
+
+      const img = this.mapImages ? this.mapImages[this.currentMap] : null;
+      if (this.mapStyle === 'satellite' && img && img.complete && img.naturalWidth > 0) {
+        this.ctx.drawImage(img, 0, 0, w, h);
+        this.ctx.fillStyle = 'rgba(10, 16, 26, 0.15)';
+        this.ctx.fillRect(0, 0, w, h);
+      } else {
+        if (this.currentMap === 'erangel') {
+          this.renderErangelMap(w, h);
+        } else if (this.currentMap === 'bermuda') {
+          this.renderBermudaMap(w, h);
+        } else if (this.currentMap === 'nexterra') {
+          this.renderNexterraMap(w, h);
+        } else if (this.currentMap === 'solara') {
+          this.renderSolaraMap(w, h);
+        } else if (this.currentMap === 'purgatory') {
+          this.renderPurgatoryMap(w, h);
+        } else if (this.currentMap === 'kalahari') {
+          this.renderKalahariMap(w, h);
+        } else if (this.currentMap === 'hok_gorge') {
+          this.renderHokGorgeMap(w, h);
+        }
+      }
+    }    renderErangelMap(w, h) {
+      this.ctx.fillStyle = '#0a233a';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Main island
+      this.ctx.fillStyle = '#162822';
+      this.ctx.strokeStyle = '#2d5a47';
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.1, h * 0.08, w * 0.8, h * 0.58, 20);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Military Island
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.25, h * 0.74, w * 0.5, h * 0.22, 16);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Bridges
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.fillRect(w * 0.38, h * 0.66, w * 0.04, h * 0.08);
+      this.ctx.fillRect(w * 0.58, h * 0.66, w * 0.04, h * 0.08);
+
+      // River
+      this.ctx.fillStyle = '#0a233a';
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.45, h * 0.36, w * 0.25, h * 0.06, -0.2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // POIs
+      this.drawPoi(w * 0.5, h * 0.38, "Pochinki", "#f59e0b");
+      this.drawPoi(w * 0.52, h * 0.24, "School", "#38bdf8");
+      this.drawPoi(w * 0.45, h * 0.22, "Rozhok", "#10b981");
+      this.drawPoi(w * 0.2, h * 0.24, "Georgopol", "#f59e0b");
+      this.drawPoi(w * 0.78, h * 0.28, "Yasnaya", "#a855f7");
+      this.drawPoi(w * 0.5, h * 0.85, "Military Base", "#ef4444");
+      this.drawPoi(w * 0.68, h * 0.84, "Novorepnoye", "#f59e0b");
+    }
+
+    renderBermudaMap(w, h) {
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Bermuda Island
+      this.ctx.fillStyle = '#1b2c1f';
+      this.ctx.strokeStyle = '#386940';
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.5, h * 0.5, w * 0.42, h * 0.44, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Peak
+      this.ctx.fillStyle = '#2d3b25';
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.5, h * 0.48, Math.min(w, h) * 0.18, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // POIs
+      this.drawPoi(w * 0.5, h * 0.46, "PEAK (High Ground)", "#ef4444");
+      this.drawPoi(w * 0.35, h * 0.38, "Clock Tower", "#f59e0b");
+      this.drawPoi(w * 0.52, h * 0.68, "Factory", "#38bdf8");
+      this.drawPoi(w * 0.64, h * 0.42, "Bimasakti Strip", "#10b981");
+      this.drawPoi(w * 0.75, h * 0.32, "Mill", "#a855f7");
+      this.drawPoi(w * 0.38, h * 0.68, "Pochinok", "#f59e0b");
+    }
+
+    renderNexterraMap(w, h) {
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Real NeXTerra island outline
+      this.ctx.fillStyle = '#162822';
+      this.ctx.strokeStyle = '#3b82f6';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.5, h * 0.5, w * 0.43, h * 0.45, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Intellect Center (Top Center surrounded by canal)
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.45, h * 0.18, w * 0.18, h * 0.08, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.fillStyle = '#22382c';
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.45, h * 0.18, Math.min(w, h) * 0.09, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Grav Labs (Lower-Left Double Circular Zero-G Dome)
+      this.ctx.fillStyle = 'rgba(234, 179, 8, 0.25)';
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.18, h * 0.76, Math.min(w, h) * 0.07, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Deca Square (Bottom Center Plaza with Pink Tiles)
+      this.ctx.fillStyle = '#4a2539';
+      this.ctx.strokeStyle = '#ec4899';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.48, h * 0.74, w * 0.16, h * 0.12, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Museum (Upper-Left)
+      this.ctx.fillStyle = '#2d3748';
+      this.ctx.fillRect(w * 0.14, h * 0.30, w * 0.12, h * 0.10);
+
+      // Farmtopia (Center-Left)
+      this.ctx.fillStyle = '#143323';
+      this.ctx.fillRect(w * 0.32, h * 0.44, w * 0.12, h * 0.12);
+
+      // Plazaria (Lower-Center-Left)
+      this.ctx.fillStyle = '#3f3522';
+      this.ctx.fillRect(w * 0.32, h * 0.68, w * 0.12, h * 0.09);
+
+      // Rust Town (Mid-East)
+      this.ctx.fillStyle = '#3b2518';
+      this.ctx.fillRect(w * 0.74, h * 0.44, w * 0.14, h * 0.12);
+
+      // Mud Site (Lower-East)
+      this.ctx.fillStyle = '#2f2115';
+      this.ctx.fillRect(w * 0.70, h * 0.66, w * 0.12, h * 0.10);
+
+      // POI Markers (Exact in-game positions)
+      this.drawPoi(w * 0.45, h * 0.18, "Intellect Center", "#facc15");
+      this.drawPoi(w * 0.20, h * 0.35, "Museum", "#38bdf8");
+      this.drawPoi(w * 0.10, h * 0.55, "Turbine", "#94a3b8");
+      this.drawPoi(w * 0.18, h * 0.76, "Grav Labs (0-G)", "#eab308");
+      this.drawPoi(w * 0.38, h * 0.50, "Farmtopia", "#10b981");
+      this.drawPoi(w * 0.38, h * 0.72, "Plazaria", "#fbbf24");
+      this.drawPoi(w * 0.55, h * 0.62, "Boxing Gym", "#f43f5e");
+      this.drawPoi(w * 0.56, h * 0.80, "Deca Square", "#ec4899");
+      this.drawPoi(w * 0.65, h * 0.24, "Twin Bridge", "#38bdf8");
+      this.drawPoi(w * 0.80, h * 0.32, "Mortar Ruins", "#a8a29e");
+      this.drawPoi(w * 0.65, h * 0.48, "Zipway", "#06b6d4");
+      this.drawPoi(w * 0.82, h * 0.50, "Rust Town", "#fb923c");
+      this.drawPoi(w * 0.76, h * 0.72, "Mud Site", "#78716c");
+    }
+
+    renderSolaraMap(w, h) {
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Real Solara island outline
+      this.ctx.fillStyle = '#172b1e';
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.5, h * 0.5, w * 0.44, h * 0.45, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Center Canal River
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.25, h * 0.28);
+      this.ctx.bezierCurveTo(w * 0.45, h * 0.26, w * 0.52, h * 0.42, w * 0.75, h * 0.40);
+      this.ctx.lineTo(w * 0.75, h * 0.44);
+      this.ctx.bezierCurveTo(w * 0.52, h * 0.46, w * 0.45, h * 0.30, w * 0.25, h * 0.32);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // East Lagoon Basin
+      this.ctx.fillStyle = '#0e2b38';
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.82, h * 0.42, w * 0.12, h * 0.08, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Central Triangle Fortress
+      this.ctx.fillStyle = '#3d2b1a';
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.58, h * 0.56);
+      this.ctx.lineTo(w * 0.64, h * 0.65);
+      this.ctx.lineTo(w * 0.52, h * 0.65);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Bloomtown (Jacaranda streets)
+      this.ctx.fillStyle = 'rgba(236, 72, 153, 0.25)';
+      this.ctx.strokeStyle = '#ec4899';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.34, h * 0.60, w * 0.18, h * 0.16, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Slide Rail System (Yellow elevated rails looping across the whole island)
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 2.5;
+      // Main outer loop
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.5, h * 0.5, w * 0.38, h * 0.38, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+      // Inner loop around Bloomtown & Triangle
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.50, h * 0.62, w * 0.18, h * 0.16, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+
+      // West Terminal Pier
+      this.ctx.fillStyle = '#fde68a';
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.08, h * 0.45, Math.min(w, h) * 0.06, Math.PI * 0.5, Math.PI * 1.5);
+      this.ctx.fill();
+
+      // South-East Docks / Shipping Harbor
+      this.ctx.fillStyle = '#334155';
+      this.ctx.fillRect(w * 0.78, h * 0.78, w * 0.14, h * 0.12);
+
+      // East Crescent Pier
+      this.ctx.strokeStyle = '#fde68a';
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.92, h * 0.66, Math.min(w, h) * 0.04, Math.PI * 0.5, Math.PI * 1.5, true);
+      this.ctx.stroke();
+
+      // POI Markers (Exact in-game features)
+      this.drawPoi(w * 0.08, h * 0.45, "West Pier Terminal", "#fde68a");
+      this.drawPoi(w * 0.42, h * 0.14, "North Compound", "#38bdf8");
+      this.drawPoi(w * 0.78, h * 0.18, "Hilltop Villa", "#10b981");
+      this.drawPoi(w * 0.82, h * 0.42, "East Lagoon Basin", "#06b6d4");
+      this.drawPoi(w * 0.58, h * 0.61, "Triangle Fortress", "#eab308");
+      this.drawPoi(w * 0.42, h * 0.68, "Bloomtown (Jacaranda)", "#ec4899");
+      this.drawPoi(w * 0.52, h * 0.88, "South Coastal Domes", "#38bdf8");
+      this.drawPoi(w * 0.85, h * 0.84, "South-East Harbor", "#94a3b8");
+      this.drawPoi(w * 0.92, h * 0.66, "Crescent Pier", "#fde68a");
+    }
+
+    renderPurgatoryMap(w, h) {
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Main Island
+      this.ctx.fillStyle = '#1c2e22';
+      this.ctx.strokeStyle = '#2d5a3f';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.12, h * 0.1, w * 0.76, h * 0.8, 24);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // River
+      this.ctx.fillStyle = '#081c2e';
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.12, h * 0.48);
+      this.ctx.bezierCurveTo(w * 0.4, h * 0.45, w * 0.5, h * 0.6, w * 0.88, h * 0.52);
+      this.ctx.lineTo(w * 0.88, h * 0.58);
+      this.ctx.bezierCurveTo(w * 0.5, h * 0.66, w * 0.4, h * 0.52, w * 0.12, h * 0.54);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // Brasilia Center
+      this.ctx.fillStyle = '#3a241b';
+      this.ctx.beginPath();
+      this.ctx.arc(w * 0.5, h * 0.42, Math.min(w, h) * 0.12, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // POIs
+      this.drawPoi(w * 0.5, h * 0.42, "Brasilia (Center)", "#ef4444");
+      this.drawPoi(w * 0.5, h * 0.18, "Moathouse", "#38bdf8");
+      this.drawPoi(w * 0.78, h * 0.28, "Campsite", "#f59e0b");
+      this.drawPoi(w * 0.25, h * 0.32, "Marbleworks", "#10b981");
+      this.drawPoi(w * 0.3, h * 0.75, "Quarry", "#a855f7");
+      this.drawPoi(w * 0.68, h * 0.75, "Fields / Golf", "#f59e0b");
+    }
+
+    renderKalahariMap(w, h) {
+      this.ctx.fillStyle = '#26150a';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // Desert Island
+      this.ctx.fillStyle = '#472d1a';
+      this.ctx.strokeStyle = '#ca8a04';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.beginPath();
+      this.ctx.ellipse(w * 0.5, h * 0.5, w * 0.44, h * 0.44, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Refinery Center Gantry
+      this.ctx.fillStyle = '#1e293b';
+      this.ctx.strokeStyle = '#eab308';
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.roundRect(w * 0.42, h * 0.42, w * 0.16, h * 0.16, 8);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // POIs
+      this.drawPoi(w * 0.5, h * 0.5, "Refinery (140m Gantry)", "#eab308");
+      this.drawPoi(w * 0.32, h * 0.32, "Council Hall", "#38bdf8");
+      this.drawPoi(w * 0.68, h * 0.32, "Command Post", "#ef4444");
+      this.drawPoi(w * 0.28, h * 0.68, "The Sub / Mammoth", "#10b981");
+      this.drawPoi(w * 0.72, h * 0.68, "Santa Catarina", "#a855f7");
+      this.drawPoi(w * 0.5, h * 0.76, "Foundation", "#f59e0b");
+    }
+
+    renderHokGorgeMap(w, h) {
+      this.ctx.fillStyle = '#111827';
+      this.ctx.fillRect(0, 0, w, h);
+
+      // River
+      this.ctx.fillStyle = '#0f3a57';
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.1, h * 0.9);
+      this.ctx.lineTo(w * 0.9, h * 0.1);
+      this.ctx.lineTo(w * 0.95, h * 0.15);
+      this.ctx.lineTo(w * 0.15, h * 0.95);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // Lanes
+      this.ctx.strokeStyle = '#475569';
+      this.ctx.lineWidth = 12;
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.15, h * 0.85);
+      this.ctx.lineTo(w * 0.85, h * 0.15);
+      this.ctx.stroke();
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.15, h * 0.85);
+      this.ctx.lineTo(w * 0.15, h * 0.15);
+      this.ctx.lineTo(w * 0.85, h * 0.15);
+      this.ctx.stroke();
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(w * 0.15, h * 0.85);
+      this.ctx.lineTo(w * 0.85, h * 0.85);
+      this.ctx.lineTo(w * 0.85, h * 0.15);
+      this.ctx.stroke();
+
+      // Pits & Nexuses
+      this.drawPoi(w * 0.38, h * 0.42, "Shadow Tyrant (Damage)", "#f59e0b");
+      this.drawPoi(w * 0.62, h * 0.58, "Shadow Overlord (Waves)", "#a855f7");
+      this.drawPoi(w * 0.16, h * 0.84, "Blue Base Nexus", "#38bdf8");
+      this.drawPoi(w * 0.84, h * 0.16, "Red Base Nexus", "#ef4444");
+
+      this.ctx.font = '11px Rajdhani';
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.fillText("CLASH LANE (Top)", w * 0.18, h * 0.12);
+      this.ctx.fillText("MID LANE (Pivot)", w * 0.52, h * 0.48);
+      this.ctx.fillText("FARM LANE (Bot/ADC)", w * 0.62, h * 0.88);
+    }
+
+    drawPoi(x, y, text, color) {
+      this.ctx.fillStyle = color;
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 4, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 11px Rajdhani, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      this.ctx.shadowBlur = 4;
+      this.ctx.fillText(text, x, y - 8);
+      this.ctx.shadowBlur = 0;
+    }
+
+    drawArrow(fromx, fromy, tox, toy, color, width, label) {
+      const headlen = 14;
+      const dx = tox - fromx;
+      const dy = toy - fromy;
+      const angle = Math.atan2(dy, dx);
+      this.ctx.strokeStyle = color;
+      this.ctx.fillStyle = color;
+      this.ctx.lineWidth = width;
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(fromx, fromy);
+      this.ctx.lineTo(tox, toy);
+      this.ctx.stroke();
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(tox, toy);
+      this.ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+      this.ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      if (label) {
+        this.ctx.save();
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 10px Chakra Petch';
+        this.ctx.textAlign = 'center';
+        this.ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        this.ctx.shadowBlur = 4;
+        this.ctx.fillText(label, (fromx + tox) / 2, (fromy + toy) / 2 - 6);
+        this.ctx.restore();
+      }
+    }
+
+    drawCircle(fromx, fromy, tox, toy, color, width) {
+      const radius = Math.hypot(tox - fromx, toy - fromy);
+      this.ctx.save();
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = width;
+      this.ctx.setLineDash([6, 6]);
+      this.ctx.beginPath();
+      this.ctx.arc(fromx, fromy, radius, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+      this.ctx.fill();
+      this.ctx.restore();
+    }
+
+    renderProOverlays() {
+      if (!this.proOverlays) return;
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+
+      // Danger Zones
+      if (this.proOverlays.dangerZones) {
+        this.proOverlays.dangerZones.forEach(dz => {
+          const cx = dz.x * w;
+          const cy = dz.y * h;
+          const r = dz.radius * Math.min(w, h);
+
+          this.ctx.save();
+          this.ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+          this.ctx.strokeStyle = '#ef4444';
+          this.ctx.lineWidth = 1.5;
+          this.ctx.setLineDash([4, 4]);
+          this.ctx.beginPath();
+          this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.stroke();
+
+          this.ctx.fillStyle = '#f87171';
+          this.ctx.font = 'bold 9px Rajdhani';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText(dz.label, cx, cy);
+          this.ctx.restore();
+        });
+      }
+
+      // Arrows
+      if (this.proOverlays.arrows) {
+        this.proOverlays.arrows.forEach(arr => {
+          this.drawArrow(arr.fromX * w, arr.fromY * h, arr.toX * w, arr.toY * h, arr.color, arr.width, arr.label);
+        });
+      }
+
+      // Utilities
+      if (this.proOverlays.utilities) {
+        this.proOverlays.utilities.forEach(ut => {
+          const ux = ut.x * w;
+          const uy = ut.y * h;
+          this.ctx.save();
+          this.ctx.fillStyle = 'rgba(200, 220, 240, 0.4)';
+          this.ctx.beginPath();
+          this.ctx.arc(ux, uy, 18, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.strokeStyle = '#38bdf8';
+          this.ctx.lineWidth = 1.5;
+          this.ctx.stroke();
+
+          this.ctx.fillStyle = '#ffffff';
+          this.ctx.font = 'bold 8px Chakra Petch';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText(ut.label, ux, uy + 3);
+          this.ctx.restore();
+        });
+      }
+
+      // Pro Player Tokens
+      if (this.proOverlays.tokens) {
+        this.proOverlays.tokens.forEach(tok => {
+          const tx = tok.x * w;
+          const ty = tok.y * h;
+
+          this.ctx.save();
+          this.ctx.fillStyle = tok.color;
+          this.ctx.beginPath();
+          this.ctx.arc(tx, ty, 13, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.strokeStyle = '#ffffff';
+          this.ctx.lineWidth = 2;
+          this.ctx.stroke();
+
+          this.ctx.fillStyle = '#000000';
+          this.ctx.font = 'bold 9px Chakra Petch';
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'middle';
+          this.ctx.fillText(tok.label, tx, ty);
+
+          // Role caption above
+          this.ctx.fillStyle = '#f8fafc';
+          this.ctx.font = 'bold 9px Rajdhani';
+          this.ctx.shadowColor = 'rgba(0,0,0,0.9)';
+          this.ctx.shadowBlur = 3;
+          this.ctx.fillText(tok.role, tx, ty - 16);
+          this.ctx.restore();
+        });
+      }
+    }
+
+    drawToken(x, y, label, color) {
+      this.ctx.save();
+      this.ctx.fillStyle = color || '#00f0ff';
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 14, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      this.ctx.shadowBlur = 4;
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#000000';
+      this.ctx.font = 'bold 9px Chakra Petch, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(label || 'P', x, y);
+      this.ctx.restore();
+    }
+
+    drawSmokeCloud(x, y, color) {
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(200, 220, 240, 0.45)';
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 18, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = color || '#38bdf8';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 8px Chakra Petch, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText("SMOKE", x, y);
+      this.ctx.restore();
+    }
+
+    drawGlooWall(x, y, color) {
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(245, 158, 11, 0.35)';
+      this.ctx.strokeStyle = color || '#f59e0b';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.roundRect(x - 22, y - 9, 44, 18, 4);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 8px Chakra Petch, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText("GLOO", x, y);
+      this.ctx.restore();
+    }
+
+    drawTextNote(x, y, text, color) {
+      this.ctx.save();
+      this.ctx.font = 'bold 11px Rajdhani, sans-serif';
+      const textWidth = this.ctx.measureText(text).width;
+      this.ctx.fillStyle = 'rgba(10, 16, 26, 0.88)';
+      this.ctx.fillRect(x - textWidth / 2 - 6, y - 16, textWidth + 12, 22);
+      this.ctx.strokeStyle = color || '#00f0ff';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(x - textWidth / 2 - 6, y - 16, textWidth + 12, 22);
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(text, x, y - 5);
+      this.ctx.restore();
+    }
+
+    renderUserElements() {
+      if (!this.userElements || this.userElements.length === 0) return;
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+
+      this.userElements.forEach(el => {
+        if (el.type === 'freedraw') {
+          if (!el.points || el.points.length < 2) return;
+          this.ctx.save();
+          this.ctx.strokeStyle = el.color || '#00f0ff';
+          this.ctx.lineWidth = el.width || 3;
+          this.ctx.lineCap = 'round';
+          this.ctx.lineJoin = 'round';
+          this.ctx.beginPath();
+          this.ctx.moveTo(el.points[0].nx * w, el.points[0].ny * h);
+          for (let i = 1; i < el.points.length; i++) {
+            this.ctx.lineTo(el.points[i].nx * w, el.points[i].ny * h);
+          }
+          this.ctx.stroke();
+          this.ctx.restore();
+        } else if (el.type === 'arrow') {
+          this.drawArrow(el.fromNormX * w, el.fromNormY * h, el.toNormX * w, el.toNormY * h, el.color, el.width || 3, el.label);
+        } else if (el.type === 'circle') {
+          this.drawCircle(el.fromNormX * w, el.fromNormY * h, el.toNormX * w, el.toNormY * h, el.color, el.width || 2);
+        } else if (el.type === 'token') {
+          this.drawToken(el.normX * w, el.normY * h, el.label, el.color);
+        } else if (el.type === 'utility') {
+          if (el.utilityType === 'GLOO') {
+            this.drawGlooWall(el.normX * w, el.normY * h, el.color || '#f59e0b');
+          } else {
+            this.drawSmokeCloud(el.normX * w, el.normY * h, el.color || '#38bdf8');
+          }
+        } else if (el.type === 'text') {
+          this.drawTextNote(el.normX * w, el.normY * h, el.text, el.color);
+        }
+      });
+    }
+
+    saveState() {
+      this.historyStep++;
+      if (this.historyStep < this.history.length) {
+        this.history.length = this.historyStep;
+      }
+      this.history.push(JSON.parse(JSON.stringify(this.userElements)));
+    }
+
+    undo() {
+      if (this.historyStep > 0) {
+        this.historyStep--;
+        this.userElements = JSON.parse(JSON.stringify(this.history[this.historyStep]));
+        this.redrawAll();
+      } else if (this.historyStep === 0) {
+        this.historyStep = -1;
+        this.userElements = [];
+        this.redrawAll();
+      }
+    }
+
+    clearAll() {
+      this.userElements = [];
+      this.proOverlays = null;
+      this.history = [];
+      this.historyStep = -1;
+      this.redrawAll();
+      this.saveState();
+      const cardContainer = document.getElementById('proRotationCardContainer');
+      if (cardContainer) cardContainer.innerHTML = '';
+    }
+
+    redrawAll() {
+      this.drawMapBackground();
+      this.renderSafeZoneOverlay();
+      this.renderProOverlays();
+      this.renderUserElements();
+    }
+
+    exportPlan() {
+      // Broadcast-Grade Strategy Briefing Card (1200 x 850)
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = 1200;
+      exportCanvas.height = 850;
+      const ctx = exportCanvas.getContext('2d');
+
+      // 1. Cyber Battleground Gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, 850);
+      grad.addColorStop(0, '#060913');
+      grad.addColorStop(0.5, '#0b1325');
+      grad.addColorStop(1, '#05070e');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 1200, 850);
+
+      // Grid Lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 1200; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 850);
+        ctx.stroke();
+      }
+
+      // Outer Border
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(18, 18, 1164, 814);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(24, 24, 1152, 802);
+
+      // 2. Header
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 14px "Rajdhani", sans-serif';
+      ctx.fillText('● UNDERDOG ESPORTS ACADEMY • TACTICAL BRIEFING SYSTEM ●', 40, 52);
+
+      const mapTitle = this.currentMap.toUpperCase();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 28px "Chakra Petch", sans-serif';
+      ctx.fillText(`MAP STRAT BRIEFING: ${mapTitle}`, 40, 85);
+
+      // Safe Zone Badge in Header
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(840, 42, 320, 44, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = 'bold 15px "Chakra Petch", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`⚪ SAFE ZONE PHASE ${this.safeZone.phase} ACTIVE`, 1000, 70);
+      ctx.textAlign = 'left';
+
+      // 3. Draw Active Tactical Canvas at Center
+      const vpX = 40;
+      const vpY = 105;
+      const vpW = 1120;
+      const vpH = 560;
+
+      // Viewport Border
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(vpX, vpY, vpW, vpH);
+
+      // Draw Main Canvas content
+      ctx.drawImage(this.canvas, vpX, vpY, vpW, vpH);
+
+      // 4. Footer Strategy Roster Callouts
+      const footY = 685;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(40, footY, 1120, 120, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      const roles = [
+        { role: 'IGL', title: 'ROTATION ANCHOR', desc: 'Call early zone shift (Zone ' + this.safeZone.phase + '). Direct team on hard-side rotation.' },
+        { role: 'RUSHER', title: 'POINT ENTRY', desc: 'Pre-place gloo wall path across open fields. Maintain trigger discipline.' },
+        { role: 'SUPPORT', title: 'UTILITY & REZ', desc: 'Stack 3+ smokes for blue zone transitions. Cover rear angles with nades.' },
+        { role: 'SNIPER', title: 'OVERWATCH', desc: 'Lock down high-ground ridges. Call enemy rotations entering safe zone.' }
+      ];
+
+      roles.forEach((r, idx) => {
+        const rx = 60 + idx * 275;
+        ctx.fillStyle = idx === 0 ? '#38bdf8' : (idx === 1 ? '#ef4444' : (idx === 2 ? '#f59e0b' : '#10b981'));
+        ctx.font = '900 13px "Chakra Petch", sans-serif';
+        ctx.fillText(`[${r.role}] ${r.title}`, rx, footY + 30);
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '11px "Inter", sans-serif';
+        ctx.fillText(r.desc, rx, footY + 52, 255);
+      });
+
+      // Watermark
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 11px "Rajdhani", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('CONFIDENTIAL ESPORTS TACTICAL BRIEFING • NOT FOR PUBLIC BROADCAST', 1140, footY + 105);
+
+      // Download
+      const dataURL = exportCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `Briefing_${this.currentMap}_Zone${this.safeZone.phase}_${Date.now()}.png`;
+      link.href = dataURL;
+      link.click();
+
+      return dataURL;
+    }
+
+
+  }
+
+  // ---------------------------------------------------------------------------
+  // AIM & REFLEX TRAINER CONTROLLER
+  // ---------------------------------------------------------------------------
+  class ReflexTrainer {
+    constructor(arenaId, statsId) {
+      this.arena = document.getElementById(arenaId);
+      this.statsEl = document.getElementById(statsId);
+      this.round = 0;
+      this.maxRounds = 5;
+      this.reactionTimes = [];
+      this.spawnTime = 0;
+      this.activeTarget = null;
+      this.timeoutId = null;
+      this.isRunning = false;
+
+      this.bindEvents();
+    }
+
+    bindEvents() {
+      if (!this.arena) return;
+
+      this.arena.addEventListener('click', (e) => {
+        if (!this.isRunning) return;
+
+        if (e.target.classList.contains('aim-target')) {
+          const reactionTime = Math.round(performance.now() - this.spawnTime);
+          this.reactionTimes.push(reactionTime);
+          this.removeTarget();
+          this.updateStats();
+
+          if (this.round >= this.maxRounds) {
+            this.endSession();
+          } else {
+            this.scheduleNextTarget();
+          }
+        }
+      });
+    }
+
+    startTest() {
+      this.isRunning = true;
+      this.round = 0;
+      this.reactionTimes = [];
+      this.removeTarget();
+      this.statsEl.innerHTML = `
+        <div class="text-primary font-sub uppercase tracking-wider text-sm">Round 0 of ${this.maxRounds}</div>
+        <div class="text-xs text-slate-400 mt-1">Keep eyes focused. Targets spawn randomly. Tap as soon as target appears!</div>
+      `;
+      this.scheduleNextTarget();
+    }
+
+    scheduleNextTarget() {
+      this.round++;
+      const delay = 900 + Math.random() * 1800;
+
+      this.statsEl.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-sub uppercase text-amber-400">Target ${this.round} / ${this.maxRounds} incoming...</span>
+          <span class="text-xs text-slate-500">Wait for trigger...</span>
+        </div>
+      `;
+
+      this.timeoutId = setTimeout(() => {
+        if (!this.isRunning) return;
+        this.spawnTarget();
+      }, delay);
+    }
+
+    spawnTarget() {
+      const arenaRect = this.arena.getBoundingClientRect();
+      const targetSize = 48;
+
+      const minX = targetSize;
+      const maxX = Math.max(arenaRect.width - targetSize, targetSize + 20);
+      const minY = targetSize;
+      const maxY = Math.max(arenaRect.height - targetSize, targetSize + 20);
+
+      const x = Math.floor(minX + Math.random() * (maxX - minX));
+      const y = Math.floor(minY + Math.random() * (maxY - minY));
+
+      const target = document.createElement('div');
+      target.className = 'aim-target';
+      target.style.width = `${targetSize}px`;
+      target.style.height = `${targetSize}px`;
+      target.style.left = `${x}px`;
+      target.style.top = `${y}px`;
+      target.style.background = 'radial-gradient(circle, #00f0ff 30%, #ef4444 90%)';
+      target.style.border = '2px solid #ffffff';
+      target.style.cursor = 'crosshair';
+
+      this.arena.appendChild(target);
+      this.activeTarget = target;
+      this.spawnTime = performance.now();
+    }
+
+    removeTarget() {
+      if (this.activeTarget && this.activeTarget.parentElement) {
+        this.activeTarget.parentElement.removeChild(this.activeTarget);
+        this.activeTarget = null;
+      }
+      if (this.timeoutId) {
+        clearTimeout(this.timeoutId);
+        this.timeoutId = null;
+      }
+    }
+
+    updateStats() {
+      const last = this.reactionTimes[this.reactionTimes.length - 1];
+      const avg = Math.round(this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length);
+
+      this.statsEl.innerHTML = `
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-slate-300">Round ${this.round}/${this.maxRounds}: <strong class="text-primary">${last} ms</strong></span>
+          <span class="text-slate-400">Current Average: <strong class="text-amber-400">${avg} ms</strong></span>
+        </div>
+      `;
+    }
+
+    endSession() {
+      this.isRunning = false;
+      this.removeTarget();
+      const avg = Math.round(this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length);
+      const best = Math.min(...this.reactionTimes);
+
+      let rank = "";
+      let badgeColor = "";
+      let advice = "";
+
+      if (avg < 190) {
+        rank = "Tier-1 Pro Phenom (God Reflexes)";
+        badgeColor = "text-emerald-400 border-emerald-400 bg-emerald-950/40";
+        advice = "Your motor reaction speed is in the top 1% of competitive esports athletes. Focus 80% of training on macro and IGL positioning.";
+      } else if (avg <= 230) {
+        rank = "Scrim Demon (Tournament Ready)";
+        badgeColor = "text-primary border-primary bg-cyan-950/40";
+        advice = "Excellent reaction speed suitable for Tier-2 & Tier-1 LAN tournaments. Perfect for Entry Fraggers and Fast Gloo Wall rushers.";
+      } else if (avg <= 280) {
+        rank = "Contender (Solid Grassroots)";
+        badgeColor = "text-amber-400 border-amber-400 bg-amber-950/40";
+        advice = "Standard competitive speed. Implement 15 minutes of daily crosshair drills to shave off 30-40 milliseconds.";
+      } else {
+        rank = "Underdog Rookie (Pre-Warmup State)";
+        badgeColor = "text-rose-400 border-rose-400 bg-rose-950/40";
+        advice = "Nerve endings are cold or device touch response is lagging. Perform wrist stretches, hydrate, and run the 15-minute warmup routine.";
+      }
+
+      this.statsEl.innerHTML = `
+        <div class="cyber-panel p-4 border border-cyan-500/30 rounded-lg animate-fade-in mt-2">
+          <div class="flex items-center justify-between mb-2">
+            <span class="cyber-badge ${badgeColor} border px-2 py-0.5">${rank}</span>
+            <span class="text-xs text-slate-400 font-mono">Best: <span class="text-emerald-400 font-bold">${best} ms</span></span>
+          </div>
+          <div class="text-2xl font-heading text-white font-bold my-1">${avg} <span class="text-xs font-normal text-slate-400">ms avg</span></div>
+          <p class="text-xs text-slate-300 leading-relaxed">${advice}</p>
+          <button id="retryReflexBtn" class="mt-3 w-full py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-sub font-bold uppercase rounded tracking-wider text-xs hover:opacity-90">
+            Run Test Again (5 Rounds)
+          </button>
+        </div>
+      `;
+
+      document.getElementById('retryReflexBtn')?.addEventListener('click', () => this.startTest());
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // FREE FIRE ROSTER ARSENAL (39 TOURNAMENT CHARACTERS)
+  // ---------------------------------------------------------------------------
+  const FF_CHARACTERS = [
+    // === ACTIVE SKILLS (15) ===
+    {
+      id: "tatsuya",
+      name: "Tatsuya",
+      type: "active",
+      role: "Apex Rusher / Shotgun",
+      skillName: "Rebel Rush",
+      cooldown: "45s (2-3 Dashes)",
+      summary: "Dashes forward at lightning speed. Disrupts opponent crosshairs and closes distance instantly for M590 / M1887 shotgun 1-taps.",
+      tags: ["all", "active", "m590", "rusher"],
+      accent: "#f43f5e"
+    },
+    {
+      id: "k",
+      name: "K (Captain Booyah)",
+      type: "active",
+      role: "250 HP Ranked Juggernaut",
+      skillName: "Master of All",
+      cooldown: "3s toggle",
+      summary: "Max EP increased to 250. Jiu-Jitsu mode converts 5 EP to 5 HP per second. Provides endless passive healing without stopping to medkit.",
+      tags: ["all", "active", "survival"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "dimitri",
+      name: "Dimitri",
+      type: "active",
+      role: "Undying Support Core",
+      skillName: "Healing Heartbeat",
+      cooldown: "60s",
+      summary: "Creates a 3.5m healing aura recovering 5 HP/s for 12s. Allows knocked teammates (and yourself) to self-revive without exposing teammates.",
+      tags: ["all", "active", "survival", "gloo"],
+      accent: "#10b981"
+    },
+    {
+      id: "chrono",
+      name: "Chrono",
+      type: "active",
+      role: "Forcefield Sniper Duelist",
+      skillName: "Time Turner",
+      cooldown: "75s",
+      summary: "Deploys an impenetrable 800 HP forcefield sphere for 6s. Completely protects against bullets while you trade shots in open fields.",
+      tags: ["all", "active", "sniper", "gloo"],
+      accent: "#00f0ff"
+    },
+    {
+      id: "orion",
+      name: "Orion",
+      type: "active",
+      role: "Close CQB Brawler",
+      skillName: "Crimson Crush",
+      cooldown: "3s (150 EP)",
+      summary: "Consumes 150 EP to transform into an invincible crimson orb for 3s. Immune to all damage while draining 15 HP/s from nearby foes.",
+      tags: ["all", "active", "m590", "rusher"],
+      accent: "#a855f7"
+    },
+    {
+      id: "alok",
+      name: "Alok",
+      type: "active",
+      role: "Movement Tempo & Heal",
+      skillName: "Drop the Beat",
+      cooldown: "45s",
+      summary: "Creates a 5m aura increasing sprint speed by 15% and restoring 30 HP. The classic tournament tempo initiator.",
+      tags: ["all", "active", "m590", "survival"],
+      accent: "#38bdf8"
+    },
+    {
+      id: "homer",
+      name: "Homer",
+      type: "active",
+      role: "Crowd Control Drone",
+      skillName: "Senses Shock",
+      cooldown: "90s",
+      summary: "Releases a homing drone at the nearest enemy within 100m, causing 25 damage, 60% movement slow, and 35% firing rate reduction.",
+      tags: ["all", "active", "gloo", "sniper"],
+      accent: "#eab308"
+    },
+    {
+      id: "ryden",
+      name: "Ryden",
+      type: "active",
+      role: "Robotic Spider Trap",
+      skillName: "Spider Trap",
+      cooldown: "75s",
+      summary: "Releases an explosive robotic spider web. Traps opponents, reducing speed by 80% and bleeding 10 HP/s for 3s.",
+      tags: ["all", "active", "gloo"],
+      accent: "#ec4899"
+    },
+    {
+      id: "wukong",
+      name: "Wukong",
+      type: "active",
+      role: "Bush Flanker & Infiltrator",
+      skillName: "Camouflage",
+      cooldown: "200s (Resets on Knock)",
+      summary: "Transforms into a bush for 15s. Removes enemy auto-aim crosshair lock. Cooldown resets instantly upon knocking an enemy.",
+      tags: ["all", "active", "m590", "rusher"],
+      accent: "#84cc16"
+    },
+    {
+      id: "santino",
+      name: "Santino",
+      type: "active",
+      role: "Decoy Teleport Specialist",
+      skillName: "Shape Splitter",
+      cooldown: "60s",
+      summary: "Spawns a 200 HP mannequin and allows instant teleportation back to it within 12s. Perfect for baiting compound pushes.",
+      tags: ["all", "active", "rusher"],
+      accent: "#f97316"
+    },
+    {
+      id: "skyler",
+      name: "Skyler",
+      type: "active",
+      role: "Gloo Wall Sonic Breaker",
+      skillName: "Riptide Rhythm",
+      cooldown: "40s",
+      summary: "Unleashes a sonic wave destroying up to 5 Gloo Walls within 100m. Leaves enemy squads completely exposed for instant wipes.",
+      tags: ["all", "active", "m590", "gloo"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "iris",
+      name: "Iris",
+      type: "active",
+      role: "Wall-Bang Penetrator",
+      skillName: "Wall Brawler",
+      cooldown: "60s",
+      summary: "For 15s, bullets penetrate enemy Gloo Walls to hit marked enemies behind them, converting any weapon into an anti-cover machine.",
+      tags: ["all", "active", "sniper", "gloo"],
+      accent: "#8b5cf6"
+    },
+    {
+      id: "a124",
+      name: "A124",
+      type: "active",
+      role: "Skill Silencer",
+      skillName: "Thrill of Battle",
+      cooldown: "60s",
+      summary: "Releases an 8m electromagnetic pulse that cancels enemy skill countdowns and silences their active and passive abilities for 30s.",
+      tags: ["all", "active", "gloo"],
+      accent: "#14b8a6"
+    },
+    {
+      id: "steffie",
+      name: "Steffie",
+      type: "active",
+      role: "Grenade & Bullet Barrier",
+      skillName: "Painted Refuge",
+      cooldown: "60s",
+      summary: "Creates a 4m graffiti barrier that completely nullifies grenade throwables and reduces firearm damage taken by 20%.",
+      tags: ["all", "active", "gloo", "survival"],
+      accent: "#d946ef"
+    },
+    {
+      id: "clu",
+      name: "Clu",
+      type: "active",
+      role: "Radar Scout & Vision",
+      skillName: "Tracing Steps",
+      cooldown: "50s",
+      summary: "Detects positions of all standing or running enemies within 65m for 10s and shares coordinates directly with the entire squad.",
+      tags: ["all", "active", "sniper"],
+      accent: "#f43f5e"
+    },
+
+    // === PASSIVE SKILLS (24) ===
+    {
+      id: "jota",
+      name: "Jota",
+      type: "passive",
+      role: "Shotgun / HP Leech",
+      skillName: "Sustained Raids",
+      summary: "Hitting enemies with guns restores HP. Knocking down an enemy instantly recovers 20% max HP. Mandatory for M590 shotgun rushes.",
+      tags: ["all", "passive", "m590", "rusher", "survival"],
+      accent: "#10b981"
+    },
+    {
+      id: "hayato",
+      name: "Hayato (Awakened)",
+      type: "passive",
+      role: "Armor Pen & Front Shield",
+      skillName: "Bushido / Art of Blades",
+      summary: "When max HP drops by 10%, armor penetration increases by 5%. Also reduces frontal damage by 3% for every 10% HP lost.",
+      tags: ["all", "passive", "m590", "rusher", "gloo"],
+      accent: "#ef4444"
+    },
+    {
+      id: "luqueta",
+      name: "Luqueta",
+      type: "passive",
+      role: "250 Max HP Scaling Tank",
+      skillName: "Hat-Trick",
+      summary: "Every elimination permanently increases max HP by 25, scaling up to 250 Max HP. Gives an insurmountable 50 HP health advantage.",
+      tags: ["all", "passive", "survival"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "thiva",
+      name: "Thiva",
+      type: "passive",
+      role: "1.0s Fast Revive",
+      skillName: "Vital Vibes",
+      summary: "Revival speed increased by 70% (1.0s instant pick-up). The revived teammate immediately recovers 60 HP in 3s.",
+      tags: ["all", "passive", "survival", "gloo"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "nairi",
+      name: "Nairi",
+      type: "passive",
+      role: "Gloo Wall Regeneration",
+      skillName: "Ice Iron",
+      summary: "Deployed Gloo Walls heal 40 HP per second. Also increases weapon damage against enemy Gloo Walls by +35%.",
+      tags: ["all", "passive", "gloo", "survival"],
+      accent: "#3b82f6"
+    },
+    {
+      id: "sonia",
+      name: "Sonia",
+      type: "passive",
+      role: "Fatal Clutch Shield",
+      skillName: "Nano Lifeline",
+      summary: "Upon taking fatal damage, gains 100 HP shield and survives for 3s. If you knock an enemy during this window, you stay alive.",
+      tags: ["all", "passive", "survival", "gloo"],
+      accent: "#a855f7"
+    },
+    {
+      id: "kelly",
+      name: "Kelly (Awakened)",
+      type: "passive",
+      role: "Sprint & First Shot Burst",
+      skillName: "Dash / Deadly Velocity",
+      summary: "Sprint speed increased by 6%. After sprinting for 4s, your first shot deals 106% bonus damage.",
+      tags: ["all", "passive", "m590", "rusher"],
+      accent: "#eab308"
+    },
+    {
+      id: "luna",
+      name: "Luna",
+      type: "passive",
+      role: "Fire Rate Accelerant",
+      skillName: "Fight or Flight",
+      summary: "Increases weapon firing rate by 8% to 15%. Excess firing rate converts into movement speed while shooting.",
+      tags: ["all", "passive", "m590", "rusher"],
+      accent: "#ec4899"
+    },
+    {
+      id: "moco",
+      name: "Moco (Awakened)",
+      type: "passive",
+      role: "Hacker's Eye Tag",
+      skillName: "Enigma's Eye",
+      summary: "Tags shot enemies for up to 6.5s. Tagged enemies have their movement tracked and shared with the entire squad.",
+      tags: ["all", "passive", "sniper", "gloo"],
+      accent: "#10b981"
+    },
+    {
+      id: "rafael",
+      name: "Rafael",
+      type: "passive",
+      role: "Anti-Revive Bleed",
+      skillName: "Dead Silent",
+      summary: "Silencing effect on all Snipers and DMRs. Enemies knocked down by you bleed out 85% faster, hard-countering Dimitri.",
+      tags: ["all", "passive", "sniper"],
+      accent: "#64748b"
+    },
+    {
+      id: "maro",
+      name: "Maro",
+      type: "passive",
+      role: "Distance Damage Scaler",
+      skillName: "Falcon Fervor",
+      summary: "Damage increases with distance up to +25%. Deals an additional +3.5% damage on marked enemies.",
+      tags: ["all", "passive", "sniper"],
+      accent: "#d97706"
+    },
+    {
+      id: "laura",
+      name: "Laura",
+      type: "passive",
+      role: "ADS Precision",
+      skillName: "Sharp Shooter",
+      summary: "Accuracy increases by +50% while aiming down sights (ADS). Essential for 4x scope DMR spam.",
+      tags: ["all", "passive", "sniper"],
+      accent: "#0284c7"
+    },
+    {
+      id: "dbee",
+      name: "D-Bee",
+      type: "passive",
+      role: "Strafe Speed & Accuracy",
+      skillName: "Bullet Beat",
+      summary: "When firing while moving, movement speed increases by +30% and accuracy increases by +60%. Perfect for jumping with M590.",
+      tags: ["all", "passive", "m590", "rusher"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "dasha",
+      name: "Dasha",
+      type: "passive",
+      role: "Knock Speed Chain",
+      skillName: "Partying On",
+      summary: "Knocking down an enemy grants +18% rate of fire and +12% movement speed for 6s. Chaining knocks resets the timer.",
+      tags: ["all", "passive", "rusher"],
+      accent: "#8b5cf6"
+    },
+    {
+      id: "miguel",
+      name: "Miguel",
+      type: "passive",
+      role: "EP Harvester",
+      skillName: "Crazy Slayer",
+      summary: "Gains 200 EP instantly upon knocking down an enemy. Pairs with Orion to fuel infinite invincibility transformations.",
+      tags: ["all", "passive", "rusher", "survival"],
+      accent: "#dc2626"
+    },
+    {
+      id: "caroline",
+      name: "Caroline",
+      type: "passive",
+      role: "Shotgun Agility",
+      skillName: "Agility",
+      summary: "Movement speed increased by +13% while holding a shotgun (M590, M1887, Charge Buster). Gives elite movement in close quarters.",
+      tags: ["all", "passive", "m590", "rusher"],
+      accent: "#fb7185"
+    },
+    {
+      id: "antonio",
+      name: "Antonio",
+      type: "passive",
+      role: "Shield Points Armor",
+      skillName: "Gangster's Spirit",
+      summary: "Receives 40 extra Shield Points at round start. Automatically regenerates after leaving combat.",
+      tags: ["all", "passive", "survival", "gloo"],
+      accent: "#f97316"
+    },
+    {
+      id: "shani",
+      name: "Shani",
+      type: "passive",
+      role: "Active Skill Shield",
+      skillName: "Gear Recycle",
+      summary: "Using an active skill gives 50 Shield Points for 5s to self and all teammates within 10m.",
+      tags: ["all", "passive", "gloo"],
+      accent: "#84cc16"
+    },
+    {
+      id: "andrew",
+      name: "Andrew (Awakened)",
+      type: "passive",
+      role: "Armor Durability",
+      skillName: "Armor Specialist / Wolf Pack",
+      summary: "Armor durability loss reduced by 25%. Entire squad receives 15% armor damage reduction when stacked.",
+      tags: ["all", "passive", "gloo"],
+      accent: "#0ea5e9"
+    },
+    {
+      id: "leon",
+      name: "Leon",
+      type: "passive",
+      role: "Post-Combat Heal",
+      skillName: "Buzzer Beater",
+      summary: "Recovers 60 HP after surviving a combat engagement. Great for edge-of-zone players taking poke damage.",
+      tags: ["all", "passive", "survival"],
+      accent: "#10b981"
+    },
+    {
+      id: "maxim",
+      name: "Maxim",
+      type: "passive",
+      role: "Rapid Medkit",
+      skillName: "Gluttony",
+      summary: "Consuming mushrooms and applying Medkits is 25% faster. Allows clutch healing in storm or behind a gloo wall.",
+      tags: ["all", "passive", "survival"],
+      accent: "#eab308"
+    },
+    {
+      id: "nikita",
+      name: "Nikita",
+      type: "passive",
+      role: "SMG Reload & Finisher",
+      skillName: "Firearms Expert",
+      summary: "Reload speed increased by 24%. The last 6 bullets of an SMG deal 30% additional damage.",
+      tags: ["all", "passive", "rusher"],
+      accent: "#6366f1"
+    },
+    {
+      id: "kapella",
+      name: "Kapella",
+      type: "passive",
+      role: "Healing Amplifier",
+      skillName: "Healing Song",
+      summary: "Increases effects of healing items and skills by 20%. Reduces ally bleed-out rate by 10%.",
+      tags: ["all", "passive", "survival"],
+      accent: "#ec4899"
+    },
+    {
+      id: "otho",
+      name: "Otho",
+      type: "passive",
+      role: "Knock Wave Vision",
+      skillName: "Memory Mist",
+      summary: "After knocking down an enemy, reveals positions of all enemies within 20m and slows their movement speed by 25% for 4s.",
+      tags: ["all", "passive", "sniper", "rusher"],
+      accent: "#14b8a6"
+    },
+    // === NEW ADDITIONS REQUESTED (OSCAR, MORSE, KASSIE, IGNIS, KENTA, KAIROS, LILA, SUZY, WOLFRAHH, ALVARO, SHIROU, FORD) ===
+    {
+      id: "oscar",
+      name: "Oscar",
+      type: "active",
+      role: "Gloo Breaker Rusher",
+      skillName: "Valiant Dash",
+      cooldown: "60s",
+      summary: "Dashes forward at high momentum. Destroys the first 3 enemy Gloo Walls in his path, dealing 25 damage and knocking back enemies. Direct counter to compound campers.",
+      tags: ["all", "active", "m590", "rusher", "gloo"],
+      accent: "#f43f5e"
+    },
+    {
+      id: "morse",
+      name: "Morse",
+      type: "active",
+      role: "Stealth Assassin",
+      skillName: "Stealth Bytes",
+      cooldown: "60s",
+      summary: "Enters stealth mode with movement speed boost. Enemies beyond 16m cannot target or clearly see you. Triggers automatic aim assist within 4m for M590 shotgun ambush.",
+      tags: ["all", "active", "m590", "rusher", "mobility"],
+      accent: "#38bdf8"
+    },
+    {
+      id: "kassie",
+      name: "Kassie",
+      type: "active",
+      role: "Combat Medic Tether",
+      skillName: "Electro Therapy",
+      cooldown: "60s",
+      summary: "Forms an electro-healing tether with a teammate to continuously restore 5 HP/s. Reactivating delivers an instant massive 100 HP burst heal to save teammates under heavy fire.",
+      tags: ["all", "active", "survival", "support"],
+      accent: "#10b981"
+    },
+    {
+      id: "ignis",
+      name: "Ignis",
+      type: "active",
+      role: "Firewall Area Denier",
+      skillName: "Flame Mirage",
+      cooldown: "60s",
+      summary: "Deploys a 10m wall of fire for 8s. Enemies who touch it take 30 burn damage + 10 damage/s and suffer 10% armor durability loss. Instantly melts enemy Gloo Walls.",
+      tags: ["all", "active", "gloo", "rusher"],
+      accent: "#f97316"
+    },
+    {
+      id: "kenta",
+      name: "Kenta",
+      type: "active",
+      role: "Frontal Shield Tank",
+      skillName: "Swordsman's Wrath",
+      cooldown: "70s",
+      summary: "Forms a 5m frontal shield that reduces weapon damage taken from the front by 50% for 5s. Resets upon firing.",
+      tags: ["all", "active", "gloo", "survival"],
+      accent: "#a855f7"
+    },
+    {
+      id: "kairos",
+      name: "Kairos",
+      type: "passive",
+      role: "Armor & Shield Shredder",
+      skillName: "Defense Breaker",
+      summary: "Defense Mode recovers 2 EP/s. When EP is full, activates Breaker Mode: consumes EP to deal massive bonus damage directly destroying enemy Shield Points and armor.",
+      tags: ["all", "passive", "m590", "rusher"],
+      accent: "#ec4899"
+    },
+    {
+      id: "lila",
+      name: "Lila",
+      type: "passive",
+      role: "Gloo Freezer & Harvester",
+      skillName: "Gloo Strike",
+      summary: "Rifle or SMG hits slow enemies by 10%. Knocking down a slowed enemy freezes them for 3s and immediately awards you +1 extra Gloo Wall grenade.",
+      tags: ["all", "passive", "gloo", "sniper"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "suzy",
+      name: "Suzy",
+      type: "passive",
+      role: "Bounty & Economy Scout",
+      skillName: "Money Mark",
+      summary: "Marked enemies have a bounty placed on them. When you or a teammate eliminates them, everyone in the squad gains 100 extra FF Coins for Vending Machines and Pocket Markets.",
+      tags: ["all", "passive", "sniper", "support"],
+      accent: "#eab308"
+    },
+    {
+      id: "wolfrahh",
+      name: "Wolfrahh",
+      type: "passive",
+      role: "Damage Scaler & Anti-Headshot",
+      skillName: "Limelight",
+      summary: "Every elimination or spectator reduces headshot damage taken by up to 30%, while increasing limb/body damage dealt to enemies by up to 30%. Makes body sprays lethal.",
+      tags: ["all", "passive", "rusher", "survival"],
+      accent: "#d97706"
+    },
+    {
+      id: "alvaro",
+      name: "Alvaro (Awakened)",
+      type: "passive",
+      role: "Grenade Cluster Demolisher",
+      skillName: "Split Refractory",
+      summary: "Explosive damage increased by 20% and damage range by 10%. 1s before detonating, thrown grenades split into 3 extra sub-munitions dealing 20% damage each. Essential for Grenadiers.",
+      tags: ["all", "passive", "gloo", "support"],
+      accent: "#dc2626"
+    },
+    {
+      id: "shirou",
+      name: "Shirou (Awakened)",
+      type: "passive",
+      role: "Armor-Piercing Retaliator",
+      skillName: "Damage Delivered",
+      summary: "When hit by an enemy within 100m, tags the attacker for 6s. Your first retaliatory shot against them has 100% armor penetration, practically guaranteeing a 1-tap counter.",
+      tags: ["all", "passive", "sniper", "rusher"],
+      accent: "#8b5cf6"
+    },
+    {
+      id: "ford",
+      name: "Ford",
+      type: "passive",
+      role: "Damage Reaction Heal",
+      skillName: "Iron Will",
+      summary: "Restores 10 HP/s for 3s upon taking damage. Cooldown resets immediately whenever you activate an active character skill (e.g. Tatsuya, K, Dimitri).",
+      tags: ["all", "passive", "survival"],
+      accent: "#14b8a6"
+    },
+    // === EXPANSION TO REACH FULL 66 ROSTER ===
+    {
+      id: "nero",
+      name: "Nero (Dreamsmith)",
+      type: "active",
+      role: "Anti-Gloo Area Denier",
+      skillName: "Cryo Mind",
+      cooldown: "45s",
+      summary: "Throws a plushie up to 100m tracking enemies within 8m and explodes into an 8m 'Dreamy Space' lasting 12s. Disables ALL Gloo Wall placements and deals 6 HP/s continuous damage.",
+      tags: ["all", "active", "gloo", "rusher"],
+      accent: "#38bdf8"
+    },
+    {
+      id: "ray",
+      name: "Ray",
+      type: "active",
+      role: "Sunpower Finisher Rusher",
+      skillName: "Bond of Eclipse",
+      cooldown: "45s (Resets on Knock)",
+      summary: "Fires a 30m fan wave tagging target for 10s. If target's HP falls to 30 or below, instantly executes a knockdown! Knocking down the target resets skill cooldown and heals 10 HP/s for 3s.",
+      tags: ["all", "active", "m590", "rusher"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "rin",
+      name: "Rin (Hayato's Sister)",
+      type: "passive",
+      role: "Kunai Auto-Shredder",
+      skillName: "Gale of Kunai",
+      summary: "Passively summons up to 3 Kunai (1 every 8s). Attacking enemies or Gloo Walls automatically launches kunai that shred Gloo Wall durability and deal scaling distance damage.",
+      tags: ["all", "passive", "gloo", "rusher"],
+      accent: "#ec4899"
+    },
+    {
+      id: "xayne",
+      name: "Xayne",
+      type: "active",
+      role: "Gloo & Shield Breaker",
+      skillName: "Xtreme Encounter",
+      cooldown: "75s",
+      summary: "Instantly gains 50 temporary HP (decaying over 8s) and deals +75% damage to Gloo Walls and shields. Hard-counters defensive Gloo campers during shotgun pushes.",
+      tags: ["all", "active", "gloo", "rusher"],
+      accent: "#ef4444"
+    },
+    {
+      id: "kla",
+      name: "Kla",
+      type: "passive",
+      role: "Hot-Drop Drop-Puncher",
+      skillName: "Muay Thai",
+      summary: "Fist damage increased by a massive +400%! Allows lethal 1-punch knockouts on early hot drops at Clock Tower, Factory roof, and Brasilia before enemies find weapons.",
+      tags: ["all", "passive", "rusher", "survival"],
+      accent: "#f97316"
+    },
+    {
+      id: "jai",
+      name: "Jai (Awakened)",
+      type: "passive",
+      role: "Instant Ammo Mag Reloader",
+      skillName: "Raging Reload",
+      summary: "After knocking down an enemy, gun's magazine automatically reloads 45% of its maximum capacity (AR, Pistol, SMG, SG). Enables uninterrupted multi-kill squad wipes.",
+      tags: ["all", "passive", "rusher", "m590"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "jbiebs",
+      name: "J.Biebs",
+      type: "passive",
+      role: "EP Damage Absorber",
+      skillName: "Silent Sentinel",
+      summary: "Allies and user within 12m block 12% incoming damage using EP. The EP deducted from allies is transferred directly to the user to keep protection active.",
+      tags: ["all", "passive", "survival", "support"],
+      accent: "#a855f7"
+    },
+    {
+      id: "joseph",
+      name: "Joseph",
+      type: "passive",
+      role: "Nutty Movement & Disruption Immune",
+      skillName: "Silver Spoon",
+      summary: "Movement and sprinting speed increased by 15% for 5s upon taking damage. Also grants complete immunity to disruptive enemy abilities (slowing, marking, silencing).",
+      tags: ["all", "passive", "rusher", "survival"],
+      accent: "#6366f1"
+    },
+    {
+      id: "olivia",
+      name: "Olivia",
+      type: "passive",
+      role: "Aura Spread Pocket Medic",
+      skillName: "Healing Touch",
+      summary: "Spreads 80% of any single-target healing received (Medkits, skills, Inhalers) to all squad members within 10m. Turns single medkits into squad-wide heals.",
+      tags: ["all", "passive", "survival", "support"],
+      accent: "#10b981"
+    },
+    {
+      id: "paloma",
+      name: "Paloma",
+      type: "passive",
+      role: "Heavy Ammo Hoarder",
+      skillName: "Arms-Dealing",
+      summary: "Carries up to 120 ammo capacity (AR, SMG, SG, Sniper) without occupying any backpack inventory space. Frees up inventory to carry 15+ Gloo Walls and Grenades.",
+      tags: ["all", "passive", "support", "gloo"],
+      accent: "#d97706"
+    },
+    {
+      id: "misha",
+      name: "Misha",
+      type: "passive",
+      role: "Combat Charioteer & Anti-Aim",
+      skillName: "Afterburner",
+      summary: "Vehicle driving speed increased by 10%, damage taken while driving reduced by 20%, and enemies CANNOT lock aim-assist or drag-headshot onto you while in a vehicle.",
+      tags: ["all", "passive", "survival"],
+      accent: "#0ea5e9"
+    },
+    {
+      id: "notora",
+      name: "Notora",
+      type: "passive",
+      role: "Mobile Ambulance",
+      skillName: "Racer's Blessing",
+      summary: "When riding in a vehicle, restores 5 HP every 2 seconds for all squad members inside. Does not stack. Perfect for healing during high-speed zone rotations.",
+      tags: ["all", "passive", "survival", "support"],
+      accent: "#14b8a6"
+    },
+    {
+      id: "apatroa",
+      name: "A-Patroa",
+      type: "active",
+      role: "Adaptive Soundwave Operative",
+      skillName: "Club Beat",
+      cooldown: "60s",
+      summary: "Adaptive skill flexibility allowing custom tuning of tactical rhythm, movement boosts, and soundwave enemy tracking in close-quarters tournament compounds.",
+      tags: ["all", "active", "support"],
+      accent: "#f43f5e"
+    },
+    {
+      id: "primis",
+      name: "Primis (Adam)",
+      type: "passive",
+      role: "Original Baseline Vanguard",
+      skillName: "Original Vanguard",
+      summary: "The foundational Free Fire operative. Neutral, zero-ability baseline designed for purist crosshair calibration, mechanical recoil mastery, and raw gunplay duels.",
+      tags: ["all", "passive", "sniper", "rusher"],
+      accent: "#64748b"
+    },
+    {
+      id: "nulla",
+      name: "Nulla (Eve)",
+      type: "passive",
+      role: "Adaptive Baseline Operative",
+      skillName: "Adaptive Operative",
+      summary: "The original female operative. Clean zero-buff profile used in competitive scrims for handicap tournaments, hitbox calibration, and zero-perk gunplay training.",
+      tags: ["all", "passive", "sniper", "rusher"],
+      accent: "#94a3b8"
+    }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // FREE FIRE USABLE TOURNAMENT PETS (17 PRO PETS)
+  // ---------------------------------------------------------------------------
+  const FF_PETS = [
+    {
+      id: "falco",
+      name: "Falco",
+      skillName: "Skyline Spree",
+      role: "Hot-Drop Glider",
+      summary: "45% increase in gliding speed upon jumping from the plane, and 50% increase in diving speed. Guarantees your squad lands on weapons first at Brasilia, Refinery, and Peak.",
+      synergy: "Essential for hot drops and securing M590 / Level 3 armor ahead of enemy squads.",
+      tags: ["all", "pet", "rusher", "m590"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "waggor",
+      name: "Mr. Waggor",
+      skillName: "Smooth Gloo",
+      role: "Gloo Economy Generator",
+      summary: "Produces 1 Gloo Wall grenade every 100 seconds when the player has fewer than 2 Gloo Walls in inventory. Invaluable for endgame open-field survival.",
+      synergy: "Pairs perfectly with Nairi and defense IGL anchors who need continuous wall supply.",
+      tags: ["all", "pet", "gloo", "survival"],
+      accent: "#38bdf8"
+    },
+    {
+      id: "beaston",
+      name: "Beaston",
+      skillName: "Helping Hand",
+      role: "Grenade & Utility Catapult",
+      summary: "Throwing distance of Grenades, Gloo Walls, and Flashbangs increased by +30%. Allows knocking compound campers from safe, unhittable distances.",
+      synergy: "Mandatory for Alvaro grenade specialists and support players throwing defensive Gloo Walls.",
+      tags: ["all", "pet", "gloo", "support"],
+      accent: "#f43f5e"
+    },
+    {
+      id: "rockie",
+      name: "Rockie",
+      skillName: "Stay Chill",
+      role: "Cooldown Reducer",
+      summary: "Reduces the cooldown time of equipped Active Character skills by 15%. Enables faster Tatsuya dashes, Dimitri revives, Chrono bubbles, and Oscar wall-breaks.",
+      synergy: "Best-in-slot for Tatsuya, Dimitri, Chrono, and Oscar players.",
+      tags: ["all", "pet", "rusher", "survival"],
+      accent: "#a855f7"
+    },
+    {
+      id: "ottero",
+      name: "Ottero",
+      skillName: "Double Blubber",
+      role: "EP Converter on Medkits",
+      summary: "When using Medkits or Treatment Guns, recovers EP equal to 65% of the HP restored. Keeps your EP bar perpetually full for K or Orion.",
+      synergy: "Pairs with K and Orion to ensure constant EP reserves for invincibility.",
+      tags: ["all", "pet", "survival"],
+      accent: "#10b981"
+    },
+    {
+      id: "fang",
+      name: "Fang",
+      skillName: "Wolf Pact",
+      role: "Knockback Compensation",
+      summary: "Whenever a teammate is knocked down by an enemy, grants you 30 EP (if HP is full) or 1 free Gloo Wall (if HP is not full). Cooldown: 25s.",
+      synergy: "Great for clutch players and secondary rushers in squad teamfights.",
+      tags: ["all", "pet", "gloo", "survival"],
+      accent: "#ec4899"
+    },
+    {
+      id: "flash",
+      name: "Flash",
+      skillName: "Steel Shell",
+      role: "Back-Armor Shield",
+      summary: "Reduces damage taken from behind (from FF rifles and shotguns) by 25%, up to 150 points. Cooldown: 90s.",
+      synergy: "Protects rushers and sprinters rotating through open fields from back-stabs.",
+      tags: ["all", "pet", "survival", "rusher"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "panda",
+      name: "Detective Panda",
+      skillName: "Panda's Blessing",
+      role: "Knockout Health Restorer",
+      summary: "Restores 10 HP immediately upon every enemy elimination. Stacks with Jota for massive multi-kill HP surge.",
+      synergy: "Combines with Jota and M590 shotgun for instant snowball healing in 1v3s.",
+      tags: ["all", "pet", "rusher", "survival"],
+      accent: "#84cc16"
+    },
+    {
+      id: "agent_hop",
+      name: "Agent Hop",
+      skillName: "Bouncing Bonus",
+      role: "Zone Shrink EP Battery",
+      summary: "Automatically gains 50 EP every time the Safe Zone begins shrinking. In Phase 4, grants instant continuous healing energy.",
+      synergy: "Pairs with K and Luqueta for zero-effort EP generation throughout the match.",
+      tags: ["all", "pet", "survival"],
+      accent: "#eab308"
+    },
+    {
+      id: "hoot",
+      name: "Hoot",
+      skillName: "Far-Sighted",
+      role: "Vision & Scan Amplifier",
+      summary: "Adds 10m range and 1s duration to all scanning items and vision skills (Clu, Moco). Tagged enemies are highlighted in red for all teammates.",
+      synergy: "Ideal for scouts running Clu and Moco for wall-hack level information.",
+      tags: ["all", "pet", "sniper"],
+      accent: "#6366f1"
+    },
+    {
+      id: "dr_beanie",
+      name: "Dr. Beanie",
+      skillName: "Dashy Duckwalk",
+      role: "Crouch Strafe Speed",
+      summary: "Movement speed while crouching is increased by +60%. Allows lightning-fast crouch-peeking and sit-down Gloo Wall execution.",
+      synergy: "Elite shotgun duelists use this to slide into low cover without losing velocity.",
+      tags: ["all", "pet", "m590", "rusher"],
+      accent: "#f97316"
+    },
+    {
+      id: "arvon",
+      name: "Arvon",
+      skillName: "Dinoculars",
+      role: "Radar Detection",
+      summary: "Detects the number of enemies within a 50m radius for 6s. Cooldown: 60s. Completely negates bush campers and stairwell traps.",
+      synergy: "IGLs use Arvon before breaching compounds like Central or Brasilia houses.",
+      tags: ["all", "pet", "support", "sniper"],
+      accent: "#14b8a6"
+    },
+    {
+      id: "dreki",
+      name: "Dreki",
+      skillName: "Dragon Glare",
+      role: "Medkit Wall-Hacker",
+      summary: "Reveals up to 4 enemies who are using Medkits within a 30m radius for 5 seconds through walls. Cooldown: 75s.",
+      synergy: "Pairs with M82B wall-bang sniper and Rafael to hunt healing opponents.",
+      tags: ["all", "pet", "sniper"],
+      accent: "#ef4444"
+    },
+    {
+      id: "robo",
+      name: "Robo",
+      skillName: "Wall Enforcement",
+      role: "Gloo Wall HP Reinforcer",
+      summary: "Adds an extra 100 HP shield to deployed Gloo Walls. Makes each wall withstand significantly more shotgun and rifle spray.",
+      synergy: "Combines with Nairi for virtually indestructible tournament cover.",
+      tags: ["all", "pet", "gloo", "survival"],
+      accent: "#3b82f6"
+    },
+    {
+      id: "yeti",
+      name: "Yeti",
+      skillName: "Frost Fortress",
+      role: "Anti-Grenade Defense",
+      summary: "Reduces explosive grenade and launcher damage taken by 30% every 90 seconds.",
+      synergy: "Hard-counters Alvaro grenade spammers in final circle compound pushes.",
+      tags: ["all", "pet", "gloo", "survival"],
+      accent: "#d946ef"
+    },
+    {
+      id: "zasil",
+      name: "Zasil",
+      skillName: "Extra Luck",
+      role: "Medkit & Repair Duplicator",
+      summary: "Every time you consume an Inhaler, Medkit, or Armor Repair Kit, has a 50% chance to copy and award an extra identical item. Cooldown: 70s.",
+      synergy: "Ensures your team never runs dry on healing or Level 4 vest repairs.",
+      tags: ["all", "pet", "survival"],
+      accent: "#0ea5e9"
+    },
+    {
+      id: "moony",
+      name: "Moony",
+      skillName: "Paranormal Protection",
+      role: "Interaction Shield",
+      summary: "35% damage reduction while in an interaction countdown (using Medkits, reviving teammates, or deploying campfires).",
+      synergy: "Crucial for support players and medics executing 1.0s Thiva revives under fire.",
+      tags: ["all", "pet", "survival", "support"],
+      accent: "#64748b"
+    }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // FREE FIRE TOURNAMENT BATTLE LOADOUTS (8 OFFICIAL LOADOUTS)
+  // ---------------------------------------------------------------------------
+  const FF_LOADOUTS = [
+    {
+      id: "pocket_market",
+      name: "Pocket Market (Pocket Bazaar)",
+      type: "Utility Portal",
+      summary: "Opens a portable Vending Machine portal anywhere on the battlefield! Buy Gloo Walls, Medkits, Armor, or Revive Cards with FF Coins without moving to static machines.",
+      esportsUsage: "Tier-1 Meta: Squads can buy 10+ Gloo Walls and Super Meds right at the Phase 4 circle edge.",
+      tags: ["all", "loadout", "m590", "gloo", "survival"],
+      accent: "#f43f5e"
+    },
+    {
+      id: "bounty_token",
+      name: "Bounty Token",
+      type: "Combat Bounty",
+      summary: "Your first elimination grants 400 FF Coins, level 3 armor attachment, and an upgraded primary weapon (M590, M1887, or Marksman Rifle).",
+      esportsUsage: "Mandatory for primary rushers seeking instant S-tier weapon upgrades off early drop kills.",
+      tags: ["all", "loadout", "m590", "rusher"],
+      accent: "#f59e0b"
+    },
+    {
+      id: "bonfire",
+      name: "Bonfire",
+      type: "Campfire Regeneration",
+      summary: "Places a campfire on the ground that rapidly regenerates 15 HP/s and 10 EP/s for you and all nearby teammates for 12 seconds.",
+      esportsUsage: "Essential for healing the entire squad simultaneously during intense zone rotations without wasting medkits.",
+      tags: ["all", "loadout", "survival"],
+      accent: "#eab308"
+    },
+    {
+      id: "armor_crate",
+      name: "Armor Crate",
+      type: "Immediate Gear",
+      summary: "Start the match immediately with a Level 2 Vest, Level 2 Helmet, 3 Armor Repair Kits, and 200 FF Coins.",
+      esportsUsage: "Crucial for hot drops; prevents dying to early pistol/shotgun chip damage before looting a compound.",
+      tags: ["all", "loadout", "survival", "rusher"],
+      accent: "#10b981"
+    },
+    {
+      id: "supply_crate",
+      name: "Supply Crate",
+      type: "Periodic Resupply",
+      summary: "Spawns 200 FF Coins, ammo, and tactical throwables (Gloo Walls, Inhalers) at the beginning of each safe zone phase.",
+      esportsUsage: "Provides a guaranteed trickle of Gloo Walls and Coins in long tournament matches.",
+      tags: ["all", "loadout", "gloo", "support"],
+      accent: "#06b6d4"
+    },
+    {
+      id: "leg_pockets",
+      name: "Leg Pockets",
+      type: "Inventory Expansion",
+      summary: "Increases backpack capacity by +100 inventory volume and allows carrying extra Gloo Walls beyond standard capacity limits.",
+      esportsUsage: "Enables designated squad utility carriers to stockpile 15+ Gloo Walls and Grenades for Phase 5.",
+      tags: ["all", "loadout", "gloo", "support"],
+      accent: "#8b5cf6"
+    },
+    {
+      id: "summon_airdrop",
+      name: "Summon Airdrop",
+      type: "Air Support",
+      summary: "Calls down a private yellow supply crate containing high-tier airdrop weapons (Groza, AWM, SVD, Level 4 Vest).",
+      esportsUsage: "Used by defensive compound squads holding high ground on Purgatory/Kalahari.",
+      tags: ["all", "loadout", "sniper"],
+      accent: "#ec4899"
+    },
+    {
+      id: "secret_clue",
+      name: "Secret Clue",
+      type: "Map Cache",
+      summary: "Marks an underground resupply chest on your minimap containing Level 3 gear, Level 3 helmet, and coins.",
+      esportsUsage: "Guarantees full Level 3 loadouts for underdogs dropping in remote split spots.",
+      tags: ["all", "loadout", "survival", "sniper"],
+      accent: "#38bdf8"
+    },
+    {
+      id: "scan",
+      name: "Scan (Scanner)",
+      type: "Tactical Drop Radar",
+      summary: "Shows the exact number of players remaining in the plane and reveals the positions of enemy players parachuting nearby on your minimap.",
+      esportsUsage: "Guarantees safe contest-free drop rotations or prepares your team for immediate early hot-drop ambushes.",
+      tags: ["all", "loadout", "sniper", "support"],
+      accent: "#a855f7"
+    }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // MAIN APPLICATION CONTROLLER
+  // ---------------------------------------------------------------------------
+  
+  // ---------------------------------------------------------------------------
+  // FREE FIRE OFFICIAL DEFAULT & PRO PLAYER CUSTOM HUD + SENSITIVITY PRESETS
+  // ---------------------------------------------------------------------------
+  const FF_HUD_PRESETS = [
+    {
+      id: "ff_default_2finger",
+      name: "Official Free Fire Default HUD (2-Finger Standard)",
+      player: "Official Garena Free Fire Default",
+      team: "Garena Standard",
+      category: "default",
+      flag: "🎮",
+      badge: "Standard Default",
+      grip: "2-Finger (Thumbs Only)",
+      dpi: 392,
+      fireButtonSize: 55,
+      fireButtonPosition: "X: 82% | Y: 72%",
+      description: "Official Garena factory default layout used by two-thumb players. Balanced button dimensions and standard camera sensitivities. Best baseline for beginners or resetting settings back to official defaults.",
+      proTip: "Default sensitivity requires a longer, deliberate upward thumb drag. To hit headshots, pull your right thumb from below the crosshair in a swift upward motion.",
+      sensitivity: {
+        general: 65,
+        redDot: 85,
+        scope2x: 75,
+        scope4x: 65,
+        sniper: 50,
+        freeLook: 50
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 55, opacity: 70, shape: "circle", color: "#f59e0b", note: "Standard thumb position for 360-degree sprint & strafing." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Thumb", x: 12, y: 35, size: 50, opacity: 60, shape: "circle", color: "#ef4444", note: "Used during scoped-in firing or stationary shooting." },
+        { id: "fire_right", name: "Right Fire (Drag Headshot)", icon: "🎯", finger: "Right Thumb", x: 82, y: 72, size: 55, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Primary drag headshot button. Pull straight up for one-tap headshots." },
+        { id: "gloo", name: "Gloo Wall & Grenade", icon: "🛡️", finger: "Left Thumb", x: 26, y: 62, size: 65, opacity: 80, shape: "rounded", color: "#00f0ff", note: "Default location. Tap immediately upon taking bullet damage." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 50, size: 55, opacity: 75, shape: "circle", color: "#38bdf8", note: "Used for jump-shots to clear enemy gloo wall vision." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 80, y: 56, size: 55, opacity: 75, shape: "circle", color: "#a855f7", note: "Used for sit-up gloo walls and spray recoil stabilization." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 91, y: 65, size: 45, opacity: 65, shape: "circle", color: "#64748b", note: "Drop-shotting and end-circle grass concealment." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 40, size: 55, opacity: 75, shape: "circle", color: "#10b981", note: "Aim down sights for Red Dot, 2x, 4x, and Sniper scopes." },
+        { id: "active_skill", name: "Active Character Skill", icon: "⚡", finger: "Right Thumb", x: 70, y: 68, size: 55, opacity: 80, shape: "circle", color: "#f59e0b", note: "Triggers active skills like Tatsuya dash, Dimitri revive, or Iris wall-bang." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 68, y: 52, size: 55, opacity: 70, shape: "circle", color: "#f59e0b", note: "Quick swap between primary and secondary weapons." },
+        { id: "weapon_primary", name: "Primary Weapon Slot", icon: "🔫1", finger: "Right Thumb", x: 73, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Equipped rifle or sniper (Woodpecker, AWM, M82B)." },
+        { id: "weapon_secondary", name: "Secondary Weapon Slot", icon: "🔫2", finger: "Right Thumb", x: 83, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Close-range shotgun or SMG (M1887, MP40, Charge Buster)." },
+        { id: "weapon_melee", name: "Melee / Fist Slot", icon: "🥊", finger: "Right Thumb", x: 92, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Katana, Pan, or Fist for silent high-speed sprinting." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 70, y: 38, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Quick magazine reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 20, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Locks full-speed running sprint." },
+        { id: "medkit", name: "Medkit / Super Med", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Quick healing behind fortified cover." },
+        { id: "backpack", name: "Backpack / Inventory", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Manage armor, attachments, and gloo inventory." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Right Thumb", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revives knocked teammates." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Safe zone boundaries, UAV scans, and sound radar indicators." },
+        { id: "squad", name: "Squad Status & HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Teammates health, helmet, and vest status." }
+      ]
+    },
+
+    {
+      id: "ff_pro_3finger",
+      name: "Esports Pro 3-Finger Claw (Standard Competitive)",
+      player: "Pro Competitive Meta",
+      team: "Esports Standard",
+      category: "default",
+      flag: "⚡",
+      badge: "Esports Standard",
+      grip: "3-Finger Claw (Left Index Dedicated)",
+      dpi: 440,
+      fireButtonSize: 45,
+      fireButtonPosition: "X: 82% | Y: 76%",
+      description: "The #1 most popular competitive Free Fire layout in Asia and India. Uses Left Index Finger for the Left Fire button and fast Gloo Wall, freeing the Right Thumb solely for jump-shots, drag headshots, and crosshair tracking.",
+      proTip: "Enables the 0.1s Fast Sit-Up Gloo Wall. Right thumb drags headshot -> left thumb taps gloo -> right thumb taps crouch -> left index hits left fire button. You never stop moving.",
+      sensitivity: {
+        general: 100,
+        redDot: 98,
+        scope2x: 94,
+        scope4x: 88,
+        sniper: 55,
+        freeLook: 75
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Precise jiggle movements and defensive strafes." },
+        { id: "fire_left", name: "Left Fire Button (Dedicated)", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Dedicated for 0.1s instant gloo wall deployment and scoped shooting." },
+        { id: "fire_right", name: "Right Fire (Drag Headshot)", icon: "🎯", finger: "Right Thumb", x: 82, y: 76, size: 45, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Placed low to give 75% vertical screen travel for explosive drag headshots." },
+        { id: "gloo", name: "Gloo Wall (Enlarged)", icon: "🛡️", finger: "Left Thumb / Index", x: 22, y: 60, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Maximized 85% size for instant reflexive cover." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 44, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Enables jump-shots to clear enemy gloo wall barrier heights." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 84, y: 58, size: 60, opacity: 80, shape: "circle", color: "#a855f7", note: "Immediate crouch tap for 0.1s sit-up gloo wall sequence." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "End-circle prone cover." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 60, opacity: 75, shape: "circle", color: "#10b981", note: "Quick ADS targeting." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Rapid skill activation during intense rushes." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 54, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Seamless weapon cycling without opening backpack." },
+        { id: "weapon_primary", name: "Primary Weapon Slot", icon: "🔫1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Long-range marksman or assault weapon." },
+        { id: "weapon_secondary", name: "Secondary Weapon Slot", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Shotgun or SMG." },
+        { id: "weapon_melee", name: "Melee / Fist Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Speed sprinting item." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 38, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Manual reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Locks full-speed running sprint." },
+        { id: "medkit", name: "Medkit / Super Med", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Rescue knocked squadmates." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad health." }
+      ]
+    },
+    {
+      id: "ff_pro_4finger",
+      name: "Pro 4-Finger Tournament Claw (Maximum Movement)",
+      player: "Tier-1 Tournament Meta",
+      team: "Esports 4-Finger",
+      category: "default",
+      flag: "👑",
+      badge: "4-Finger Meta",
+      grip: "4-Finger Tournament Claw",
+      dpi: 460,
+      fireButtonSize: 44,
+      fireButtonPosition: "X: 82% | Y: 76%",
+      description: "Tier-1 tournament multi-action layout. Left Index fires and drops gloo; Right Index handles jump, crouch, and scope; thumbs handle movement, aiming, and skill triggers.",
+      proTip: "Allows jumping, scoping, shooting, and dropping gloo walls simultaneously without lifting your aim thumb.",
+      sensitivity: {
+        general: 98,
+        redDot: 95,
+        scope2x: 90,
+        scope4x: 85,
+        sniper: 58,
+        freeLook: 70
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 48, opacity: 70, shape: "circle", color: "#f59e0b", note: "Movement." },
+        { id: "fire_left", name: "Left Fire (Index)", icon: "🔥", finger: "Left Index", x: 14, y: 16, size: 92, opacity: 95, shape: "circle", color: "#ef4444", note: "Left Fire trigger." },
+        { id: "fire_right", name: "Right Fire (Drag)", icon: "🎯", finger: "Right Thumb", x: 82, y: 76, size: 44, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Drag headshot." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Index", x: 22, y: 56, size: 90, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Fast gloo." },
+        { id: "jump", name: "Jump (Right Index)", icon: "⏫", finger: "Right Index", x: 88, y: 22, size: 65, opacity: 85, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch (Right Index)", icon: "🧎", finger: "Right Index", x: 92, y: 40, size: 65, opacity: 85, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "scope", name: "Scope (Right Index)", icon: "🔭", finger: "Right Index", x: 80, y: 22, size: 60, opacity: 75, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 52, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Weapon switch." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Weapon", icon: "🔫1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 1." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 2." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Inventory." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "mafia_sniper",
+      name: "Total Gaming — Mafia (Daksh Garg) [Verified Sniper HUD]",
+      player: "Mafia (Daksh Garg)",
+      team: "Total Gaming Esports",
+      category: "india",
+      flag: "🇮🇳",
+      badge: "Sniper God",
+      grip: "3/4-Finger Sniper Hybrid",
+      dpi: 460,
+      fireButtonSize: 45,
+      fireButtonPosition: "X: 82% | Y: 76%",
+      description: "Custom crafted for India's premier sniper king Daksh 'Mafia' Garg. Features an enlarged 85% Quick Weapon Switch placed directly center-right to execute instant double-sniper bolt cancels (AWM + M82B) without suffering reload cooldowns.",
+      proTip: "Double Sniper Quick-Cancel: Fire AWM with Right Fire -> instant tap Quick Weapon Switch with Right Thumb -> tap Scope -> Fire M82B with Left Fire (Left Index). 2 sniper rounds land in 0.75 seconds!",
+      sensitivity: {
+        general: 98,
+        redDot: 95,
+        scope2x: 92,
+        scope4x: 88,
+        sniper: 58,
+        freeLook: 75
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 48, opacity: 65, shape: "circle", color: "#f59e0b", note: "Small joystick size prevents accidental sprint locks during fine sniping alignment." },
+        { id: "fire_left", name: "Left Fire Button (Sniper Trigger)", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 90, opacity: 95, shape: "circle", color: "#ef4444", note: "Dedicated for scoped sniper firing. Keeps right thumb purely for aiming crosshair tracking." },
+        { id: "fire_right", name: "Right Fire (Drag Headshot)", icon: "🎯", finger: "Right Thumb", x: 82, y: 76, size: 45, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "45% size. Calibrated for Woodpecker / Marksman rifle drag headshots." },
+        { id: "quick_switch", name: "Quick Weapon Switch (DOUBLE SNIPER)", icon: "🔄", finger: "Right Thumb", x: 68, y: 50, size: 85, opacity: 95, shape: "circle", color: "#00f0ff", note: "CRITICAL: 85% enlarged button! Tapping this immediately after firing AWM cancels reload animation." },
+        { id: "scope", name: "Scope / ADS (Enlarged)", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 75, opacity: 85, shape: "circle", color: "#10b981", note: "Enlarged 75% scope button for instant sniper ADS acquisition." },
+        { id: "active_skill", name: "Active Skill (Iris Wall-Brawl)", icon: "👁️", finger: "Right Thumb", x: 72, y: 68, size: 60, opacity: 85, shape: "circle", color: "#38bdf8", note: "Triggers Iris Wall Brawl to tag and eliminate enemies behind gloo walls." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Thumb", x: 22, y: 60, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Instant emergency cover." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 44, size: 60, opacity: 75, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 84, y: 58, size: 60, opacity: 75, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone sniping." },
+        { id: "weapon_primary", name: "Primary Sniper Slot (AWM)", icon: "🎯1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#00f0ff", note: "AWM or M82B." },
+        { id: "weapon_secondary", name: "Secondary Sniper Slot (M82B)", icon: "🎯2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#00f0ff", note: "Double Sniper setup." },
+        { id: "weapon_melee", name: "Melee / Fist Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Sprint." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Inventory." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad health." }
+      ]
+    },
+
+    {
+      id: "tg_aztec",
+      name: "Total Gaming — AZTEC (Sohail Alam) [Aggressive Rusher HUD]",
+      player: "AZTEC (Sohail Alam)",
+      team: "Total Gaming Esports",
+      category: "india",
+      flag: "🇮🇳",
+      badge: "Entry Rusher",
+      grip: "3-Finger Aggressive Drag",
+      dpi: 420,
+      fireButtonSize: 42,
+      fireButtonPosition: "X: 80% | Y: 78%",
+      description: "Aggressive entry fragger layout engineered for 1-tap M1887 shotgun and Charge Buster headshots. Right Fire button is minimized to 42% and pushed low to afford 80% vertical drag screen distance.",
+      proTip: "Aztec's M1887 Drag: Within 5m range, pull fire button slightly down for 0.05s to lock chest, then whip upward with maximum velocity for pure red headshot numbers.",
+      sensitivity: {
+        general: 100,
+        redDot: 100,
+        scope2x: 96,
+        scope4x: 90,
+        sniper: 50,
+        freeLook: 80
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 15, y: 74, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Zig-zag rush evasion." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 95, opacity: 95, shape: "circle", color: "#ef4444", note: "Instant 0.1s gloo wall deploy trigger." },
+        { id: "fire_right", name: "Right Fire (LOW POSITION)", icon: "🎯", finger: "Right Thumb", x: 80, y: 78, size: 42, opacity: 90, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "42% size at bottom edge. Gives full screen vertical headroom for explosive shotgun drag headshots." },
+        { id: "gloo", name: "Gloo Wall (100% MAX SIZE)", icon: "🛡️", finger: "Left Thumb", x: 24, y: 58, size: 95, opacity: 95, shape: "rounded", color: "#00f0ff", note: "Massive gloo wall button right next to crouch for lightning sit-up gloo walls." },
+        { id: "crouch", name: "Crouch Button (Sit-Up)", icon: "🧎", finger: "Right Thumb", x: 86, y: 58, size: 65, opacity: 85, shape: "circle", color: "#a855f7", note: "Enlarged crouch button right above right fire for instant sit-up gloo walls." },
+        { id: "active_skill", name: "Active Skill (Tatsuya Dash)", icon: "⚡", finger: "Right Thumb", x: 70, y: 70, size: 65, opacity: 90, shape: "circle", color: "#f59e0b", note: "Rapid 3-dash Tatsuya burst through compound doors." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 91, y: 44, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump-shotting over low obstacles." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 52, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Quick swap." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 55, opacity: 70, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary (M1887 Shotgun)", icon: "💥1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#ef4444", note: "M1887." },
+        { id: "weapon_secondary", name: "Secondary (Charge Buster)", icon: "⚡2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#f59e0b", note: "Charge Buster." },
+        { id: "weapon_melee", name: "Melee / Fist Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Sprint." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Inventory." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad health." }
+      ]
+    },
+
+    {
+      id: "hind_louis",
+      name: "Team Hind / Apex — Louis (Ayush Jangir) [250 HP Fragger HUD]",
+      player: "Louis (Ayush Jangir)",
+      team: "Team Hind / Team Apex Gaming",
+      category: "india",
+      flag: "🇮🇳",
+      badge: "Star Fragger",
+      grip: "4-Finger Tournament Claw",
+      dpi: 450,
+      fireButtonSize: 44,
+      fireButtonPosition: "X: 82% | Y: 75%",
+      description: "Optimized for high-fragging rusher gameplay with Luqueta 250 Max HP advantage. 4-finger claw provides instant slide-and-fire agility.",
+      proTip: "Use Tatsuya dashes right after jump-shooting to break opponent crosshair tracking, then snap back with Right Fire drag.",
+      sensitivity: {
+        general: 97,
+        redDot: 94,
+        scope2x: 90,
+        scope4x: 85,
+        sniper: 55,
+        freeLook: 70
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Movement." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 16, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire (Drag)", icon: "🎯", finger: "Right Thumb", x: 82, y: 75, size: 44, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Headshot drag." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Index", x: 22, y: 58, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Index", x: 88, y: 24, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Index", x: 92, y: 42, size: 60, opacity: 80, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 55, opacity: 75, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 54, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Weapon", icon: "🔫1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 1." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 2." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 38, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "s8ul_prinxz",
+      name: "S8UL Esports — PRINXZ (Prince) [EWC Paris Finalist HUD]",
+      player: "PRINXZ (Prince)",
+      team: "S8UL Esports",
+      category: "india",
+      flag: "🇮🇳",
+      badge: "EWC Finalist",
+      grip: "3-Finger Speed Claw",
+      dpi: 440,
+      fireButtonSize: 46,
+      fireButtonPosition: "X: 82% | Y: 76%",
+      description: "Official EWC Paris tournament setup for India's star rusher Prince. Features balanced 46% button scale for consistent drag headshots on both shotguns and SMGs.",
+      proTip: "Keep your crosshair slightly above chest level before starting your upward drag; this eliminates bullet spread and connects directly with helmet hitboxes.",
+      sensitivity: {
+        general: 100,
+        redDot: 96,
+        scope2x: 92,
+        scope4x: 88,
+        sniper: 52,
+        freeLook: 80
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Joystick." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire (Drag)", icon: "🎯", finger: "Right Thumb", x: 82, y: 76, size: 46, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Right fire." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Thumb", x: 22, y: 60, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 44, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 84, y: 58, size: 60, opacity: 80, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 54, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 60, opacity: 75, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Weapon", icon: "🔫1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 1." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 2." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 38, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "falcons_onfire",
+      name: "Team Falcons — ONFIRE (Phulipat Yosit) [Thai Speed God HUD]",
+      player: "ONFIRE (Phulipat Yosit)",
+      team: "Team Falcons",
+      category: "international",
+      flag: "🇹🇭",
+      badge: "SEA Champion",
+      grip: "4-Finger High-Speed Claw",
+      dpi: 480,
+      fireButtonSize: 38,
+      fireButtonPosition: "X: 82% | Y: 78%",
+      description: "World-class 4-finger claw layout used by Thailand's star rusher ONFIRE. Ultra-small 38% Fire Button generates maximum pixels-per-millimeter drag velocity for instant MP40 and Bizon headshots.",
+      proTip: "ONFIRE's SMG drag secret: Start the upward drag the exact millisecond the first bullet fires. A small fire button provides extreme flick speed.",
+      sensitivity: {
+        general: 100,
+        redDot: 98,
+        scope2x: 95,
+        scope4x: 92,
+        sniper: 60,
+        freeLook: 85
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 74, size: 45, opacity: 60, shape: "circle", color: "#f59e0b", note: "Fast strafe." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 16, size: 95, opacity: 95, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire (38% MINI BUTTON)", icon: "🎯", finger: "Right Thumb", x: 82, y: 78, size: 38, opacity: 90, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "38% Mini Size: Gives lightning drag speed." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Index", x: 22, y: 58, size: 90, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Index", x: 88, y: 22, size: 65, opacity: 85, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Index", x: 92, y: 40, size: 65, opacity: 85, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Index", x: 80, y: 22, size: 60, opacity: 75, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 52, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary SMG Slot", icon: "⚡1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#ef4444", note: "MP40." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "AR." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "fluxo_mt7",
+      name: "Fluxo W7M — MT7 (Mateus Torre) [Brazilian Shotgun King HUD]",
+      player: "MT7 (Mateus Torre)",
+      team: "Fluxo W7M",
+      category: "international",
+      flag: "🇧🇷",
+      badge: "Shotgun Master",
+      grip: "3-Finger Brazilian Drag Style",
+      dpi: 410,
+      fireButtonSize: 48,
+      fireButtonPosition: "X: 80% | Y: 74%",
+      description: "Brazilian Liga Pro layout optimized for M1887 and SPAS-12 curved J-shape drag headshots. Fire button positioned at 48% provides optimal surface friction for rotational flicks.",
+      proTip: "MT7's J-Shape Drag: When enemy jumps diagonally, swipe thumb in a letter 'J' curve matching their head arc. All pellets connect in the head.",
+      sensitivity: {
+        general: 100,
+        redDot: 95,
+        scope2x: 88,
+        scope4x: 80,
+        sniper: 45,
+        freeLook: 65
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Strafe." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire (J-DRAG)", icon: "🎯", finger: "Right Thumb", x: 80, y: 74, size: 48, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Curved J-drag." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Thumb", x: 24, y: 58, size: 95, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 44, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 84, y: 56, size: 65, opacity: 80, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 70, y: 68, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 68, y: 52, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 55, opacity: 70, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Shotgun Slot", icon: "💥1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#ef4444", note: "M1887." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Secondary." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "buriram_moshi",
+      name: "Buriram United — Moshi (Ratchanon) [SEA MVP HUD]",
+      player: "Moshi (Ratchanon Kunrayason)",
+      team: "Buriram United Esports",
+      category: "international",
+      flag: "🇹🇭",
+      badge: "SEA MVP",
+      grip: "4-Finger Precision Claw",
+      dpi: 450,
+      fireButtonSize: 45,
+      fireButtonPosition: "X: 82% | Y: 75%",
+      description: "Southeast Asia MVP tournament setup with balanced mid-and-close range tracking. 4-finger distribution provides flawless 360-degree compound clearing.",
+      proTip: "Keep Red Dot sensitivity at 96 for pinpoint headshot lock-on with M4A1 and Woodpecker.",
+      sensitivity: {
+        general: 99,
+        redDot: 96,
+        scope2x: 92,
+        scope4x: 86,
+        sniper: 52,
+        freeLook: 75
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Movement." },
+        { id: "fire_left", name: "Left Fire Button", icon: "🔥", finger: "Left Index", x: 14, y: 16, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire (Drag)", icon: "🎯", finger: "Right Thumb", x: 82, y: 75, size: 45, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Drag fire." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Index", x: 22, y: 58, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Index", x: 88, y: 22, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Index", x: 92, y: 40, size: 60, opacity: 80, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 70, y: 52, size: 65, opacity: 80, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 55, opacity: 75, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Weapon", icon: "🔫1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 1." },
+        { id: "weapon_secondary", name: "Secondary Weapon", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "Weapon 2." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    },
+
+    {
+      id: "horaa_renice",
+      name: "Horaa Esports — RENICE [Nepal Sniper King HUD]",
+      player: "RENICE",
+      team: "Horaa Esports",
+      category: "international",
+      flag: "🇳🇵",
+      badge: "Bangkok Qualified",
+      grip: "3-Finger Long Range Sniper",
+      dpi: 440,
+      fireButtonSize: 52,
+      fireButtonPosition: "X: 82% | Y: 74%",
+      description: "Nepal FFWS Champion sniper layout. Calibrated for high-ground mountain ridgeline gatekeeping and anti-revive distance snipes with Iris and Rafael.",
+      proTip: "Scope in with Left Index -> micro-adjust target with Right Thumb -> fire with Left Fire. Allows 100% steady aim without screen shaking.",
+      sensitivity: {
+        general: 95,
+        redDot: 90,
+        scope2x: 85,
+        scope4x: 80,
+        sniper: 48,
+        freeLook: 60
+      },
+      buttons: [
+        { id: "joystick", name: "Movement Joystick Wheel", icon: "🕹️", finger: "Left Thumb", x: 16, y: 72, size: 50, opacity: 70, shape: "circle", color: "#f59e0b", note: "Movement." },
+        { id: "fire_left", name: "Left Fire Button (Mountain Snipes)", icon: "🔥", finger: "Left Index", x: 14, y: 18, size: 90, opacity: 90, shape: "circle", color: "#ef4444", note: "Left fire." },
+        { id: "fire_right", name: "Right Fire", icon: "🎯", finger: "Right Thumb", x: 82, y: 74, size: 52, opacity: 85, shape: "circle", color: "#ef4444", hasDragArrow: true, note: "Drag fire." },
+        { id: "gloo", name: "Gloo Wall", icon: "🛡️", finger: "Left Thumb", x: 22, y: 60, size: 85, opacity: 90, shape: "rounded", color: "#00f0ff", note: "Gloo." },
+        { id: "quick_switch", name: "Quick Weapon Switch", icon: "🔄", finger: "Right Thumb", x: 68, y: 52, size: 75, opacity: 85, shape: "circle", color: "#f59e0b", note: "Switch." },
+        { id: "scope", name: "Scope / ADS", icon: "🔭", finger: "Right Thumb", x: 80, y: 38, size: 70, opacity: 80, shape: "circle", color: "#10b981", note: "Scope." },
+        { id: "active_skill", name: "Active Skill", icon: "⚡", finger: "Right Thumb", x: 72, y: 70, size: 60, opacity: 85, shape: "circle", color: "#f59e0b", note: "Skill." },
+        { id: "jump", name: "Jump Button", icon: "⏫", finger: "Right Thumb", x: 90, y: 44, size: 60, opacity: 80, shape: "circle", color: "#38bdf8", note: "Jump." },
+        { id: "crouch", name: "Crouch Button", icon: "🧎", finger: "Right Thumb", x: 84, y: 58, size: 60, opacity: 80, shape: "circle", color: "#a855f7", note: "Crouch." },
+        { id: "prone", name: "Prone Button", icon: "🛌", finger: "Right Thumb", x: 92, y: 72, size: 45, opacity: 60, shape: "circle", color: "#64748b", note: "Prone." },
+        { id: "weapon_primary", name: "Primary Sniper (AWM)", icon: "🎯1", finger: "Right Thumb", x: 74, y: 12, size: 65, opacity: 75, shape: "pill", color: "#00f0ff", note: "AWM." },
+        { id: "weapon_secondary", name: "Secondary (SVD)", icon: "🔫2", finger: "Right Thumb", x: 84, y: 12, size: 65, opacity: 75, shape: "pill", color: "#e2e8f0", note: "SVD." },
+        { id: "weapon_melee", name: "Melee Slot", icon: "🥊", finger: "Right Thumb", x: 93, y: 12, size: 50, opacity: 70, shape: "pill", color: "#94a3b8", note: "Melee." },
+        { id: "reload", name: "Manual Reload", icon: "🔁", finger: "Right Thumb", x: 68, y: 36, size: 50, opacity: 70, shape: "circle", color: "#94a3b8", note: "Reload." },
+        { id: "sprint", name: "Sprint / Run", icon: "🏃", finger: "Left Thumb", x: 18, y: 44, size: 55, opacity: 75, shape: "circle", color: "#f59e0b", note: "Sprint." },
+        { id: "medkit", name: "Medkit", icon: "🩹", finger: "Left Thumb", x: 10, y: 54, size: 55, opacity: 75, shape: "rounded", color: "#10b981", note: "Heal." },
+        { id: "backpack", name: "Backpack", icon: "🎒", finger: "Left Thumb", x: 8, y: 72, size: 50, opacity: 65, shape: "rounded", color: "#64748b", note: "Backpack." },
+        { id: "revive", name: "Revive Teammate", icon: "❤️", finger: "Center", x: 50, y: 60, size: 55, opacity: 80, shape: "circle", color: "#ec4899", note: "Revive." },
+        { id: "minimap", name: "Radar Minimap", icon: "🗺️", finger: "Information", x: 9, y: 12, size: 85, opacity: 75, shape: "square", color: "#38bdf8", note: "Minimap." },
+        { id: "squad", name: "Squad HP", icon: "👥", finger: "Information", x: 24, y: 12, size: 80, opacity: 70, shape: "pill", color: "#10b981", note: "Squad." }
+      ]
+    }
+  ];
+
+  
+  // ---------------------------------------------------------------------------
+  // VERIFIED FREE FIRE PRO COACHING STAFF & MASTER STRATEGY VAULT
+  // ---------------------------------------------------------------------------
+  const FF_COACHING_STAFF = [
+    {
+      id: "coach_duker",
+      name: "Sankalp 'Duker' Gupta",
+      alias: "Coach Duker",
+      role: "Head Coach & Official Broadcast Analyst",
+      team: "Titan Esports Club (Ex-Team Elite & Chemin)",
+      country: "India",
+      flag: "🇮🇳",
+      region: "india",
+      badge: "1st Indian Coach at EWC & FFWS",
+      avatar: "🧠",
+      trophies: "First Indian Coach to reach Esports World Cup (EWC 2025/2026) & FFWS Global Finals; Multiple Tier-1 Indian Championships",
+      youtubeName: "Duker Gaming (@FFCoach_Duker)",
+      youtubeUrl: "https://www.youtube.com/@FFCoach_Duker",
+      instaHandle: "@ff_coach.ind / @duker_ff",
+      instaUrl: "https://www.instagram.com/ff_coach.ind/",
+      strategyTitle: "The 'Tuition Time' Macro-Rotations & Trigger Discipline Protocol",
+      philosophy: "Scientific rotation pathing over mindless early frags. Duker enforces strict trigger discipline: underdog squads lose 70% of games because they shoot at distant opponents, alerting third-party squads and burning compound advantages.",
+      summary: "Duker's coaching methodology transformed Indian competitive teams into international contenders. His core doctrine is 'Zero-Shot Transit' during Zones 1 & 2, followed by an aggressive 'Zone Edge Squeeze' with Nairi gloo walls in Zones 3 to 5.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "Drop Contestation & Resource Protocol",
+          desc: "Claim an uncontested drop perimeter. Every player must secure at least 4 gloo walls and a Level 2+ Vest before grouping. If contested early, fight as a 4-man block rather than taking separated 1v1 duels."
+        },
+        {
+          step: 2,
+          title: "Trigger Discipline on Transit",
+          desc: "When moving across open terrain between Zone 1 and Zone 2, NEVER open fire on passing squads unless they obstruct your direct rotation vector. Maintaining stealth guarantees safe arrival into key compound vantage points."
+        },
+        {
+          step: 3,
+          title: "The Zone Edge Squeeze",
+          desc: "Enter the safe zone with the blue damage line right behind you. Deploy Nairi fortified gloo walls to gatekeep late-rotating squads who are desperate for healing, securing 4-6 easy kill points without exposing your rear."
+        },
+        {
+          step: 4,
+          title: "Endgame 2-1-1 Spatial Triangle",
+          desc: "In Zone 5 and final circle, avoid stacking all 4 players behind one gloo wall cluster. Split into a 2-1-1 triangle so enemy grenades or air-strikes can never knock more than 1 player, ensuring immediate Dimitri revives."
+        }
+      ],
+      mistakesUnderdogsMake: "Taking low-percentage poke fights at 120m-150m range. It burns sniper ammo, breaks armor durability, and reveals your compound to 3 surrounding teams who immediately launch a synchronized pincer rush.",
+      videoNotes: {
+        title: "Duker's Tuition Time: EWC Compound Control & Third-Party Counter-Strat",
+        duration: "14:20",
+        timestamps: [
+          { time: "01:15", title: "Drop Pathing: Why Centre Drops Fail in Competitive Lobbies" },
+          { time: "04:30", title: "The 30-Second Rule: When to Disengage from Prolonged Fights" },
+          { time: "08:10", title: "Nairi + Dimitri Wall Healing Cycle under Heavy Artillery" },
+          { time: "12:00", title: "Final 1v1 Zone Freeze: Timing Medkits vs Active Spraying" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Recoil & Drag Headshot Warmup", desc: "Training Grounds: 100 one-tap drag headshots with Woodpecker & M1887." },
+        { time: "15 Mins", name: "0.1s Fast Sit-Up Gloo Wall Speed", desc: "Custom Room: 50 consecutive jump-shot -> sit-up gloo wall deployments without pausing." },
+        { time: "15 Mins", name: "2v2 Compound Siege & Breach", desc: "Clash Squad Custom: Practicing 2-man pincer rush with Tatsuya." },
+        { time: "15 Mins", name: "Scrim VOD Review & Rotation Analysis", desc: "Analyzing previous scrim replay to identify delayed zone entries and poor trigger discipline." }
+      ]
+    },
+
+    {
+      id: "coach_iconic",
+      name: "Dev Kumar (ICONIC)",
+      alias: "Coach ICONIC",
+      role: "Head Coach",
+      team: "Orangutan (OG)",
+      country: "India",
+      flag: "🇮🇳",
+      region: "india",
+      badge: "Champion Player Turned Mastermind",
+      avatar: "🦍",
+      trophies: "Free Fire India Championship Champion, Snapdragon Pro Series, Multiple Tier-1 Podium Finishes",
+      youtubeName: "ICONIC (220k+ Subscribers)",
+      youtubeUrl: "https://www.youtube.com/@ICONIC_01",
+      instaHandle: "@_iconic_ico",
+      instaUrl: "https://www.instagram.com/_iconic_ico/",
+      strategyTitle: "The 2-2 Split Compound Lock & 4.5s Third-Party Interception Window",
+      philosophy: "Uncompromising compound sovereignty and split-second third-party execution. ICONIC utilizes his experience as an elite tier-1 fragger to instill high-tempo decision making into Orangutan's roster.",
+      summary: "ICONIC's Orangutan playbook splits defensive duties into two distinct pairs: two roof anchors maintaining 360-degree perimeter vision, and two ground brawlers barricading entrance chokes. When two nearby squads engage, Orangutan strikes at the exact 4.5s mark.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "2-2 Compound Lockdown",
+          desc: "Two players hold the compound rooftop with marksman rifles and snipers (Woodpecker / AWM). The other two players anchor the lower floor with M1887 shotguns and Nairi gloo walls, sealing the staircases."
+        },
+        {
+          step: 2,
+          title: "The 4.5-Second Third-Party Window",
+          desc: "When two enemy teams clash nearby, monitor the kill-feed intently. The exact moment 2 knocks appear on either side, initiate a full Tatsuya breach within 4.5 seconds before opponents can pop medkits or Dimitri revives."
+        },
+        {
+          step: 3,
+          title: "Gloo Wall Shredder Pressure",
+          desc: "Use Xayne and Iris skills to pierce through enemy cover simultaneously, turning enemy defensive gloo walls into lethal bullet-magnets."
+        },
+        {
+          step: 4,
+          title: "Clean Wipe & Rapid Reset",
+          desc: "Wipe surviving enemies in under 10 seconds, loot only essential gloo walls/ammo, and immediately smoke and rebuild your perimeter before other squads arrive."
+        }
+      ],
+      mistakesUnderdogsMake: "Hesitating when third-partying. If you wait 15 seconds instead of 4.5 seconds, the winning squad has already pulled off a Dimitri-Thiva instant revive and reset behind full HP gloo walls.",
+      videoNotes: {
+        title: "ICONIC Masterclass: Compound Defense & Instant Third-Party Wipes",
+        duration: "12:45",
+        timestamps: [
+          { time: "00:50", title: "Compound Selection: Identifying 360-Degree Sightlines" },
+          { time: "03:40", title: "Reading the Kill-Feed for the 4.5s Push Timing" },
+          { time: "07:25", title: "Anti-Rush Staircase Gloo Wall Traps" },
+          { time: "10:50", title: "Clutch Comm Protocols under High Pressure" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Flick Tracking & Crosshair Placement", desc: "Training Grounds: Rapid target switching between 3 moving dummies." },
+        { time: "15 Mins", name: "Staircase Gloo Trap Placement", desc: "Practicing placing 1 horizontal gloo wall on stairs to force enemies into single-file jumps." },
+        { time: "15 Mins", name: "4.5s High-Tempo Compound Breach", desc: "Custom scrim drill: Breaching a 2-man fortified house in under 5 seconds." },
+        { time: "15 Mins", name: "Kill-Feed Reaction & Comms Callout", desc: "Captain calls out knockouts in live scrims; squad must react within 2 seconds." }
+      ]
+    },
+
+    {
+      id: "coach_vaibhav_fozy",
+      name: "Vaibhav & FOZYAJAY",
+      alias: "TG Strategy Hub",
+      role: "Strategic Co-Analyst & Captain IGL Coach",
+      team: "Total Gaming Esports",
+      country: "India",
+      flag: "🇮🇳",
+      region: "india",
+      badge: "Total Gaming Tactical Core",
+      avatar: "🏰",
+      trophies: "Free Fire India Championship Winners, Free Fire Pro League Champions, Multiple Grand Finals Trophies",
+      youtubeName: "FOZY AJAY / Total Gaming Esports",
+      youtubeUrl: "https://www.youtube.com/@TotalGaming093",
+      instaHandle: "@vaibhav_tg / @fozyajay_",
+      instaUrl: "https://www.instagram.com/vaibhav_tg/",
+      strategyTitle: "The Anti-Gloo Sniper Corridor & Safe-Zone Parachute Economy",
+      philosophy: "Enabling star talent through rigid statistical planning. Vaibhav analyzes team heatmaps while FozyAjay commands on-field execution, setting up Mafia's sniper angles and Aztec's entry rushes.",
+      summary: "Total Gaming's competitive system pairs Daksh 'Mafia' Garg's Iris anti-gloo wall snipes with Aztec's shotgun breach. By creating long-range sniper crossfire corridors, enemies are pinned behind cover while FozyAjay anchors defensive Dimitri revives.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "Parachute & Pocket Market Economy",
+          desc: "Use Falco for fast drop velocity and Pocket Market loadouts to purchase Level 3 armor, vests, and chip upgrades by early Zone 2, achieving gear superiority without risky drop contests."
+        },
+        {
+          step: 2,
+          title: "Sniper Corridor Construction",
+          desc: "Position Mafia on an isolated high vantage point with Iris and Rafael. The rest of the squad positions 40m forward, flushing enemies out of cover directly into Mafia's AWM/M82B crosshairs."
+        },
+        {
+          step: 3,
+          title: "Iris Wall-Bang Penetration",
+          desc: "When enemies place defensive gloo walls, Mafia activates Iris (Wall Brawl) to fire directly through the barrier, securing knocks while enemies believe they are safe."
+        },
+        {
+          step: 4,
+          title: "Aztec M1887 Shock Breach",
+          desc: "The moment a sniper knock occurs, Aztec leads an immediate Tatsuya-rush with M1887 / Charge Buster to wipe the remaining members before a revive can occur."
+        }
+      ],
+      mistakesUnderdogsMake: "Leaving their sniper unprotected or placing all 4 players in close range where they are vulnerable to a single grenade salvo.",
+      videoNotes: {
+        title: "Total Gaming Tactical Breakdown: Mill Gatekeep & Iris Sniper Crossfires",
+        duration: "15:10",
+        timestamps: [
+          { time: "01:00", title: "The Pocket Market Economy: Early Level 3 Vest Buy" },
+          { time: "04:15", title: "Constructing the Mafia Sniper Crossfire Corridor" },
+          { time: "08:50", title: "FozyAjay's Dimitri + Thiva 1-Second Revive Anchor" },
+          { time: "13:20", title: "Late Zone 5 Rotations on Bermuda & Purgatory" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Double-Sniper Quick Switch Drill", desc: "AWM + M82B quick-switch without bolt reload animation (85% switch button)." },
+        { time: "15 Mins", name: "Iris Wall-Bang Target Sound Cues", desc: "Firing through gloo walls based purely on opponent footstep audio cues." },
+        { time: "15 Mins", name: "Dimitri Revive Shield Rotation", desc: "Deploying Dimitri heartbeat within 0.5s of taking a knock behind Nairi cover." },
+        { time: "15 Mins", name: "High-Ground Gatekeep Crossfire Setup", desc: "Setting up Mill and Brasilia chokehold crossfire angles." }
+      ]
+    },
+
+    {
+      id: "coach_namo",
+      name: "Aekkachai 'Namo' Kaewkong",
+      alias: "Coach Namo",
+      role: "2x FFWS World Champion Coach & Creator of 'Dream Coach'",
+      team: "EVOS Phoenix / Twisted Minds / Buriram x EVOS",
+      country: "Thailand",
+      flag: "🇹🇭",
+      region: "international",
+      badge: "2x World Champion Coach",
+      avatar: "👑",
+      trophies: "FFWS 2021 Sentosa Champions, FFWS 2022 Bangkok Champions, Multiple Free Fire Pro League Thailand Titles",
+      youtubeName: "Free Fire Esports TH / Dream Coach",
+      youtubeUrl: "https://www.youtube.com/@FreeFireEsportsTH",
+      instaHandle: "@namo_08_ (TikTok/Insta)",
+      instaUrl: "https://www.tiktok.com/@namo_08_",
+      strategyTitle: "Namo Zone Clocking Theory: The 60-Second Predictive Center Shift",
+      philosophy: "The circle is predictable, not random. Coach Namo developed mathematical probability models based on terrain geometry. His teams move into the zone's focal power node 60 seconds before it starts shrinking.",
+      summary: "Widely regarded as the greatest strategic coach in Free Fire history. Coach Namo's teams won back-to-back Free Fire World Series trophies by refusing to chase the safe zone edge. Instead, they occupy the focal compound early, establishing an impregnable triangular defense.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "Water & Edge Boundary Exclusion",
+          desc: "If Zone 1 contains more than 35% water or unplayable cliff edges, Zone 2 will shift 82% towards the dense building clusters. Identify this shift before the timer even begins."
+        },
+        {
+          step: 2,
+          title: "The 60-Second Early Rotate",
+          desc: "Do not loot for 10 minutes. By 02:30 on the match clock, conclude looting and occupy the designated 'Power Node' (the highest central two-story structure)."
+        },
+        {
+          step: 3,
+          title: "The 360-Degree Triangular Defense Web",
+          desc: "Three players anchor the three vertices of the compound perimeter, while the 4th player free-looks with high-power optic. No opponent can approach within 70m without taking crossfire damage."
+        },
+        {
+          step: 4,
+          title: "Harvesting the Desperate Edge",
+          desc: "As the zone collapses, all 11 competing squads are forced to rotate into your crosshairs, allowing your team to accumulate 12-18 elimination points without moving an inch."
+        }
+      ],
+      mistakesUnderdogsMake: "Rotating late along the blue line. You run into gatekeeping tier-1 squads, run out of medkits, and get eliminated outside the top 8 without placement points.",
+      videoNotes: {
+        title: "Coach Namo's World Series Safe Zone Probability & Rotation Masterclass",
+        duration: "18:30",
+        timestamps: [
+          { time: "01:20", title: "The Mathematical Physics of Zone 2 & Zone 3 Pulls" },
+          { time: "05:45", title: "Identifying the 'Power Node' on Bermuda, Purgatory & Alpine" },
+          { time: "11:15", title: "Triangular Defense Web: Positioning 3 Players on 120-Degree Arcs" },
+          { time: "15:40", title: "Final Circle Booyah Execution: Controlling the High Bluff" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Early Zone Node Identification", desc: "Opening tournament replays, pausing at Zone 1, and predicting Zone 3 center." },
+        { time: "15 Mins", name: "Vehicle High-Speed Rotation Practice", desc: "Using Monster Truck / Jeep to execute high-speed compound rotations without flips." },
+        { time: "15 Mins", name: "Triangular Crossfire Synchronized Volley", desc: "Practicing calling focus-fire on 1 vehicle crossing at 80m range." },
+        { time: "15 Mins", name: "Zone 5 Fortification Routine", desc: "Setting up 6 overlapping gloo walls in under 3 seconds in an open field." }
+      ]
+    },
+
+    {
+      id: "coach_conan",
+      name: "Thana 'Conan' Kamruang",
+      alias: "Coach Conan",
+      role: "Head Coach",
+      team: "Team Falcons",
+      country: "Thailand",
+      flag: "🇹🇭",
+      region: "international",
+      badge: "EWC Paris & SEA Champion",
+      avatar: "🦅",
+      trophies: "Free Fire World Series Southeast Asia Champions, Esports World Cup Finalists, Multiple Regional Trophies",
+      youtubeName: "Team Falcons Official",
+      youtubeUrl: "https://www.youtube.com/@TeamFalcons",
+      instaHandle: "@neng.thana / @teamfalcons",
+      instaUrl: "https://www.facebook.com/neng.thana",
+      strategyTitle: "The Falcons Pincer Blitz & Grenade Artillery Trajectories",
+      philosophy: "Relentless velocity and destructive grenade coordination. Conan's philosophy gives opponents zero time to breathe, using Alvaro-boosted ordnance to crack gloo walls before launching dual-side SMG rushes.",
+      summary: "Under Coach Conan, Team Falcons dominates close-quarters fighting. LIMIT acts as the artillery bombardier, using Homer drones and cooked Beaston grenades, while ONFIRE and the rushers execute lightning-fast pincer dashes that overwhelm compound defenders.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "Artillery Drone Scouting",
+          desc: "LIMIT releases a Homer drone towards suspected compound windows. The drone reduces enemy movement speed by 60% and firing speed by 35%."
+        },
+        {
+          step: 2,
+          title: "Alvaro Cooked Grenade Volley",
+          desc: "Launch Beaston-extended cooked grenades that detonate in mid-air right above enemy gloo walls, dealing 150+ splash damage and shredding cover."
+        },
+        {
+          step: 3,
+          title: "The Dual-Side Pincer Blitz",
+          desc: "ONFIRE and the second rusher activate Tatsuya dashes simultaneously from opposite sides (left and right), forcing defenders to split their crosshair focus."
+        },
+        {
+          step: 4,
+          title: "Instant Gloo Wall Seal",
+          desc: "The second the compound is breached, seal the windows with gloo walls to prevent external third parties from shooting into the house."
+        }
+      ],
+      mistakesUnderdogsMake: "Rushing compounds through a single doorway in a straight line, allowing 1 player with an M1887 or Charge Buster to get a multi-knock collateral.",
+      videoNotes: {
+        title: "Team Falcons: Synchronized Grenade Trajectories & Compound Clears",
+        duration: "13:50",
+        timestamps: [
+          { time: "01:05", title: "Beaston Grenade Trajectory Angles on 2-Story Houses" },
+          { time: "04:20", title: "Timing Homer Drone Release with Tatsuya Dash" },
+          { time: "08:15", title: "ONFIRE's 38% Fire Button Micro-Drag Mechanics" },
+          { time: "11:45", title: "Compound Sealing: Blocking External Third-Party Lines" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Cooked Grenade Air-Burst Practice", desc: "Training Grounds: Detonating grenades 1 meter above target dummies." },
+        { time: "15 Mins", name: "Tatsuya Dash Corner-Flick Drill", desc: "Dashing around corners and instantly 180-flicking onto target heads." },
+        { time: "15 Mins", name: "Dual-Angle Pincer Timing", desc: "2 players coordinate voice comm countdown (3-2-1) to enter doors at exact same frame." },
+        { time: "15 Mins", name: "Close-Quarters Shotgun Evasion", desc: "Practicing zig-zag jumps against M1887 shotguns." }
+      ]
+    },
+
+    {
+      id: "coach_luuuking",
+      name: "Lucas 'LUUUKING' Lemos",
+      alias: "Coach LUUUKING",
+      role: "Head Coach",
+      team: "Fluxo W7M",
+      country: "Brazil",
+      flag: "🇧🇷",
+      region: "international",
+      badge: "Brazilian Liga Pro Champion Coach",
+      avatar: "🇧🇷",
+      trophies: "Liga Brasileira de Free Fire (LBFF) Champions, Free Fire World Series World Finalists",
+      youtubeName: "Fluxo Official (3M+ Subscribers)",
+      youtubeUrl: "https://www.youtube.com/@Fluxo",
+      instaHandle: "@luuuking_",
+      instaUrl: "https://www.instagram.com/luuuking_/",
+      strategyTitle: "The Brazilian J-Drag Shotgun Entry & Chrono Dome Counter-Push",
+      philosophy: "Fluid Brazilian street agility and mastery of the close-range shotgun meta. LUUUKING teaches players to embrace close-range chaos and master the curved 'J-Drag' headshot technique.",
+      summary: "Coach LUUUKING pioneered the modern Brazilian shotgun meta for MT7 and Fluxo. By pairing Caroline speed and Hayato armor penetration with Chrono's protective dome, Fluxo bait enemies into pushing them, absorb the attack, and counter-wipe them in 2 seconds.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "The Shotgun Bait",
+          desc: "Intentionally feign weakness behind a low fence or rock to bait aggressive rushers into crossing open ground."
+        },
+        {
+          step: 2,
+          title: "Chrono 800 HP Dome Deployment",
+          desc: "When the enemy opens fire, deploy Chrono's force field. The 800 HP barrier absorbs all incoming shots, wasting the enemy's shotgun magazine."
+        },
+        {
+          step: 3,
+          title: "The Brazilian J-Drag Flicks",
+          desc: "While enemy is reloading or stunned by the shield, MT7 steps out with Caroline +50% speed and executes a curved J-Shape drag with M1887 for an instant 220+ headshot."
+        },
+        {
+          step: 4,
+          title: "360-Degree Gloo Wall Box",
+          desc: "Drop 3 gloo walls in a complete 360 circle around yourself in 0.2 seconds to safely reload and trigger Jota HP absorption."
+        }
+      ],
+      mistakesUnderdogsMake: "Panicking and trying to run away when rushed by a shotgun player. In Free Fire, turning your back guarantees death; you must counter-strafe with a J-drag.",
+      videoNotes: {
+        title: "Coach LUUUKING: Brazilian Shotgun J-Drag & Chrono Shield Counter-Pushes",
+        duration: "16:05",
+        timestamps: [
+          { time: "01:10", title: "The Physics of the Curved J-Drag on Touchscreens" },
+          { time: "05:20", title: "Chrono Dome Counter-Timing: When to Step Out" },
+          { time: "09:40", title: "0.2s 360-Degree Defensive Gloo Wall Box" },
+          { time: "13:30", title: "Caroline + Hayato + Jota Synergy in CQC" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Curved J-Shape Drag Flicking", desc: "Training Grounds: Pulling fire button in letter 'J' arc against moving targets." },
+        { time: "15 Mins", name: "360 Gloo Wall Box Speed", desc: "Dropping 3 connected gloo walls forming a complete box in under 0.3s." },
+        { time: "15 Mins", name: "Chrono Dome Step-Out 1-Tap", desc: "Standing inside dome, timing opponent reload, stepping out for 1-shot kill." },
+        { time: "15 Mins", name: "Shotgun Jump-Shot Sliding", desc: "Jumping sideways while rotating crosshair 90 degrees." }
+      ]
+    },
+
+    {
+      id: "coach_joker",
+      name: "Ângelo 'JOKER' Gabriel",
+      alias: "Coach JOKER",
+      role: "Head Coach",
+      team: "LOUD",
+      country: "Brazil",
+      flag: "🇧🇷",
+      region: "international",
+      badge: "EWC Paris 3rd Place & LBFF Champion",
+      avatar: "🃏",
+      trophies: "LBFF Champions, Esports World Cup 2026 Top-3 Podium ($120,000 Prize), Multiple International Medals",
+      youtubeName: "LOUD Official (12M+ Subscribers)",
+      youtubeUrl: "https://www.youtube.com/@LOUD",
+      instaHandle: "@loud_joker",
+      instaUrl: "https://www.instagram.com/loud_joker/",
+      strategyTitle: "Loot Starvation Gatekeep & Drop POI Domination",
+      philosophy: "Win the match through psychological pressure and economic strangulation. JOKER trains LOUD to deny every single vending machine, upgrade chip, and airdrop on the map.",
+      summary: "Coach JOKER led LOUD to the global podium at the Esports World Cup. His coaching strategy treats Free Fire as a resource battle: if the enemy has no level-3 vests and no gloo walls, even an average push will result in a clean squad wipe.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "POI Dominance",
+          desc: "Secure major drop hubs (Brasilia or Clock Tower) with aggressive 4-man landing spreads. Clear contesting teams within the first 60 seconds."
+        },
+        {
+          step: 2,
+          title: "Vending Machine Starvation",
+          desc: "Camp high-traffic vending machines. Prevent rotating squads from purchasing revive cards or gloo wall packets."
+        },
+        {
+          step: 3,
+          title: "Airdrop Interception",
+          desc: "Track every falling yellow airdrop. Use Groza and AWM power spikes to establish a lethal perimeter around the drop site."
+        },
+        {
+          step: 4,
+          title: "Late-Game Attrition Siege",
+          desc: "By Zone 4, the remaining teams have burned their gloo walls. LOUD surrounds them with superior supplies and concludes the Booyah."
+        }
+      ],
+      mistakesUnderdogsMake: "Running directly to an airdrop without throwing a smoke grenade or checking high ground for marksman snipers.",
+      videoNotes: {
+        title: "Coach JOKER: LOUD's Economic Starvation Strategy at Esports World Cup",
+        duration: "14:15",
+        timestamps: [
+          { time: "01:15", title: "Drop POI Clearing in Under 60 Seconds" },
+          { time: "04:50", title: "Vending Machine Gatekeeping Tactics" },
+          { time: "08:30", title: "Airdrop Baiting with Sniper Rifles" },
+          { time: "12:10", title: "Managing Squad Economy and Gloo Inventory" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "Early Landing Weapon Scramble", desc: "Landing on exact rooftop weapon spawns with Falco glider." },
+        { time: "15 Mins", name: "Long-Range Airdrop Gatekeeping", desc: "Practicing 100m sniper shots against players looting airdrops." },
+        { time: "15 Mins", name: "Resource Sharing & Economy Comms", desc: "Rapidly transferring 10 gloo walls and medkits to teammates during zone transit." },
+        { time: "15 Mins", name: "End-Game Attrition Fire", desc: "Suppressing enemy gloo walls with continuous AR spray to prevent healing." }
+      ]
+    },
+
+    {
+      id: "coach_dlong",
+      name: "Wattipong 'D_Long' Ngarmrod",
+      alias: "Coach D_Long",
+      role: "Head Coach",
+      team: "Buriram United Esports",
+      country: "Thailand",
+      flag: "🇹🇭",
+      region: "international",
+      badge: "Thai Premier League Champion",
+      avatar: "⚡",
+      trophies: "Free Fire Pro League Thailand Champions, Esports World Cup 2026 Finalists, SEA Super Cup Winners",
+      youtubeName: "Buriram United Esports",
+      youtubeUrl: "https://www.youtube.com/@BuriramUnitedEsports",
+      instaHandle: "Buriram United Esports Official",
+      instaUrl: "https://www.instagram.com/buriramunitedesports/",
+      strategyTitle: "The Kalahari High-Ground Ridge Gatekeeper & 250 HP Fragger Setup",
+      philosophy: "Topographical height control and health pool supremacy. D_Long utilizes Luqueta's 250 HP scaling to give Moshi and squad an unbreachable 50 HP advantage in prolonged firefights.",
+      summary: "Under Coach D_Long, Buriram United is virtually unbeatable on high-altitude maps like Kalahari and Alpine. By seizing mountain ridges early and utilizing 250 HP Luqueta scaling, Buriram win trades that would eliminate normal 200 HP squads.",
+      tacticalSteps: [
+        {
+          step: 1,
+          title: "Early Ridge Occupation",
+          desc: "On Kalahari (Refinery or Santa Catarina), ascend the highest ridgeline within 2 minutes. High ground gives a 40% headshot angle advantage."
+        },
+        {
+          step: 2,
+          title: "Luqueta 250 HP Stacking",
+          desc: "Ensure star fragger Moshi secures early knocks to scale Luqueta to maximum 250 HP, providing a massive 50 HP buffer against enemy drag headshots."
+        },
+        {
+          step: 3,
+          title: "Vertical Grenade Trajectories",
+          desc: "Lob grenades downward from the cliff ridge. Gravity accelerates the grenade and prevents enemies from hearing the roll audio."
+        },
+        {
+          step: 4,
+          title: "Downward Zone Sweep",
+          desc: "When zone shifts down into the low ground, slide down with Nairi gloo wall stairs, maintaining sightline control while collapsing on the remaining teams."
+        }
+      ],
+      mistakesUnderdogsMake: "Trying to push uphill against an entrenched squad on a ridge. Uphill attackers expose their heads first, while defenders only expose their foreheads.",
+      videoNotes: {
+        title: "Buriram United: Ridge Gatekeeping & 250 HP Luqueta Scaling Breakdown",
+        duration: "13:30",
+        timestamps: [
+          { time: "01:00", title: "Kalahari & Alpine Ridge Climbing Routes" },
+          { time: "04:10", title: "The 250 Max HP Buffer: Surviving Drag Headshots" },
+          { time: "07:50", title: "Vertical Downward Grenade Trajectories" },
+          { time: "11:20", title: "Executing the Downward Zone Sweep" }
+        ]
+      },
+      drillSchedule: [
+        { time: "15 Mins", name: "High-to-Low Downward Headshot Tracking", desc: "Aiming down from high platforms onto running targets." },
+        { time: "15 Mins", name: "Gloo Wall Staircase Climbing Drill", desc: "Stacking 3 gloo walls vertically to scale unclimbable rocks." },
+        { time: "15 Mins", name: "250 HP Trade Duel Simulation", desc: "Clash squad duels with 250 HP vs 200 HP to understand damage thresholds." },
+        { time: "15 Mins", name: "Ridge Elevation Comms", desc: "Calling out elevation angles and compass bearings from high vantages." }
+      ]
+    }
+  ];
+
+  class UnderdogApp {
+    constructor() {
+      this.activeGame = 'freefire';
+      this.currentUser = this.loadActiveUserSession();
+      this.pwaDeferredPrompt = null;
+
+      this.activeTab = 'academy';
+      this.whiteboard = null;
+      this.reflexTrainer = null;
+
+      // Free Fire Complete Tournament Loadout Builder state (Active, 3 Passives, Pet, Loadout)
+      
+      // Free Fire Custom HUD & Sensitivity State
+      this.selectedCoachId = 'coach_duker';
+      this.selectedCoachTab = 'strategy';
+      this.ffActiveHudPreset = 'ff_default_2finger';
+      this.ffSelectedHudButton = 'fire_right';
+      this.ffCustomSens = null;
+      this.ffActiveDevice = 'generic';
+this.ffSelectedLoadout = { 
+        active: 'tatsuya', 
+        p1: 'jota', 
+        p2: 'hayato', 
+        p3: 'luqueta',
+        pet: 'rockie',
+        loadoutItem: 'pocket_market'
+      };
+
+      // Free Fire Esports (FFWS) Official Scrim Tracker State
+      // 12-Team Tournament Lobby & PointCalc Generator State
+      this.ffScrimMode = 'lobby'; // 'lobby' (PointCalc style) or 'my_squad'
+      this.ffTourneyMeta = {
+        title: 'FREE FIRE MAX TIER-1 SCRIMS',
+        stage: 'GRAND FINALS • MATCH 1 TO 6',
+        organizer: 'UNDERDOG ESPORTS',
+        date: 'SEPTEMBER 2026'
+      };
+      this.ffLobbyTeams = [
+        { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
+        { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
+        { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
+        { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
+        { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
+        { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
+        { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
+        { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
+        { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
+        { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
+        { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
+        { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
+      ];
+      // 12-Team Tournament Lobby & PointCalc Generator State
+      this.ffScrimMode = 'lobby'; // 'lobby' (PointCalc style) or 'my_squad'
+      this.ffTourneyMeta = {
+        title: 'FREE FIRE MAX TIER-1 SCRIMS',
+        stage: 'GRAND FINALS • MATCH 1 TO 6',
+        organizer: 'UNDERDOG ESPORTS',
+        date: 'SEPTEMBER 2026'
+      };
+      this.ffLobbyTeams = [
+        { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
+        { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
+        { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
+        { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
+        { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
+        { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
+        { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
+        { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
+        { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
+        { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
+        { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
+        { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
+      ];
+      this.ffScrimMatches = [
+        { id: 1, matchNum: 1, map: 'Bermuda', placement: 1, kills: 9, placementPts: 12, totalPts: 21, blunder: 'None (Clean Match)', rating: 'S-Tier Booyah' },
+        { id: 2, matchNum: 2, map: 'Purgatory', placement: 3, kills: 7, placementPts: 8, totalPts: 15, blunder: 'River Chokehold Fight', rating: 'A-Tier Podiums' },
+        { id: 3, matchNum: 3, map: 'Kalahari', placement: 5, kills: 4, placementPts: 6, totalPts: 10, blunder: 'Late Gantry Rotation', rating: 'B-Tier Placement' }
+      ];
+      this.ffActiveTargetSlot = 'active'; // 'active', 'p1', 'p2', 'p3', 'pet', 'loadout'
+      this.ffCharacterFilter = 'all';
+      this.ffCharacterSearch = '';
+
+      this.init();
+    }
+
+    init() {
+      this.bindGameSwitcher();
+      this.bindTabSwitcher();
+      this.bindSearch();
+      this.renderUserAuthHeader();
+      this.bindCloudStatusBadge();
+      this.initMobileNav();
+      this.initPwaInstall();
+      this.renderGameContext();
+      this.renderTabContent();
+    }
+
+    bindCloudStatusBadge() {
+      const badge = document.getElementById('cloudStatusBadge');
+      if (badge) {
+        badge.onclick = () => this.showSupabaseSetupModal();
+      }
+      if (window.underdogSupabase && window.underdogSupabase.isConnected) {
+        window.underdogSupabase.updateStatusBadge(true);
+      }
+    }
+
+    bindGameSwitcher() {
+      const gameBtns = document.querySelectorAll('.game-btn');
+      gameBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const game = btn.getAttribute('data-game');
+          if (game && game !== this.activeGame) {
+            this.activeGame = game;
+
+            // Update UI buttons styling
+            gameBtns.forEach(b => {
+              b.classList.remove('active', 'border-amber-400', 'border-rose-500', 'border-sky-400', 'text-white', 'bg-amber-500/10', 'bg-rose-500/10', 'bg-sky-500/10');
+              b.classList.add('border-transparent', 'text-slate-400');
+            });
+
+            btn.classList.add('active', 'text-white');
+            btn.classList.remove('border-transparent', 'text-slate-400');
+
+            if (game === 'bgmi') btn.classList.add('border-amber-400', 'bg-amber-500/10');
+            if (game === 'freefire') btn.classList.add('border-rose-500', 'bg-rose-500/10');
+            if (game === 'hok') btn.classList.add('border-sky-400', 'bg-sky-500/10');
+
+            this.renderGameContext();
+            this.renderTabContent();
+          }
+        });
+      });
+    }
+
+    bindTabSwitcher() {
+      const tabBtns = document.querySelectorAll('.tab-btn');
+      tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.getAttribute('data-tab');
+          if (tab) {
+            this.activeTab = tab;
+            this.syncTabButtons();
+            this.syncMobileNavButtons();
+            this.renderTabContent();
+          }
+        });
+      });
+    }
+
+    syncTabButtons() {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        if (b.getAttribute('data-tab') === this.activeTab) {
+          b.classList.add('active');
+        } else {
+          b.classList.remove('active');
+        }
+      });
+    }
+
+    bindSearch() {
+      const searchInput = document.getElementById('globalSearchInput');
+      const resultsPanel = document.getElementById('searchResultsPanel');
+      if (!searchInput || !resultsPanel) return;
+
+      searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        if (query.length > 1) {
+          const allTactics = [
+            ...GAMES_DATA.bgmi.tactics.map(t => ({ ...t, gameName: 'BGMI', gameKey: 'bgmi' })),
+            ...GAMES_DATA.freefire.tactics.map(t => ({ ...t, gameName: 'Free Fire', gameKey: 'freefire' })),
+            ...GAMES_DATA.hok.tactics.map(t => ({ ...t, gameName: 'Honor of Kings', gameKey: 'hok' }))
+          ];
+
+          const matches = allTactics.filter(t =>
+            t.title.toLowerCase().includes(query) ||
+            t.description.toLowerCase().includes(query) ||
+            t.category.toLowerCase().includes(query)
+          );
+
+          if (matches.length === 0) {
+            resultsPanel.innerHTML = `<div class="p-3 text-xs text-slate-400">No guides matching "${query}"</div>`;
+          } else {
+            resultsPanel.innerHTML = matches.slice(0, 5).map(m => `
+              <div class="p-3 hover:bg-slate-800 cursor-pointer border-b border-slate-800 last:border-0" data-ref-game="${m.gameKey}">
+                <div class="flex justify-between text-[10px] uppercase font-sub">
+                  <span class="text-primary font-bold">${m.gameName}</span>
+                  <span class="text-slate-400">${m.category}</span>
+                </div>
+                <div class="text-xs font-bold text-white mt-0.5">${m.title}</div>
+              </div>
+            `).join('');
+          }
+          resultsPanel.classList.remove('hidden');
+
+          resultsPanel.querySelectorAll('[data-ref-game]').forEach(item => {
+            item.addEventListener('click', () => {
+              this.activeGame = item.getAttribute('data-ref-game');
+              this.activeTab = 'academy';
+              resultsPanel.classList.add('hidden');
+              this.syncGameButtons();
+              this.renderGameContext();
+              this.renderTabContent();
+            });
+          });
+        } else {
+          resultsPanel.classList.add('hidden');
+        }
+      });
+    }
+
+    syncGameButtons() {
+      const gameBtns = document.querySelectorAll('.game-btn');
+      gameBtns.forEach(b => {
+        b.classList.remove('active', 'border-amber-400', 'border-rose-500', 'border-sky-400', 'text-white', 'bg-amber-500/10', 'bg-rose-500/10', 'bg-sky-500/10');
+        b.classList.add('border-transparent', 'text-slate-400');
+        if (b.getAttribute('data-game') === this.activeGame) {
+          b.classList.add('active', 'text-white');
+          b.classList.remove('border-transparent', 'text-slate-400');
+          if (this.activeGame === 'bgmi') b.classList.add('border-amber-400', 'bg-amber-500/10');
+          if (this.activeGame === 'freefire') b.classList.add('border-rose-500', 'bg-rose-500/10');
+          if (this.activeGame === 'hok') b.classList.add('border-sky-400', 'bg-sky-500/10');
+        }
+      });
+    }
+
+    renderGameContext() {
+      const data = GAMES_DATA[this.activeGame] || GAMES_DATA.bgmi;
+      const titleEl = document.getElementById('gameBannerTitle');
+      const subEl = document.getElementById('gameBannerSubtitle');
+      const accentBar = document.getElementById('gameAccentBar');
+
+      if (titleEl) titleEl.textContent = data.title;
+      if (subEl) subEl.textContent = data.bannerSubtitle;
+      if (accentBar) accentBar.style.backgroundColor = data.accentColor;
+    }
+
+    renderTabContent() {
+      const container = document.getElementById('mainTabContainer');
+      if (!container) return;
+
+      if (this.activeTab === 'academy') {
+        this.renderAcademyTab(container);
+      } else if (this.activeTab === 'whiteboard') {
+        this.renderWhiteboardTab(container);
+      } else if (this.activeTab === 'atlas') {
+        this.renderAtlasTab(container);
+      } else if (this.activeTab === 'sensitivity') {
+        this.renderSensitivityTab(container);
+      } else if (this.activeTab === 'scrims') {
+        this.renderScrimsTab(container);
+      } else if (this.activeTab === 'reflex') {
+        this.renderReflexTab(container);
+      } else if (this.activeTab === 'coaching') {
+        this.renderCoachingTab(container);
+      } else if (this.activeTab === 'tournaments') {
+        this.renderTournamentsTab(container);
+      } else if (this.activeTab === 'playbook') {
+        this.renderPlaybookTab(container);
+      }
+    }
+
+    // --- ACADEMY TAB ---
+    renderAcademyTab(container) {
+      const data = GAMES_DATA[this.activeGame] || GAMES_DATA.bgmi;
+
+      container.innerHTML = `
+        <div class="space-y-8 animate-fade-in">
+          <!-- Roles -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${data.accentColor}"></span>
+              <h3 class="text-lg font-heading uppercase text-white font-bold tracking-wider">Esports Roster Specializations (${data.title.split(' ')[0]})</h3>
+            </div>
+            <p class="text-xs text-slate-400">Competitive rosters fail when duties overlap. Master your exact responsibilities.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+              ${data.roles.map(r => `
+                <div class="cyber-panel p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-[10px] mb-2">${r.tagline}</div>
+                    <h4 class="text-base font-heading font-bold text-white mb-1">${r.name}</h4>
+                    <p class="text-xs text-slate-400 leading-relaxed mb-3">${r.summary}</p>
+                    <div class="text-[11px] font-sub uppercase font-bold text-slate-300 mb-1">Core Duties:</div>
+                    <ul class="space-y-1 text-[11px] text-slate-400 mb-4 list-disc list-inside">
+                      ${r.coreDuties.map(d => `<li>${d}</li>`).join('')}
+                    </ul>
+                  </div>
+                  <div class="bg-slate-950/80 p-2.5 rounded border border-amber-500/30 text-[11px] text-amber-300 leading-normal">
+                    <strong>Underdog Secret:</strong> ${r.proTips[0]}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- FREE FIRE CHARACTER SKILL COMBOS META & ALL-CHARACTERS ARSENAL BUILDER -->
+          ${this.activeGame === 'freefire' ? this.renderFFCharacterBuilder() : ''}
+
+          <!-- Tactical Masterclasses -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+              <h3 class="text-lg font-heading uppercase text-white font-bold tracking-wider">Pro Tournament Masterclasses</h3>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-4">
+              ${data.tactics.map(t => `
+                <div class="cyber-panel p-5 rounded-xl border border-cyan-500/20 flex flex-col justify-between">
+                  <div>
+                    <div class="flex items-center justify-between text-[11px] font-sub uppercase text-cyan-400 mb-2">
+                      <span>${t.category}</span>
+                      <span class="text-slate-500">${t.readTime}</span>
+                    </div>
+                    <h4 class="text-base font-heading font-bold text-white mb-2">${t.title}</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed mb-4">${t.description}</p>
+                    <div class="space-y-2.5">
+                      ${t.content.map(c => `
+                        <div class="bg-slate-900/60 p-2.5 rounded border border-slate-800">
+                          <div class="text-xs font-bold text-amber-300 mb-0.5">${c.heading}</div>
+                          <div class="text-[11px] text-slate-400 leading-relaxed">${c.text}</div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Meta Arsenal -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+              <h3 class="text-lg font-heading uppercase text-white font-bold tracking-wider">Meta Arsenal & Tier List</h3>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+              ${data.metaWeapons.map(w => `
+                <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px]">${w.tier}</span>
+                    <span class="text-[10px] font-sub text-slate-400">${w.type}</span>
+                  </div>
+                  <h4 class="text-sm font-heading font-bold text-white mb-1">${w.name}</h4>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">${w.verdict}</p>
+                  <div class="text-[11px] text-slate-400">Recoil / Skill: <strong class="text-amber-400">${w.recoilDifficulty}</strong></div>
+                  <div class="text-[11px] text-slate-400">Esports Usage: <span class="text-slate-300">${w.esportsUsage}</span></div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+
+      if (this.activeGame === 'freefire') {
+        this.bindFFCharacterBuilderEvents();
+      }
+    }
+
+    // --- FREE FIRE COMPLETE TOURNAMENT LOADOUT SYSTEM ---
+    getFFCharacter(id) {
+      return FF_CHARACTERS.find(c => c.id === id) || FF_CHARACTERS[0];
+    }
+
+    getFFPet(id) {
+      return FF_PETS.find(p => p.id === id) || FF_PETS[0];
+    }
+
+    getFFLoadout(id) {
+      return FF_LOADOUTS.find(l => l.id === id) || FF_LOADOUTS[0];
+    }
+
+    getFilteredFFItems() {
+      let list = [];
+      const filter = this.ffCharacterFilter;
+
+      if (filter === 'all') {
+        list = [...FF_CHARACTERS, ...FF_PETS, ...FF_LOADOUTS];
+      } else if (filter === 'active') {
+        list = FF_CHARACTERS.filter(c => c.type === 'active');
+      } else if (filter === 'passive') {
+        list = FF_CHARACTERS.filter(c => c.type === 'passive');
+      } else if (filter === 'pet') {
+        list = FF_PETS;
+      } else if (filter === 'loadout') {
+        list = FF_LOADOUTS;
+      } else {
+        // Tag search across characters, pets, and loadouts
+        list = [...FF_CHARACTERS, ...FF_PETS, ...FF_LOADOUTS].filter(item => item.tags && item.tags.includes(filter));
+      }
+
+      if (this.ffCharacterSearch) {
+        const q = this.ffCharacterSearch.toLowerCase();
+        list = list.filter(item => 
+          (item.name && item.name.toLowerCase().includes(q)) || 
+          (item.skillName && item.skillName.toLowerCase().includes(q)) || 
+          (item.role && item.role.toLowerCase().includes(q)) || 
+          (item.type && item.type.toLowerCase().includes(q)) || 
+          (item.summary && item.summary.toLowerCase().includes(q))
+        );
+      }
+      return list;
+    }
+
+    calcFFSynergy(loadout) {
+      const { active, p1, p2, p3, pet, loadoutItem } = loadout;
+      const passives = [p1, p2, p3];
+      const uniquePassives = new Set(passives);
+
+      if (uniquePassives.size < 3) {
+        return {
+          score: 40,
+          role: "Duplicate Passives (Illegal)",
+          badgeColor: "bg-red-950 text-red-300 border border-red-500/50",
+          analysis: "Free Fire tournament rules strictly forbid duplicate passive skills. You must equip 3 distinct passive characters.",
+          weapons: "Fix duplicate passive skills first",
+          petTip: "Equipping duplicate passives disables your 3rd passive slot in tournament lobbies.",
+          proTip: "Free Fire competitive rules require 3 distinct passive characters."
+        };
+      }
+
+      // 0a. Nero Anti-Gloo Dreamscape
+      if (active === 'nero') {
+        return {
+          score: 99,
+          role: "Anti-Gloo Area Denier",
+          badgeColor: "bg-sky-950 text-sky-300 border border-sky-500/50",
+          analysis: "The ultimate counter to defensive Gloo campers! Nero's Cryo Mind plushie creates an 8m zone where NO Gloo Walls can be placed while dealing 6 HP/s continuous damage, leaving turtle squads completely exposed to M590 shotgun penetrations.",
+          weapons: "M590 Shotgun + MP40 + Woodpecker DMR",
+          petTip: pet === 'robo' ? "Robo strengthens your own outer walls while enemies are trapped." : "Beaston extends plushie throw range.",
+          proTip: "Toss plushie directly into enemy compound windows or behind their Gloo Walls to disable their shields during breach."
+        };
+      }
+
+      // 0b. Ray Sunpower 30-HP Finisher
+      if (active === 'ray') {
+        return {
+          score: 98,
+          role: "Sunpower 30-HP Finisher",
+          badgeColor: "bg-amber-950 text-amber-300 border border-amber-500/50",
+          analysis: "Lethal execution build for hyper-aggressive rushers. Ray's 30m wave automatically knocks down any tagged enemy reduced to 30 HP or below, immediately resetting cooldown and granting +10 HP/s healing.",
+          weapons: "M590 Shotgun + Thompson / MP40",
+          petTip: "Beaston or Rockie recommended for fast cycle times.",
+          proTip: "Tag retreating or healing enemies with Ray's wave, then land 1 shotgun burst to trigger the instant 30-HP execution knockdown."
+        };
+      }
+
+      // 0c. Kla 400% Hot-Drop Brawler
+      if (passives.includes('kla')) {
+        return {
+          score: 95,
+          role: "Hot-Drop 1-Punch Brawler",
+          badgeColor: "bg-orange-950 text-orange-300 border border-orange-500/50",
+          analysis: "Devastating early-game brawl loadout. Kla's +400% fist damage inflicts lethal 1-punch knockouts (over 200+ headshot fist damage) immediately on parachute landing at Clock Tower or Factory.",
+          weapons: "Fist / M590 Shotgun + MP40",
+          petTip: "Falco is MANDATORY to ensure you touch down on roofs first before anyone else.",
+          proTip: "Dive straight onto the highest roof at Factory or Brasilia with Falco. Punch landing enemies before they can touch weapon spawns."
+        };
+      }
+
+      // 0d. Xayne Gloo Annihilator
+      if (active === 'xayne') {
+        return {
+          score: 97,
+          role: "Gloo & Shield Annihilator",
+          badgeColor: "bg-rose-950 text-rose-300 border border-rose-500/50",
+          analysis: "High-impact rusher build. Xayne grants +50 instant HP surge and a massive +75% damage bonus to Gloo Walls and shields, allowing rapid destruction of enemy defenses during close-range trades.",
+          weapons: "M590 Shotgun + MP40 + Woodpecker",
+          petTip: pet === 'yeti' ? "Yeti protects from grenade traps during your aggressive push." : "Rockie or Beaston recommended.",
+          proTip: "Pop Xtreme Encounter right as you turn the corner to shred the enemy's Gloo Wall in 2 shotgun blasts."
+        };
+      }
+
+      // 1. Oscar Gloo Breaker Rusher (New OB48 Meta)
+      if (active === 'oscar') {
+        return {
+          score: 99,
+          role: "Apex Gloo Breaker Rusher",
+          badgeColor: "bg-rose-950 text-rose-300 border border-rose-500/50",
+          analysis: "The new premier anti-defense rusher. Oscar's Valiant Dash instantly destroys 3 consecutive Gloo Walls while knocking back opponents, allowing unhindered M590 shotgun penetrations into turtle setups.",
+          weapons: "M590 Shotgun + MP40 + Woodpecker DMR",
+          petTip: pet === 'rockie' ? "Rockie reduces Oscar's 60s cooldown by 15% for rapid dashes." : "Rockie or Beaston recommended.",
+          proTip: "Wait for enemies to turtle behind 2 Gloo Walls to heal -> Trigger Oscar dash -> Blast through with M590."
+        };
+      }
+
+      // 2. Morse Stealth Ambush Assassin
+      if (active === 'morse') {
+        return {
+          score: 98,
+          role: "Stealth Ambush Assassin",
+          badgeColor: "bg-sky-950 text-sky-300 border border-sky-500/50",
+          analysis: "Deadly flanker and compound clearing build. Morse's Stealth Bytes hides you from radar and long-distance vision beyond 16m, and automatically engages aim assist within 4m for instantaneous shotgun executions.",
+          weapons: "M590 (Primary Shotgun) + UMP / Vector",
+          petTip: pet === 'flash' ? "Flash protects your back from stray fire while you infiltrate flank angles." : "Flash or Dr. Beanie recommended.",
+          proTip: "Activate stealth before rotating across roads or entering enemy stairwells. Enemies will have zero warning on their compass."
+        };
+      }
+
+      // 3. M590 Apex Rusher: Tatsuya + Jota + (Hayato / Luqueta / Luna / Caroline / D-Bee)
+      if (active === 'tatsuya' && (passives.includes('jota') || passives.includes('hayato')) && (passives.includes('luqueta') || passives.includes('luna') || passives.includes('caroline') || passives.includes('dbee') || passives.includes('kairos'))) {
+        return {
+          score: 99,
+          role: "Tier-1 Apex M590 Rusher",
+          badgeColor: "bg-rose-950 text-rose-300 border border-rose-500/50",
+          analysis: "The undisputed tournament rusher meta for the M590 shotgun. Tatsuya's double-dash breaks opponent drag aim; Jota recovers HP instantly on every shotgun pellet hit; and Hayato grants armor penetration for instant knocks.",
+          weapons: "M590 (Primary Shotgun) + MP40 + Woodpecker DMR",
+          petTip: pet === 'rockie' ? "Rockie provides 15% faster Rebel Rush cooldown for endless dashes." : "Rockie or Falco recommended.",
+          proTip: "Dash into enemy gloo wall side crest -> Jump-shot J-Drag upwards -> Instant sit-down gloo cancel."
+        };
+      }
+
+      // 4. 250 HP Ranked Juggernaut: K + Luqueta + (Jota / Hayato / Antonio / Leon)
+      if (active === 'k' && passives.includes('luqueta') && (passives.includes('jota') || passives.includes('hayato') || passives.includes('antonio'))) {
+        return {
+          score: 98,
+          role: "250 HP Ranked Juggernaut",
+          badgeColor: "bg-amber-950 text-amber-300 border border-amber-500/50",
+          analysis: "Built for high-kill solo-vs-squad rank domination. Luqueta expands your maximum health bar to 250 HP after 2 kills, while K's Jiu-Jitsu mode converts EP to HP at 500% speed, allowing continuous clutches without stopping to use medkits.",
+          weapons: "M590 / M1887 + Woodpecker DMR",
+          petTip: pet === 'agent_hop' ? "Agent Hop gives 50 EP every time the zone shrinks, keeping K permanently fueled." : "Agent Hop or Ottero recommended.",
+          proTip: "Eat mushrooms early or deploy campfires so your EP pool is capped at 250 before entering zone crossfires."
+        };
+      }
+
+      // 5. Undying Sonitri Revival Core: Dimitri + Thiva + (Nairi / Sonia / Kapella / Olivia)
+      if (active === 'dimitri' && (passives.includes('thiva') || passives.includes('nairi')) && (passives.includes('sonia') || passives.includes('moco') || passives.includes('kapella') || passives.includes('lila'))) {
+        return {
+          score: 99,
+          role: "Undying Sonitri Revival Core",
+          badgeColor: "bg-emerald-950 text-emerald-300 border border-emerald-500/50",
+          analysis: "The tournament-standard squad preservation engine. Thiva cuts revive time down to 1.0s and gives 60 HP to revived allies; Nairi makes Gloo Walls heal 40 HP/s; and Dimitri allows knocked players to self-revive.",
+          weapons: "M590 Shotgun + Charge Buster + Frag Grenades",
+          petTip: pet === 'waggor' ? "Mr. Waggor ensures you never run out of Gloo Walls for Nairi fortress setups." : "Mr. Waggor or Robo recommended.",
+          proTip: "Deploy Nairi walls in a V-formation at zone edge and activate Dimitri inside. Knocked teammates can self-revive in 1 second."
+        };
+      }
+
+      // 6. Anti-Revive Sniper Demon: Chrono / Iris + Rafael + (Maro / Laura / Suzy)
+      if ((active === 'chrono' || active === 'iris') && passives.includes('rafael') && (passives.includes('maro') || passives.includes('laura') || passives.includes('suzy'))) {
+        return {
+          score: 97,
+          role: "Anti-Revive Sniper Assassin",
+          badgeColor: "bg-cyan-950 text-cyan-300 border border-cyan-500/50",
+          analysis: "Direct hard-counter to Dimitri and Thiva squads. Knocked enemies bleed out in under 4.5 seconds via Rafael. Maro scales damage up to +25% at distance, and Chrono provides open-ground immunity for sniper trades.",
+          weapons: "M82B (Wall-Bang Sniper) + AC80 / Woodpecker",
+          petTip: pet === 'dreki' ? "Dreki reveals healing enemies behind walls for direct M82B wall-bangs." : "Dreki or Hoot recommended.",
+          proTip: "When you tag an enemy behind a Gloo Wall, use M82B to wall-bang them. Rafael guarantees they bleed out before their team can revive them."
+        };
+      }
+
+      // 7. Infinite Crimson Brawler: Orion + Miguel + (Hayato / Jota / Kairos)
+      if (active === 'orion' && passives.includes('miguel')) {
+        return {
+          score: 96,
+          role: "Infinite Crimson Brawler",
+          badgeColor: "bg-purple-950 text-purple-300 border border-purple-500/50",
+          analysis: "The legendary Orion-Miguel engine. Orion consumes 150 EP for complete damage invulnerability while draining enemy HP. Every knock awards 200 EP via Miguel, instantly refueling back-to-back Orion activations in building stairwells.",
+          weapons: "M590 Shotgun + Bizon / MP40",
+          petTip: pet === 'ottero' ? "Ottero converts 65% of medkit healing into extra EP to keep Orion ready." : "Ottero or Agent Hop recommended.",
+          proTip: "Activate Orion right before clearing a stairwell or breaching a small room to absorb the enemy's initial shotgun blast for 0 damage."
+        };
+      }
+
+      // 8. Grenade Cluster Demolisher: Alvaro + Beaston
+      if (passives.includes('alvaro')) {
+        return {
+          score: 97,
+          role: "Explosive Cluster Demolisher",
+          badgeColor: "bg-red-950 text-red-300 border border-red-500/50",
+          analysis: "Specialized Grenadier artillery build. Alvaro's split grenades deal devastating multi-hit explosive damage behind walls, while Beaston extends your grenade launch distance by +30% to wipe compounds without taking return fire.",
+          weapons: "M79 Grenade Launcher + M590 Shotgun + M4A1",
+          petTip: pet === 'beaston' ? "Beaston's +30% throw distance allows cross-compound grenade snipes." : "Beaston mandatory for Grenadier.",
+          proTip: "Cook grenades for 2.2 seconds and toss towards roof openings. The 3 sub-munitions will wipe the entire squad inside."
+        };
+      }
+
+      // 9. General Balanced Build
+      let score = 84;
+      if (passives.includes('jota') || passives.includes('hayato') || passives.includes('luqueta') || passives.includes('nairi') || passives.includes('kairos')) score += 5;
+      if (active === 'tatsuya' || active === 'k' || active === 'dimitri' || active === 'chrono' || active === 'oscar' || active === 'morse') score += 4;
+      if (pet === 'rockie' || pet === 'waggor' || pet === 'falco' || pet === 'beaston') score += 2;
+      if (loadoutItem === 'pocket_market' || loadoutItem === 'bounty_token') score += 2;
+
+      return {
+        score: Math.min(score, 94),
+        role: "Custom Competitive Build",
+        badgeColor: "bg-blue-950 text-blue-300 border border-blue-500/50",
+        analysis: "Well-rounded competitive loadout. Ensure your active skill timing matches your primary weapon's range and team role.",
+        weapons: "M590 Shotgun + MP40 + Woodpecker DMR",
+        petTip: "Select a Pet that complements your cooldowns (Rockie) or Gloo economy (Mr. Waggor).",
+        proTip: "Coordinate with your squad so at least one teammate carries Falco for fast drops and one carries Nairi for Gloo defense."
+      };
+    }
+
+    renderFFCardsHTML(list) {
+      if (list.length === 0) {
+        return `
+          <div class="col-span-full p-8 text-center text-slate-500 font-mono text-xs">
+            No characters, pets, or loadouts matched your search. Try clearing the query.
+          </div>
+        `;
+      }
+
+      return list.map(item => {
+        // Determine category: character (active/passive), pet, or loadout
+        const isPet = item.tags && item.tags.includes('pet');
+        const isLoadout = item.tags && item.tags.includes('loadout');
+        const isCharacter = !isPet && !isLoadout;
+
+        let isEquipped = false;
+        let equippedLabel = "";
+
+        if (isCharacter) {
+          if (this.ffSelectedLoadout.active === item.id) { isEquipped = true; equippedLabel = "ACTIVE SLOT"; }
+          else if (this.ffSelectedLoadout.p1 === item.id) { isEquipped = true; equippedLabel = "PASSIVE 1"; }
+          else if (this.ffSelectedLoadout.p2 === item.id) { isEquipped = true; equippedLabel = "PASSIVE 2"; }
+          else if (this.ffSelectedLoadout.p3 === item.id) { isEquipped = true; equippedLabel = "PASSIVE 3"; }
+        } else if (isPet) {
+          if (this.ffSelectedLoadout.pet === item.id) { isEquipped = true; equippedLabel = "PET SLOT"; }
+        } else if (isLoadout) {
+          if (this.ffSelectedLoadout.loadoutItem === item.id) { isEquipped = true; equippedLabel = "LOADOUT SLOT"; }
+        }
+
+        let badgeText = "";
+        let badgeStyle = "";
+        if (isCharacter) {
+          badgeText = item.type.toUpperCase();
+          badgeStyle = item.type === 'active' ? 'bg-rose-950 text-rose-300 border border-rose-500/40' : 'bg-cyan-950 text-cyan-300 border border-cyan-500/40';
+        } else if (isPet) {
+          badgeText = "PET SKILL";
+          badgeStyle = "bg-amber-950 text-amber-300 border border-amber-500/40";
+        } else if (isLoadout) {
+          badgeText = "BATTLE LOADOUT";
+          badgeStyle = "bg-emerald-950 text-emerald-300 border border-emerald-500/40";
+        }
+
+        const iconLetter = item.name ? item.name.charAt(0) : '?';
+        const subHeader = item.skillName || item.type || "Tournament Item";
+
+        return `
+          <div class="ff-char-card cursor-pointer p-3 rounded-xl border transition-all flex flex-col justify-between ${isEquipped ? 'border-emerald-500/60 bg-emerald-950/20 ring-1 ring-emerald-500/40 shadow-md' : 'border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900'}" data-item-id="${item.id}" data-item-category="${isCharacter ? (item.type === 'active' ? 'active' : 'passive') : (isPet ? 'pet' : 'loadout')}">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="cyber-badge ${badgeStyle} text-[9px] font-bold">
+                  ${badgeText}
+                </span>
+                <span class="text-[10px] text-slate-400 font-mono truncate max-w-[120px]">${item.role || item.type || "Loadout"}</span>
+              </div>
+
+              <div class="flex items-center gap-2.5 mb-2">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow" style="background: linear-gradient(135deg, ${item.accent || '#4f46e5'}, #111);">
+                  ${iconLetter}
+                </div>
+                <div class="min-w-0">
+                  <h5 class="text-xs font-heading font-bold text-white truncate">${item.name}</h5>
+                  <div class="text-[10px] font-sub font-bold text-amber-400 truncate">${subHeader}</div>
+                </div>
+              </div>
+
+              ${item.cooldown ? `<div class="text-[10px] text-slate-400 font-mono mb-1.5">${item.cooldown}</div>` : ''}
+              <p class="text-[11px] text-slate-300 leading-relaxed mb-3 line-clamp-3">${item.summary}</p>
+            </div>
+
+            <div>
+              ${isEquipped ? `
+                <div class="p-1 rounded bg-emerald-950/60 border border-emerald-500/40 text-[10px] font-mono font-bold text-emerald-300 text-center">
+                  ✓ EQUIPPED (${equippedLabel})
+                </div>
+              ` : `
+                <div class="p-1 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-400 text-center hover:text-white hover:border-slate-600 transition-colors">
+                  Click to Equip
+                </div>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    renderFFCharacterBuilder() {
+      const activeChar = this.getFFCharacter(this.ffSelectedLoadout.active);
+      const p1Char = this.getFFCharacter(this.ffSelectedLoadout.p1);
+      const p2Char = this.getFFCharacter(this.ffSelectedLoadout.p2);
+      const p3Char = this.getFFCharacter(this.ffSelectedLoadout.p3);
+      const pet = this.getFFPet(this.ffSelectedLoadout.pet);
+      const loadout = this.getFFLoadout(this.ffSelectedLoadout.loadoutItem);
+      const syn = this.calcFFSynergy(this.ffSelectedLoadout);
+      const filtered = this.getFilteredFFItems();
+
+      return `
+        <div id="ffBuilderContainer" class="space-y-6">
+          <!-- Section Header -->
+          <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#210e16] to-slate-950">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-rose-500 animate-ping"></span>
+                  <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                    Full Pro Tournament Arsenal & Loadout Builder
+                  </h3>
+                </div>
+                <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                  Build complete tournament loadouts with <strong>66 Official Characters</strong> (including Nero, Ray, Rin, Oscar & Morse), <strong>17 Pro Pets</strong> (Falco, Mr. Waggor, Beaston, Rockie), and <strong>9 Battle Loadouts</strong> (Pocket Market, Bounty Token, Scan). Click any slot to select your target, then click any card below.
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-xs font-mono font-bold">
+                  66 Characters
+                </span>
+                <span class="cyber-badge bg-amber-950 border border-amber-500/50 text-amber-300 text-xs font-mono font-bold">
+                  17 Pets
+                </span>
+                <span class="cyber-badge bg-emerald-950 border border-emerald-500/50 text-emerald-300 text-xs font-mono font-bold">
+                  9 Loadouts
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Tournament Meta Presets -->
+          <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            <span class="text-[11px] font-sub uppercase font-bold text-slate-400 shrink-0">Pro Meta Presets:</span>
+            <!-- Verified Pro Player Signature Presets -->
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-cyan-500/60 bg-cyan-950/70 text-cyan-200 text-xs font-sub font-bold hover:bg-cyan-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="mafia_sniper">
+              🎯 Mafia Sniper God (Total Gaming)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-amber-500/60 bg-amber-950/70 text-amber-200 text-xs font-sub font-bold hover:bg-amber-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="tg_aztec">
+              ⚡ Aztec Entry Rusher (TG)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-emerald-500/60 bg-emerald-950/70 text-emerald-200 text-xs font-sub font-bold hover:bg-emerald-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="fozy_medic">
+              🏰 FozyAjay Medic Anchor (TG)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-purple-500/60 bg-purple-950/70 text-purple-200 text-xs font-sub font-bold hover:bg-purple-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="tg_shanky">
+              🩸 Shanky Orion Brawler (TG)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-emerald-500/60 bg-emerald-950/70 text-emerald-200 text-xs font-sub font-bold hover:bg-emerald-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="hind_250hp">
+              🇮🇳 Louis 250HP Rusher (Hind)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-sky-500/60 bg-sky-950/70 text-sky-200 text-xs font-sub font-bold hover:bg-sky-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="hind_kd_drone">
+              🎯 KD Drone IGL (Hind)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-rose-500/60 bg-rose-950/70 text-rose-200 text-xs font-sub font-bold hover:bg-rose-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="prinxz_rusher">
+              ⚡ PRINXZ Star Rusher (S8UL)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-cyan-500/60 bg-cyan-950/70 text-cyan-200 text-xs font-sub font-bold hover:bg-cyan-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="s8ul_jack07">
+              🎯 JACK07 Anti-Revive (S8UL)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-purple-500/60 bg-purple-950/70 text-purple-200 text-xs font-sub font-bold hover:bg-purple-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="lyon_gamezking">
+              👑 Gamezking MVP (LYON EWC)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-rose-500/60 bg-rose-950/70 text-rose-200 text-xs font-sub font-bold hover:bg-rose-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="falcons_onfire">
+              🇹🇭 ONFIRE SMG Shred (Falcons)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-yellow-500/60 bg-yellow-950/70 text-yellow-200 text-xs font-sub font-bold hover:bg-yellow-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="fluxo_mt7">
+              🇧🇷 MT7 Shotgun King (Fluxo)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-red-500/60 bg-red-950/70 text-red-200 text-xs font-sub font-bold hover:bg-red-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="buriram_moshi">
+              🇹🇭 Moshi SEA MVP (Buriram)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-sky-500/60 bg-sky-950/70 text-sky-200 text-xs font-sub font-bold hover:bg-sky-900 transition-all shrink-0 hover:scale-105 shadow" data-preset="horaa_renice">
+              🇳🇵 RENICE Sniper King (Horaa)
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-sky-600/40 bg-sky-950/60 text-sky-200 text-xs font-sub font-bold hover:bg-sky-900/80 transition-all shrink-0 hover:scale-105" data-preset="nero_dream">
+              ❄️ Nero Anti-Gloo
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-amber-600/40 bg-amber-950/60 text-amber-200 text-xs font-sub font-bold hover:bg-amber-900/80 transition-all shrink-0 hover:scale-105" data-preset="ray_finisher">
+              ☀️ Ray 30HP Finisher
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-orange-600/40 bg-orange-950/60 text-orange-200 text-xs font-sub font-bold hover:bg-orange-900/80 transition-all shrink-0 hover:scale-105" data-preset="kla_hotdrop">
+              🥊 Kla 400% Hot-Drop
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-red-600/40 bg-red-950/60 text-red-200 text-xs font-sub font-bold hover:bg-red-900/80 transition-all shrink-0 hover:scale-105" data-preset="xayne_breaker">
+              🛡️ Xayne Gloo Shredder
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-950/40 text-rose-200 text-xs font-sub font-bold hover:bg-rose-900/60 transition-all shrink-0 hover:scale-105" data-preset="m590_rusher">
+              ⚡ M590 Powerhouse Rusher
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-rose-600/40 bg-rose-950/60 text-white text-xs font-sub font-bold hover:bg-rose-900/80 transition-all shrink-0 hover:scale-105" data-preset="oscar_gloo_breaker">
+              💥 Oscar Gloo Breaker
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-sky-500/40 bg-sky-950/40 text-sky-200 text-xs font-sub font-bold hover:bg-sky-900/60 transition-all shrink-0 hover:scale-105" data-preset="morse_stealth">
+              🥷 Morse Stealth Ambush
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-950/40 text-amber-200 text-xs font-sub font-bold hover:bg-amber-900/60 transition-all shrink-0 hover:scale-105" data-preset="juggernaut">
+              🛡️ 250 HP Juggernaut
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/40 text-emerald-200 text-xs font-sub font-bold hover:bg-emerald-900/60 transition-all shrink-0 hover:scale-105" data-preset="sonitri">
+              🏰 Undying Sonitri Core
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/40 text-cyan-200 text-xs font-sub font-bold hover:bg-cyan-900/60 transition-all shrink-0 hover:scale-105" data-preset="sniper">
+              🎯 Anti-Revive Sniper Demon
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-950/40 text-purple-200 text-xs font-sub font-bold hover:bg-purple-900/60 transition-all shrink-0 hover:scale-105" data-preset="orion">
+              🩸 Infinite Orion Brawler
+            </button>
+            <button class="ff-preset-btn px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-950/40 text-red-200 text-xs font-sub font-bold hover:bg-red-900/60 transition-all shrink-0 hover:scale-105" data-preset="grenadier">
+              💣 Alvaro Grenade Demolisher
+            </button>
+          </div>
+
+          <!-- 6 Interactive Selected Slots Deck (Active, 3 Passives, Pet, Loadout) -->
+          <div id="ffSlotsDeck" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <!-- Slot 1: Active -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'active' ? 'border-rose-400 ring-2 ring-rose-500/60 bg-slate-900 shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'border-rose-500/30 bg-slate-900/80 hover:border-rose-400'}" data-slot="active">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/50 text-[9px] font-bold">1: ACTIVE</span>
+                ${this.ffActiveTargetSlot === 'active' ? '<span class="text-[9px] text-rose-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${activeChar.accent}, #000);">
+                  ${activeChar.name.charAt(0)}
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${activeChar.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-rose-400 truncate">${activeChar.skillName}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1">${activeChar.cooldown}</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${activeChar.summary}</p>
+            </div>
+
+            <!-- Slot 2: Passive 1 -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p1' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p1">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">2: PASSIVE 1</span>
+                ${this.ffActiveTargetSlot === 'p1' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p1Char.accent}, #000);">
+                  ${p1Char.name.charAt(0)}
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${p1Char.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p1Char.skillName}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p1Char.role}</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p1Char.summary}</p>
+            </div>
+
+            <!-- Slot 3: Passive 2 -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p2' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p2">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">3: PASSIVE 2</span>
+                ${this.ffActiveTargetSlot === 'p2' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p2Char.accent}, #000);">
+                  ${p2Char.name.charAt(0)}
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${p2Char.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p2Char.skillName}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p2Char.role}</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p2Char.summary}</p>
+            </div>
+
+            <!-- Slot 4: Passive 3 -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p3' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p3">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">4: PASSIVE 3</span>
+                ${this.ffActiveTargetSlot === 'p3' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p3Char.accent}, #000);">
+                  ${p3Char.name.charAt(0)}
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${p3Char.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p3Char.skillName}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p3Char.role}</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p3Char.summary}</p>
+            </div>
+
+            <!-- Slot 5: Pet Skill -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'pet' ? 'border-amber-400 ring-2 ring-amber-500/60 bg-slate-900 shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'border-amber-500/30 bg-slate-900/80 hover:border-amber-400'}" data-slot="pet">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">5: PET SKILL</span>
+                ${this.ffActiveTargetSlot === 'pet' ? '<span class="text-[9px] text-amber-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${pet.accent}, #000);">
+                  🐾
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${pet.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-amber-400 truncate">${pet.skillName}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${pet.role}</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${pet.summary}</p>
+            </div>
+
+            <!-- Slot 6: Battle Loadout -->
+            <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'loadout' ? 'border-emerald-400 ring-2 ring-emerald-500/60 bg-slate-900 shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'border-emerald-500/30 bg-slate-900/80 hover:border-emerald-400'}" data-slot="loadout">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/50 text-[9px] font-bold">6: LOADOUT</span>
+                ${this.ffActiveTargetSlot === 'loadout' ? '<span class="text-[9px] text-emerald-400 font-mono animate-pulse">● TARGET</span>' : ''}
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${loadout.accent}, #000);">
+                  🎒
+                </div>
+                <div class="min-w-0">
+                  <h4 class="text-xs font-heading font-bold text-white truncate">${loadout.name}</h4>
+                  <div class="text-[10px] font-sub font-bold text-emerald-400 truncate">${loadout.type}</div>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">Battle Item</div>
+              <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${loadout.summary}</p>
+            </div>
+          </div>
+
+          <!-- Dynamic Synergy Result Banner -->
+          <div id="ffSynergyBanner" class="cyber-panel p-5 rounded-2xl border border-slate-700 bg-gradient-to-r from-slate-950 via-[#0d1b2a] to-slate-950 shadow-xl">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class="text-2xl lg:text-3xl font-heading font-black text-amber-400 font-mono">
+                    ${syn.score}% Synergy
+                  </span>
+                  <span class="cyber-badge ${syn.badgeColor} text-xs font-bold font-sub px-3 py-1">
+                    ${syn.role}
+                  </span>
+                  <span class="text-xs text-slate-400 font-mono">
+                    Weapons: <strong class="text-amber-300">${syn.weapons}</strong>
+                  </span>
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                  ${syn.analysis}
+                </p>
+                <div class="flex flex-wrap items-center gap-4 text-[11px] font-mono">
+                  <span class="text-amber-300/90">🐾 Pet Synergy: <strong>${syn.petTip}</strong></span>
+                  <span class="text-cyan-300/90">💡 Underdog Tip: <strong>${syn.proTip}</strong></span>
+                </div>
+              </div>
+              <button id="copySkillComboBtn" class="px-5 py-3 bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 text-white font-sub font-bold rounded-xl text-xs uppercase tracking-wider shrink-0 transition-all hover:scale-105 shadow-lg shadow-rose-900/30">
+                Copy Loadout Comms
+              </button>
+            </div>
+          </div>
+
+          <!-- All Items Roster & Search -->
+          <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/80">
+            <!-- Filter & Search Controls -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+              <div>
+                <h4 class="text-base font-heading font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Pro Tournament Arsenal</span>
+                  <span class="text-xs text-slate-400 font-mono">(${filtered.length} items available)</span>
+                </h4>
+                <p class="text-xs text-slate-400 mt-0.5">Click any card to equip it into the selected target slot.</p>
+              </div>
+
+              <!-- Search Bar -->
+              <div class="w-full md:w-80">
+                <input id="ffCharSearchInput" type="text" placeholder="🔍 Search Oscar, Morse, Falco, Pocket..." value="${this.ffCharacterSearch}" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-200 font-mono outline-none focus:border-rose-500 transition-all">
+              </div>
+            </div>
+
+            <!-- Filter Chips -->
+            <div id="ffFilterButtons" class="flex flex-wrap items-center gap-2 mb-5">
+              ${[
+                { id: 'all', label: 'All (76)' },
+                { id: 'active', label: '⚡ Active Skills (20)' },
+                { id: 'passive', label: '🛡️ Passive Skills (31)' },
+                { id: 'pet', label: '🐾 Usable Pets (17)' },
+                { id: 'loadout', label: '🎒 Loadout Items (8)' },
+                { id: 'm590', label: '💥 M590 & Rusher' },
+                { id: 'survival', label: '❤️ 250HP & Survival' },
+                { id: 'gloo', label: '🧱 Gloo & Defense' },
+                { id: 'sniper', label: '🎯 Sniper & DMR' }
+              ].map(f => `
+                <button class="ff-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold transition-all ${this.ffCharacterFilter === f.id ? 'bg-rose-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}" data-filter="${f.id}">
+                  ${f.label}
+                </button>
+              `).join('')}
+            </div>
+
+            <!-- Cards Grid -->
+            <div id="ffCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[600px] overflow-y-auto pr-1">
+              ${this.renderFFCardsHTML(filtered)}
+            </div>
+          </div>
+          <!-- ============================================================ -->
+          <!-- ⭐ VERIFIED PRO LINEUPS & EXACT PLAYER SKILL COMBINATIONS      -->
+          <!-- ============================================================ -->
+          <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-br from-slate-950 via-[#18110a] to-slate-950 space-y-4 mt-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">⭐</span>
+                  <h4 class="text-base font-heading font-black uppercase text-white tracking-wider">
+                    Official Pro Squad Lineups & Exact Player Skill Combinations
+                  </h4>
+                </div>
+                <p class="text-xs text-slate-300 mt-0.5">
+                  Verified current active player rosters from Liquipedia. Each player's real tournament role, exact active & passive skills (no passive skills in active slot), pet synergy, and preferred weapons. Click any player's <strong>"⚡ Equip"</strong> button to load their build!
+                </p>
+              </div>
+
+              <!-- Region Filter -->
+              <div class="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
+                <button class="pro-team-filter-btn active px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-rose-600 text-white shadow" data-region="all">
+                  All Squads
+                </button>
+                <button class="pro-team-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-region="india">
+                  🇮🇳 India Teams
+                </button>
+                <button class="pro-team-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-region="international">
+                  🌐 International
+                </button>
+              </div>
+            </div>
+
+            <!-- Pro Teams Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+              <!-- Team 1: Total Gaming Esports (India) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-amber-500/30 flex flex-col justify-between" data-region="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇮🇳</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Total Gaming Esports</h5>
+                        <span class="text-[10px] text-amber-400 font-mono">Current Active Lineup &bull; FFMIC 2025 Double Champions (BR & CS)</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">National Champions 👑</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> <strong>Mafia</strong> holds India's highest-acclaimed sniper position, wall-banging through enemy gloo walls with Iris while AZTEC leads close-range rushes, FOZYAJAY commands defensive Dimitri revives, and Shanky brawls with Orion.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: Mafia (SNIPER) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">Mafia (Daksh Garg)</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px] font-bold">Sniper & Clutch Specialist 🎯</span>
+                          <span class="text-[10px] text-slate-400 font-mono">AWM / M82B + Woodpecker</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Maro + Laura &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris marks & penetrates gloo walls; Rafael applies dead-silent 85% bleed-out, and Maro adds +25% distance damage.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="maro" data-p3="laura" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Mafia
+                      </button>
+                    </div>
+
+                    <!-- Player 2: AZTEC (ENTRY RUSHER) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">AZTEC (Sohail Alam)</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Primary Entry Rusher ⚡</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Charge Buster + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya (Rebel Rush) &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Kelly + Jota &bull; <strong class="text-purple-300">Pet:</strong> Beaston &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Double dash breach; Jota recovers 40 HP per knock while Beaston extends grenade throw range by 30%.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="kelly" data-p3="jota" data-pet="beaston" data-loadout="pocket_market">
+                        ⚡ Equip Aztec
+                      </button>
+                    </div>
+
+                    <!-- Player 3: FOZYAJAY (IGL / MEDIC ANCHOR) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-emerald-400 font-bold font-mono text-[11px]">FOZYAJAY (Ajay Sharma)</span>
+                          <span class="cyber-badge bg-emerald-950/60 text-emerald-300 text-[9px]">IGL / Medic Anchor 🏰</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Woodpecker + MP5-III</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Dimitri &bull; <strong class="text-cyan-300">Passives:</strong> Thiva + Nairi + Moco &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Armor Crate
+                        </div>
+                        <div class="text-[10px] text-slate-400">Thiva provides instant 1.0s revives under Dimitri's aura while Nairi heals gloo walls under fire.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="dimitri" data-p1="thiva" data-p2="nairi" data-p3="moco" data-pet="waggor" data-loadout="armor_crate">
+                        🛡️ Equip Fozy
+                      </button>
+                    </div>
+
+                    <!-- Player 4: Shanky27 (SECOND RUSHER / BRAWLER) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-purple-400 font-bold font-mono text-[11px]">Shanky27 (Raj Kiran)</span>
+                          <span class="cyber-badge bg-purple-950/60 text-purple-300 text-[9px]">Crimson Shield Brawler 🩸</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M1887 + Groza</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Orion (Crimson Crush) &bull; <strong class="text-cyan-300">Passives:</strong> Miguel + D-Bee + Hayato &bull; <strong class="text-purple-300">Pet:</strong> Cactus &bull; <strong class="text-emerald-300">Item:</strong> Bounty Token
+                        </div>
+                        <div class="text-[10px] text-slate-400">Invulnerable blood shield brawler; Miguel grants 200 EP on every kill for continuous Crimson shielding.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="orion" data-p1="miguel" data-p2="dbee" data-p3="hayato" data-pet="cactus" data-loadout="bounty_token">
+                        🩸 Equip Shanky
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 2: Team Hind / Team Apex Gaming (India) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-emerald-500/30 flex flex-col justify-between" data-region="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇮🇳</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Team Hind (Team Apex Gaming)</h5>
+                        <span class="text-[10px] text-emerald-400 font-mono">Current Active Lineup &bull; FFMIC 2026 Spring Champions (₹40L) & Fall #1</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/50 text-[9px] font-bold">2026 Champions 👑</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> Acquired by Team Apex Gaming after their historic Spring Championship run. Louis and SHOTO run maximum HP and fire rate while KD suppresses with Homer's shockwave drone and Sahil executes from distance.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: Louis -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-amber-400 font-bold font-mono text-[11px]">Louis (Ayush Jangir)</span>
+                          <span class="cyber-badge bg-amber-950/60 text-amber-300 text-[9px]">Star Fragger (250 HP)</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Trogon + Vector</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Luqueta + Kelly &bull; <strong class="text-purple-300">Pet:</strong> Rockie &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Luqueta stacks +50 max HP (250 total) from 2 kills; Rockie lowers Tatsuya cooldown to 11s.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="luqueta" data-p3="kelly" data-pet="rockie" data-loadout="pocket_market">
+                        ⚡ Equip Louis
+                      </button>
+                    </div>
+
+                    <!-- Player 2: KD -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-sky-400 font-bold font-mono text-[11px]">KD (Priyanshu)</span>
+                          <span class="cyber-badge bg-sky-950/60 text-sky-300 text-[9px]">IGL / Drone Flanker</span>
+                          <span class="text-[10px] text-slate-400 font-mono">SCAR + MAG-7</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Homer &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Jota + Moco &bull; <strong class="text-purple-300">Pet:</strong> Zasil &bull; <strong class="text-emerald-300">Item:</strong> Bonfire
+                        </div>
+                        <div class="text-[10px] text-slate-400">Homer drone tracks enemies within 100m, applying 60% movement slow and 35% fire rate reduction.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="homer" data-p1="hayato" data-p2="jota" data-p3="moco" data-pet="zasil" data-loadout="bonfire">
+                        🎯 Equip KD
+                      </button>
+                    </div>
+
+                    <!-- Player 3: SHOTO -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">SHOTO (Manav Shinde)</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Second Rusher / Assault</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M1887 + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Luna + Hayato + Jota &bull; <strong class="text-purple-300">Pet:</strong> Fang &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Luna accelerates rate of fire by up to 15%; Fang recharges EP whenever teammates get knocked.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="luna" data-p2="hayato" data-p3="jota" data-pet="fang" data-loadout="pocket_market">
+                        ⚡ Equip Shoto
+                      </button>
+                    </div>
+
+                    <!-- Player 4: Sahil -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">Sahil (Sahil Dahiya)</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Sniper / Marksman</span>
+                          <span class="text-[10px] text-slate-400 font-mono">SVD-Y + Kar98k</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris wall-bangs snipers through cover; Maro deals up to +25% distance damage at long range.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Sahil
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 3: S8UL Esports (India - Former Fireeyes Core) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-cyan-500/30 flex flex-col justify-between" data-region="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇮🇳</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">S8UL Esports</h5>
+                        <span class="text-[10px] text-cyan-400 font-mono">Current Active Lineup &bull; EWC 2026 Paris Grand Finalists</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">EWC Paris Finalists 🌍</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> The powerhouse squad formed from the Spring runner-up core. PRINXZ and TROLL spearhead aggressive team wipes, supported by JACK07's silenced sniper shots and BUNNY's mobility healing.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: PRINXZ -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">PRINXZ (Prince)</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Star Entry Rusher</span>
+                          <span class="text-[10px] text-slate-400 font-mono">MAC10 + Spas12</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Kelly + Jota &bull; <strong class="text-purple-300">Pet:</strong> Rockie &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Rapid forward double dashes; Hayato increases armor penetration as health decreases in 1v1 duels.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="kelly" data-p3="jota" data-pet="rockie" data-loadout="pocket_market">
+                        ⚡ Equip Prinxz
+                      </button>
+                    </div>
+
+                    <!-- Player 2: TROLL -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-red-400 font-bold font-mono text-[11px]">TROLL (Naitik Sharma)</span>
+                          <span class="cyber-badge bg-red-950/60 text-red-300 text-[9px]">Gloo Shredder / Assault</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M1014-III + Bizon</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Xayne &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Nairi + Jota &bull; <strong class="text-purple-300">Pet:</strong> Yeti &bull; <strong class="text-emerald-300">Item:</strong> Armor Crate
+                        </div>
+                        <div class="text-[10px] text-slate-400">Xayne adds 50 temporary HP and +100% gloo wall destruction; Yeti cuts explosive damage by 30%.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-red-700 hover:bg-red-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="xayne" data-p1="hayato" data-p2="nairi" data-p3="jota" data-pet="yeti" data-loadout="armor_crate">
+                        💥 Equip Troll
+                      </button>
+                    </div>
+
+                    <!-- Player 3: JACK07 -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">JACK07 (Harshit Nain)</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Anti-Revive Sniper</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M82B + AC80</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris tracks and penetrates gloo walls; Rafael applies silent firing and 85% bleed-out acceleration.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Jack07
+                      </button>
+                    </div>
+
+                    <!-- Player 4: BUNNY -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-emerald-400 font-bold font-mono text-[11px]">BUNNY (Jay Verma)</span>
+                          <span class="cyber-badge bg-emerald-950/60 text-emerald-300 text-[9px]">Support / Anchor</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Woodpecker + UMP</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Alok &bull; <strong class="text-cyan-300">Passives:</strong> Thiva + Nairi + Moco &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Alok's Drop the Beat boosts squad movement speed by 15% and heals 3 HP/s during team rotations.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="alok" data-p1="thiva" data-p2="nairi" data-p3="moco" data-pet="waggor" data-loadout="pocket_market">
+                        🛡️ Equip Bunny
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 4: GodLike Esports (India) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-yellow-500/30 flex flex-col justify-between" data-region="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇮🇳</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">GodLike Esports</h5>
+                        <span class="text-[10px] text-yellow-400 font-mono">Current Active Lineup &bull; Top 5 FFMIC League & Multi-Title Champions</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-yellow-950 text-yellow-300 border border-yellow-500/50 text-[9px] font-bold">Pro Roster ⚡</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> Relentless compound rush with invulnerable Orion backup. YOGI coordinates entry spikes while MARCO anchors with Dimitri and NOBITA covers from the backline.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: YOGI -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">YOGI</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Entry Fragger</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Charge Buster + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Kelly + Jota &bull; <strong class="text-purple-300">Pet:</strong> Beaston &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">High-speed entry rushes; Beaston provides extra distance on initial flash and frag grenade opens.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="kelly" data-p3="jota" data-pet="beaston" data-loadout="pocket_market">
+                        ⚡ Equip Yogi
+                      </button>
+                    </div>
+
+                    <!-- Player 2: MARCO -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-emerald-400 font-bold font-mono text-[11px]">MARCO</span>
+                          <span class="cyber-badge bg-emerald-950/60 text-emerald-300 text-[9px]">IGL / Support Anchor</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Woodpecker + MP5</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Dimitri &bull; <strong class="text-cyan-300">Passives:</strong> Thiva + Nairi + Moco &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Armor Crate
+                        </div>
+                        <div class="text-[10px] text-slate-400">Guarantees revivals inside final zone smoke clusters; Nairi repairs damaged gloo walls automatically.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="dimitri" data-p1="thiva" data-p2="nairi" data-p3="moco" data-pet="waggor" data-loadout="armor_crate">
+                        🛡️ Equip Marco
+                      </button>
+                    </div>
+
+                    <!-- Player 3: NOBITA (Sniper) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">NOBITA</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Sniper / Scout</span>
+                          <span class="text-[10px] text-slate-400 font-mono">AWM + M82B</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris allows wall-bang sniper picks; Rafael accelerates enemy squad bleed-outs by 85%.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Nobita
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 5: LYON (International - France) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-purple-500/40 bg-purple-950/10 flex flex-col justify-between" data-region="international">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">👑</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">LYON</h5>
+                        <span class="text-[10px] text-purple-300 font-mono">Current Active Lineup &bull; EWC 2026 World Champions ($300k)</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">EWC 2026 World Champions 🏆</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> Paris Champion Rush masters. Tournament MVP <strong>Gamezking</strong> pioneered the Tatsuya + Beaston entry breach, while their second rusher cycled Orion's Crimson shield with Miguel's EP engine.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: Gamezking -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-amber-400 font-bold font-mono text-[11px]">Gamezking</span>
+                          <span class="cyber-badge bg-amber-950/60 text-amber-300 text-[9px]">EWC 2026 Tournament MVP</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Charge Buster + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Kelly + Jota &bull; <strong class="text-purple-300">Pet:</strong> Beaston &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">The exact MVP build used to score 155 points and capture the EWC 2026 World Championship in Paris.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="kelly" data-p3="jota" data-pet="beaston" data-loadout="pocket_market">
+                        👑 Equip Gamezking
+                      </button>
+                    </div>
+
+                    <!-- Player 2: Frontline Brawler -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-purple-400 font-bold font-mono text-[11px]">LYON Orion Tank</span>
+                          <span class="cyber-badge bg-purple-950/60 text-purple-300 text-[9px]">Crimson Shield Brawler</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M1887 + Groza</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Orion &bull; <strong class="text-cyan-300">Passives:</strong> Miguel + D-Bee + Hayato &bull; <strong class="text-purple-300">Pet:</strong> Cactus &bull; <strong class="text-emerald-300">Item:</strong> Bounty Token
+                        </div>
+                        <div class="text-[10px] text-slate-400">Takes zero bullet damage in close-range 1v3 brawls; Miguel recharges 200 EP on every kill.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="orion" data-p1="miguel" data-p2="dbee" data-p3="hayato" data-pet="cactus" data-loadout="bounty_token">
+                        🩸 Equip Brawler
+                      </button>
+                    </div>
+
+                    <!-- Player 3: Anti-Gloo Sniper -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">LYON Recon Sniper</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Anti-Gloo Marksman</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M82B + Desert Eagle</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris wall-penetrating shots finish knocked enemies behind emergency gloo shields in Paris.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Sniper
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 6: Team Falcons (International - Thailand) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-rose-500/30 flex flex-col justify-between" data-region="international">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇹🇭</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Team Falcons</h5>
+                        <span class="text-[10px] text-rose-400 font-mono">Current Active Lineup &bull; EWC 2024 Champion & 2026 Paris Finalist</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/50 text-[9px] font-bold">Thai Powerhouse 🦅</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> High-octane SMG spray pressure led by ONFIRE, supported by LIMIT's Alvaro split-grenade artillery and PEENA's wall-banging Iris sniper picks.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: ONFIRE -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">ONFIRE (Phulipat Yosit)</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Star SMG Rusher</span>
+                          <span class="text-[10px] text-slate-400 font-mono">MP40 + Shotgun</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Nikita + Kelly &bull; <strong class="text-purple-300">Pet:</strong> Rockie &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Nikita increases SMG reload speed by 24% and boosts the final 6 magazine bullets by +30% damage.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="nikita" data-p3="kelly" data-pet="rockie" data-loadout="pocket_market">
+                        ⚡ Equip Onfire
+                      </button>
+                    </div>
+
+                    <!-- Player 2: LIMIT -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-amber-400 font-bold font-mono text-[11px]">LIMIT (Rachata Wanaphurksasilp)</span>
+                          <span class="cyber-badge bg-amber-950/60 text-amber-300 text-[9px]">IGL / Grenadier Artillery</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M79 + AC80</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Homer &bull; <strong class="text-cyan-300">Passives:</strong> Alvaro + Nairi + Moco &bull; <strong class="text-purple-300">Pet:</strong> Beaston &bull; <strong class="text-emerald-300">Item:</strong> Armor Crate
+                        </div>
+                        <div class="text-[10px] text-slate-400">Alvaro splits each grenade into 3 extra sub-munitions; Beaston grants unmatched 30% lob range.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="homer" data-p1="alvaro" data-p2="nairi" data-p3="moco" data-pet="beaston" data-loadout="armor_crate">
+                        💣 Equip Limit
+                      </button>
+                    </div>
+
+                    <!-- Player 3: PEENA (Sniper) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">PEENA (Nattawut Srinakhanin)</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Marksman / Sniper</span>
+                          <span class="text-[10px] text-slate-400 font-mono">AWM / SVD + Desert Eagle</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris shoots through enemy cover; Rafael guarantees instant bleeds to deny revivals.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Peena
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 7: Buriram United Esports (International - Thailand) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-red-500/30 flex flex-col justify-between" data-region="international">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇹🇭</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Buriram United Esports</h5>
+                        <span class="text-[10px] text-red-400 font-mono">Current Active Lineup &bull; FFWS SEA Fall #1 (1,199 pts & 15 Booyahs)</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-red-950 text-red-300 border border-red-500/50 text-[9px] font-bold">SEA Dominators 🔥</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> The undisputed leaders of Southeast Asia. Moshi pressures compound choke points with Luqueta's 250 HP, while JOENA establishes unbreakable Nairi-Alok defensive bunkers.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: Moshi -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">Moshi (Ratchanon Kunrayason)</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">SEA MVP Fragger</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Charge Buster + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Luqueta + Jota &bull; <strong class="text-purple-300">Pet:</strong> Rockie &bull; <strong class="text-emerald-300">Item:</strong> Bounty Token
+                        </div>
+                        <div class="text-[10px] text-slate-400">Dominates SEA with 250 Max HP and immediate Jota healing after securing first blood.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="luqueta" data-p3="jota" data-pet="rockie" data-loadout="bounty_token">
+                        ⚡ Equip Moshi
+                      </button>
+                    </div>
+
+                    <!-- Player 2: JOENA -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-emerald-400 font-bold font-mono text-[11px]">JOENA (Chirasak Moonsarn)</span>
+                          <span class="cyber-badge bg-emerald-950/60 text-emerald-300 text-[9px]">IGL / Iron Wall Anchor</span>
+                          <span class="text-[10px] text-slate-400 font-mono">PARAFAL + UMP</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Alok &bull; <strong class="text-cyan-300">Passives:</strong> Nairi + Moco + Kelly &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Builds impregnable Nairi wall bunkers and provides continuous Alok speed auras for rapid zone rotations.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="alok" data-p1="nairi" data-p2="moco" data-p3="kelly" data-pet="waggor" data-loadout="pocket_market">
+                        🛡️ Equip Joena
+                      </button>
+                    </div>
+
+                    <!-- Player 3: GETHIGH (Sniper) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">GETHIGH (Rachata Saethian)</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Sniper / Marksman</span>
+                          <span class="text-[10px] text-slate-400 font-mono">AWM / SVD-Y</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Picks off opponents through gloo walls during messy 3-team compound pushes.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Gethigh
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 8: Fluxo W7M (International - Brazil) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-yellow-500/30 flex flex-col justify-between" data-region="international">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇧🇷</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Fluxo (Fluxo W7M)</h5>
+                        <span class="text-[10px] text-yellow-400 font-mono">Current Active Lineup &bull; FFWS World Champions & EWC Paris Top 5</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-yellow-950 text-yellow-300 border border-yellow-500/50 text-[9px] font-bold">World Champions 👑</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> Brazilian Serie A close-quarters shotgun agility. MT7 uses Caroline's shotgun sprint boost for lethal jump-shots, while Giuh.87 provides dome protection with Chrono.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: MT7 -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-yellow-400 font-bold font-mono text-[11px]">MT7 (Mateus Torre)</span>
+                          <span class="cyber-badge bg-yellow-950/60 text-yellow-300 text-[9px]">Shotgun King Fragger</span>
+                          <span class="text-[10px] text-slate-400 font-mono">M1014 + Desert Eagle</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Caroline + Kelly &bull; <strong class="text-purple-300">Pet:</strong> Rockie &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Caroline adds +13% movement speed while holding a shotgun for Brazilian flick-shot mechanics.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-slate-950 text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="caroline" data-p3="kelly" data-pet="rockie" data-loadout="pocket_market">
+                        ⚡ Equip MT7
+                      </button>
+                    </div>
+
+                    <!-- Player 2: Giuh.87 -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-sky-400 font-bold font-mono text-[11px]">Giuh.87 (Giuliano Júnior)</span>
+                          <span class="cyber-badge bg-sky-950/60 text-sky-300 text-[9px]">Support / Dome Guardian</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Woodpecker + MP5</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Chrono &bull; <strong class="text-cyan-300">Passives:</strong> Nairi + Moco + Jota &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Chrono's 800 HP force field shields the squad during open-field revives and dangerous cross-rotations.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="chrono" data-p1="nairi" data-p2="moco" data-p3="jota" data-pet="waggor" data-loadout="pocket_market">
+                        🛡️ Equip Giuh
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Team 9: Horaa Esports (International - Nepal) -->
+              <div class="pro-team-card bg-slate-900/90 p-4 rounded-xl border border-sky-500/30 flex flex-col justify-between" data-region="international">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">🇳🇵</span>
+                      <div>
+                        <h5 class="text-sm font-heading font-bold text-white leading-tight">Horaa Esports</h5>
+                        <span class="text-[10px] text-sky-400 font-mono">Current Active Lineup &bull; FFWS Nepal 2026 Champions & Bangkok Qualified</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-sky-950 text-sky-300 border border-sky-500/50 text-[9px] font-bold">Bangkok Ticket 🎟️</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed mb-3">
+                    <strong>Team Strategy:</strong> High-altitude ridge gatekeeping and long-range anti-revive snipes. SAVAGE leads the rush assault while RENICE snipes from distance with Iris/Rafael and SPARSY executes instant Dimitri-Thiva revivals.
+                  </p>
+
+                  <div class="space-y-2 border-t border-slate-800/80 pt-2.5 text-xs">
+                    <!-- Player 1: SAVAGE -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-rose-400 font-bold font-mono text-[11px]">SAVAGE</span>
+                          <span class="cyber-badge bg-rose-950/60 text-rose-300 text-[9px]">Primary Rusher</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Charge Buster + MP40</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Tatsuya &bull; <strong class="text-cyan-300">Passives:</strong> Hayato + Kelly + Jota &bull; <strong class="text-purple-300">Pet:</strong> Beaston &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">High-velocity breach into enemy compounds; Beaston extends grenade arcs over Himalayan terrain.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="tatsuya" data-p1="hayato" data-p2="kelly" data-p3="jota" data-pet="beaston" data-loadout="pocket_market">
+                        ⚡ Equip Savage
+                      </button>
+                    </div>
+
+                    <!-- Player 2: RENICE (Sniper) -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-cyan-400 font-bold font-mono text-[11px]">RENICE</span>
+                          <span class="cyber-badge bg-cyan-950/60 text-cyan-300 text-[9px]">Sniper / Marksman</span>
+                          <span class="text-[10px] text-slate-400 font-mono">AWM / SVD + M82B</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Iris (Wall Brawl) &bull; <strong class="text-cyan-300">Passives:</strong> Rafael + Laura + Maro &bull; <strong class="text-purple-300">Pet:</strong> Falco &bull; <strong class="text-emerald-300">Item:</strong> Scan
+                        </div>
+                        <div class="text-[10px] text-slate-400">Iris penetrates enemy gloo barriers; Maro adds +25% distance damage at 100m+ range.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="iris" data-p1="rafael" data-p2="laura" data-p3="maro" data-pet="falco" data-loadout="scan">
+                        🎯 Equip Renice
+                      </button>
+                    </div>
+
+                    <!-- Player 3: SPARSY -->
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                          <span class="text-emerald-400 font-bold font-mono text-[11px]">SPARSY</span>
+                          <span class="cyber-badge bg-emerald-950/60 text-emerald-300 text-[9px]">IGL / Support Medic</span>
+                          <span class="text-[10px] text-slate-400 font-mono">Woodpecker + MAG-7</span>
+                        </div>
+                        <div class="text-[11px] text-slate-200">
+                          <strong class="text-amber-300">Active:</strong> Dimitri &bull; <strong class="text-cyan-300">Passives:</strong> Thiva + Nairi + Kelly &bull; <strong class="text-purple-300">Pet:</strong> Mr. Waggor &bull; <strong class="text-emerald-300">Item:</strong> Pocket Market
+                        </div>
+                        <div class="text-[10px] text-slate-400">Guarantees lightning-fast 1s revives behind fortified Nairi gloo walls during tough uphill zone shifts.</div>
+                      </div>
+                      <button class="ff-team-preset-btn shrink-0 py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-sub font-bold uppercase tracking-wider transition-colors shadow"
+                              data-active="dimitri" data-p1="thiva" data-p2="nairi" data-p3="kelly" data-pet="waggor" data-loadout="pocket_market">
+                        🛡️ Equip Sparsy
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    bindFFCharacterBuilderEvents() {
+      // Pro Team preset buttons
+      document.querySelectorAll('.ff-team-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const active = btn.getAttribute('data-active');
+          const p1 = btn.getAttribute('data-p1');
+          const p2 = btn.getAttribute('data-p2');
+          const p3 = btn.getAttribute('data-p3');
+          const pet = btn.getAttribute('data-pet');
+          const loadoutItem = btn.getAttribute('data-loadout');
+
+          if (active && p1 && p2 && p3) {
+            this.ffSelectedLoadout = {
+              active,
+              p1,
+              p2,
+              p3,
+              pet: pet || 'rockie',
+              loadoutItem: loadoutItem || 'pocket_market'
+            };
+            this.updateFFCharacterBuilderUI();
+            const builder = document.getElementById('ffBuilderContainer');
+            if (builder) builder.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
+
+      // Pro team region filter
+      document.querySelectorAll('.pro-team-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.pro-team-filter-btn').forEach(b => {
+            b.classList.remove('active', 'bg-rose-600', 'text-white', 'shadow');
+            b.classList.add('text-slate-400');
+          });
+          btn.classList.add('active', 'bg-rose-600', 'text-white', 'shadow');
+          btn.classList.remove('text-slate-400');
+
+          const region = btn.getAttribute('data-region');
+          document.querySelectorAll('.pro-team-card').forEach(card => {
+            if (region === 'all' || card.getAttribute('data-region') === region) {
+              card.classList.remove('hidden');
+            } else {
+              card.classList.add('hidden');
+            }
+          });
+        });
+      });
+      // Slot card selection
+      document.querySelectorAll('.ff-slot-card').forEach(slot => {
+        slot.addEventListener('click', () => {
+          const slotType = slot.getAttribute('data-slot');
+          if (slotType) {
+            this.ffActiveTargetSlot = slotType;
+            this.updateFFCharacterBuilderUI();
+          }
+        });
+      });
+
+      // Quick Meta Presets (loads all 6 slots: Active, 3 Passives, Pet, Loadout)
+      document.querySelectorAll('.ff-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.getAttribute('data-preset');
+          if (preset === 'mafia_sniper') {
+            this.ffSelectedLoadout = { active: 'iris', p1: 'rafael', p2: 'maro', p3: 'laura', pet: 'falco', loadoutItem: 'scan' };
+          } else if (preset === 'tg_aztec') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'beaston', loadoutItem: 'pocket_market' };
+          } else if (preset === 'fozy_medic') {
+            this.ffSelectedLoadout = { active: 'dimitri', p1: 'thiva', p2: 'nairi', p3: 'moco', pet: 'waggor', loadoutItem: 'armor_crate' };
+          } else if (preset === 'tg_shanky') {
+            this.ffSelectedLoadout = { active: 'orion', p1: 'miguel', p2: 'dbee', p3: 'hayato', pet: 'cactus', loadoutItem: 'bounty_token' };
+          } else if (preset === 'hind_250hp') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'luqueta', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'hind_kd_drone') {
+            this.ffSelectedLoadout = { active: 'homer', p1: 'hayato', p2: 'jota', p3: 'moco', pet: 'zasil', loadoutItem: 'bonfire' };
+          } else if (preset === 'prinxz_rusher') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 's8ul_jack07') {
+            this.ffSelectedLoadout = { active: 'iris', p1: 'rafael', p2: 'maro', p3: 'laura', pet: 'falco', loadoutItem: 'scan' };
+          } else if (preset === 'lyon_gamezking') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'beaston', loadoutItem: 'pocket_market' };
+          } else if (preset === 'falcons_onfire') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'nikita', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'fluxo_mt7') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'caroline', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'buriram_moshi') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'luqueta', p3: 'jota', pet: 'rockie', loadoutItem: 'bounty_token' };
+          } else if (preset === 'horaa_renice') {
+            this.ffSelectedLoadout = { active: 'iris', p1: 'rafael', p2: 'maro', p3: 'laura', pet: 'falco', loadoutItem: 'scan' };
+          } else if (preset === 'tg_blitz') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'beaston', loadoutItem: 'pocket_market' };
+          } else if (preset === 'hind_250hp') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'luqueta', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'fireeyes_burst') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'luna', p2: 'hayato', p3: 'kelly', pet: 'fang', loadoutItem: 'pocket_market' };
+          } else if (preset === 's8ul_paris') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'lyon_ewc') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'kelly', p3: 'jota', pet: 'beaston', loadoutItem: 'pocket_market' };
+          } else if (preset === 'falcons_smg') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'nikita', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'fluxo_shotgun') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'hayato', p2: 'caroline', p3: 'kelly', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'buriram_wall') {
+            this.ffSelectedLoadout = { active: 'alok', p1: 'nairi', p2: 'moco', p3: 'kelly', pet: 'waggor', loadoutItem: 'pocket_market' };
+          } else if (preset === 'horaa_sniper') {
+            this.ffSelectedLoadout = { active: 'rafael', p1: 'laura', p2: 'maro', p3: 'moco', pet: 'falco', loadoutItem: 'scan' };
+          } else if (preset === 'fozy_medic') {
+            this.ffSelectedLoadout = { active: 'dimitri', p1: 'thiva', p2: 'nairi', p3: 'moco', pet: 'waggor', loadoutItem: 'armor_crate' };
+          } else if (preset === 'nero_dream') {
+            this.ffSelectedLoadout = { active: 'nero', p1: 'jota', p2: 'hayato', p3: 'lila', pet: 'robo', loadoutItem: 'pocket_market' };
+          } else if (preset === 'ray_finisher') {
+            this.ffSelectedLoadout = { active: 'ray', p1: 'hayato', p2: 'luna', p3: 'jota', pet: 'beaston', loadoutItem: 'bounty_token' };
+          } else if (preset === 'kla_hotdrop') {
+            this.ffSelectedLoadout = { active: 'k', p1: 'kla', p2: 'caroline', p3: 'jota', pet: 'falco', loadoutItem: 'armor_crate' };
+          } else if (preset === 'xayne_breaker') {
+            this.ffSelectedLoadout = { active: 'xayne', p1: 'jota', p2: 'hayato', p3: 'nairi', pet: 'yeti', loadoutItem: 'pocket_market' };
+          } else if (preset === 'm590_rusher') {
+            this.ffSelectedLoadout = { active: 'tatsuya', p1: 'jota', p2: 'hayato', p3: 'luqueta', pet: 'rockie', loadoutItem: 'pocket_market' };
+          } else if (preset === 'oscar_gloo_breaker') {
+            this.ffSelectedLoadout = { active: 'oscar', p1: 'jota', p2: 'hayato', p3: 'caroline', pet: 'beaston', loadoutItem: 'bounty_token' };
+          } else if (preset === 'morse_stealth') {
+            this.ffSelectedLoadout = { active: 'morse', p1: 'jota', p2: 'hayato', p3: 'luna', pet: 'flash', loadoutItem: 'pocket_market' };
+          } else if (preset === 'juggernaut') {
+            this.ffSelectedLoadout = { active: 'k', p1: 'luqueta', p2: 'jota', p3: 'hayato', pet: 'agent_hop', loadoutItem: 'bounty_token' };
+          } else if (preset === 'sonitri') {
+            this.ffSelectedLoadout = { active: 'dimitri', p1: 'thiva', p2: 'nairi', p3: 'sonia', pet: 'waggor', loadoutItem: 'bonfire' };
+          } else if (preset === 'sniper') {
+            this.ffSelectedLoadout = { active: 'chrono', p1: 'rafael', p2: 'maro', p3: 'laura', pet: 'dreki', loadoutItem: 'supply_crate' };
+          } else if (preset === 'orion') {
+            this.ffSelectedLoadout = { active: 'orion', p1: 'miguel', p2: 'hayato', p3: 'jota', pet: 'ottero', loadoutItem: 'pocket_market' };
+          } else if (preset === 'grenadier') {
+            this.ffSelectedLoadout = { active: 'steffie', p1: 'alvaro', p2: 'hayato', p3: 'jota', pet: 'beaston', loadoutItem: 'pocket_market' };
+          }
+          this.updateFFCharacterBuilderUI();
+        });
+      });
+
+      // Search bar
+      const searchInput = document.getElementById('ffCharSearchInput');
+      searchInput?.addEventListener('input', (e) => {
+        this.ffCharacterSearch = e.target.value.toLowerCase().trim();
+        const grid = document.getElementById('ffCardsGrid');
+        if (grid) grid.innerHTML = this.renderFFCardsHTML(this.getFilteredFFItems());
+      });
+
+      // Filter chips
+      document.querySelectorAll('.ff-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.ffCharacterFilter = btn.getAttribute('data-filter') || 'all';
+          document.querySelectorAll('.ff-filter-btn').forEach(b => {
+            b.classList.remove('bg-rose-600', 'text-white', 'shadow-md');
+            b.classList.add('bg-slate-900', 'text-slate-400', 'border', 'border-slate-800');
+          });
+          btn.classList.add('bg-rose-600', 'text-white', 'shadow-md');
+          btn.classList.remove('bg-slate-900', 'text-slate-400', 'border', 'border-slate-800');
+
+          const grid = document.getElementById('ffCardsGrid');
+          if (grid) grid.innerHTML = this.renderFFCardsHTML(this.getFilteredFFItems());
+        });
+      });
+
+      // Cards Click (Event Delegation on grid)
+      document.getElementById('ffCardsGrid')?.addEventListener('click', (e) => {
+        const card = e.target.closest('.ff-char-card');
+        if (!card) return;
+        const itemId = card.getAttribute('data-item-id');
+        const itemCategory = card.getAttribute('data-item-category'); // 'active', 'passive', 'pet', 'loadout'
+        if (!itemId) return;
+
+        if (itemCategory === 'active') {
+          this.ffSelectedLoadout.active = itemId;
+          this.ffActiveTargetSlot = 'p1'; // advance to first passive slot
+        } else if (itemCategory === 'passive') {
+          let target = this.ffActiveTargetSlot;
+          if (target !== 'p1' && target !== 'p2' && target !== 'p3') target = 'p1';
+
+          // Prevent duplicate passive if already equipped in another slot
+          const currentPassives = { p1: this.ffSelectedLoadout.p1, p2: this.ffSelectedLoadout.p2, p3: this.ffSelectedLoadout.p3 };
+          for (let slotKey in currentPassives) {
+            if (currentPassives[slotKey] === itemId && slotKey !== target) {
+              this.ffSelectedLoadout[slotKey] = this.ffSelectedLoadout[target];
+            }
+          }
+          this.ffSelectedLoadout[target] = itemId;
+
+          // Auto advance
+          if (target === 'p1') this.ffActiveTargetSlot = 'p2';
+          else if (target === 'p2') this.ffActiveTargetSlot = 'p3';
+          else this.ffActiveTargetSlot = 'pet';
+        } else if (itemCategory === 'pet') {
+          this.ffSelectedLoadout.pet = itemId;
+          this.ffActiveTargetSlot = 'loadout';
+        } else if (itemCategory === 'loadout') {
+          this.ffSelectedLoadout.loadoutItem = itemId;
+          this.ffActiveTargetSlot = 'active';
+        }
+
+        this.updateFFCharacterBuilderUI();
+      });
+
+      // Copy Comms
+      document.getElementById('copySkillComboBtn')?.addEventListener('click', (e) => {
+        const act = this.getFFCharacter(this.ffSelectedLoadout.active);
+        const p1 = this.getFFCharacter(this.ffSelectedLoadout.p1);
+        const p2 = this.getFFCharacter(this.ffSelectedLoadout.p2);
+        const p3 = this.getFFCharacter(this.ffSelectedLoadout.p3);
+        const pet = this.getFFPet(this.ffSelectedLoadout.pet);
+        const loadout = this.getFFLoadout(this.ffSelectedLoadout.loadoutItem);
+        const syn = this.calcFFSynergy(this.ffSelectedLoadout);
+        const text = `FF Pro Loadout (${syn.score}% Synergy - ${syn.role}): Active: ${act.name} (${act.skillName}) | Passives: ${p1.name} + ${p2.name} + ${p3.name} | Pet: ${pet.name} (${pet.skillName}) | Loadout: ${loadout.name} | Weapons: ${syn.weapons}`;
+        navigator.clipboard?.writeText(text);
+        e.target.textContent = "Copied to Clipboard! ✓";
+        setTimeout(() => { e.target.textContent = "Copy Loadout Comms"; }, 2000);
+      });
+    }
+
+    updateFFCharacterBuilderUI() {
+      const container = document.getElementById('ffBuilderContainer');
+      if (!container) return;
+
+      const activeChar = this.getFFCharacter(this.ffSelectedLoadout.active);
+      const p1Char = this.getFFCharacter(this.ffSelectedLoadout.p1);
+      const p2Char = this.getFFCharacter(this.ffSelectedLoadout.p2);
+      const p3Char = this.getFFCharacter(this.ffSelectedLoadout.p3);
+      const pet = this.getFFPet(this.ffSelectedLoadout.pet);
+      const loadout = this.getFFLoadout(this.ffSelectedLoadout.loadoutItem);
+      const syn = this.calcFFSynergy(this.ffSelectedLoadout);
+
+      // Update 6 slots deck HTML
+      const slotsDeck = document.getElementById('ffSlotsDeck');
+      if (slotsDeck) {
+        slotsDeck.innerHTML = `
+          <!-- Slot 1: Active -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'active' ? 'border-rose-400 ring-2 ring-rose-500/60 bg-slate-900 shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'border-rose-500/30 bg-slate-900/80 hover:border-rose-400'}" data-slot="active">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/50 text-[9px] font-bold">1: ACTIVE</span>
+              ${this.ffActiveTargetSlot === 'active' ? '<span class="text-[9px] text-rose-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${activeChar.accent}, #000);">
+                ${activeChar.name.charAt(0)}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${activeChar.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-rose-400 truncate">${activeChar.skillName}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1">${activeChar.cooldown}</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${activeChar.summary}</p>
+          </div>
+
+          <!-- Slot 2: Passive 1 -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p1' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p1">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">2: PASSIVE 1</span>
+              ${this.ffActiveTargetSlot === 'p1' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p1Char.accent}, #000);">
+                ${p1Char.name.charAt(0)}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${p1Char.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p1Char.skillName}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p1Char.role}</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p1Char.summary}</p>
+          </div>
+
+          <!-- Slot 3: Passive 2 -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p2' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p2">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">3: PASSIVE 2</span>
+              ${this.ffActiveTargetSlot === 'p2' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p2Char.accent}, #000);">
+                ${p2Char.name.charAt(0)}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${p2Char.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p2Char.skillName}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p2Char.role}</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p2Char.summary}</p>
+          </div>
+
+          <!-- Slot 4: Passive 3 -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'p3' ? 'border-cyan-400 ring-2 ring-cyan-500/60 bg-slate-900 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'border-cyan-500/30 bg-slate-900/80 hover:border-cyan-400'}" data-slot="p3">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/50 text-[9px] font-bold">4: PASSIVE 3</span>
+              ${this.ffActiveTargetSlot === 'p3' ? '<span class="text-[9px] text-cyan-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${p3Char.accent}, #000);">
+                ${p3Char.name.charAt(0)}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${p3Char.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-cyan-400 truncate">${p3Char.skillName}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${p3Char.role}</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${p3Char.summary}</p>
+          </div>
+
+          <!-- Slot 5: Pet Skill -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'pet' ? 'border-amber-400 ring-2 ring-amber-500/60 bg-slate-900 shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'border-amber-500/30 bg-slate-900/80 hover:border-amber-400'}" data-slot="pet">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">5: PET SKILL</span>
+              ${this.ffActiveTargetSlot === 'pet' ? '<span class="text-[9px] text-amber-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${pet.accent}, #000);">
+                🐾
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${pet.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-amber-400 truncate">${pet.skillName}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">${pet.role}</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${pet.summary}</p>
+          </div>
+
+          <!-- Slot 6: Battle Loadout -->
+          <div class="ff-slot-card cursor-pointer p-3 rounded-xl border transition-all ${this.ffActiveTargetSlot === 'loadout' ? 'border-emerald-400 ring-2 ring-emerald-500/60 bg-slate-900 shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'border-emerald-500/30 bg-slate-900/80 hover:border-emerald-400'}" data-slot="loadout">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/50 text-[9px] font-bold">6: LOADOUT</span>
+              ${this.ffActiveTargetSlot === 'loadout' ? '<span class="text-[9px] text-emerald-400 font-mono animate-pulse">● TARGET</span>' : ''}
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center font-heading font-black text-sm text-white shrink-0 shadow-md" style="background: linear-gradient(135deg, ${loadout.accent}, #000);">
+                🎒
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-heading font-bold text-white truncate">${loadout.name}</h4>
+                <div class="text-[10px] font-sub font-bold text-emerald-400 truncate">${loadout.type}</div>
+              </div>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono mb-1 truncate">Battle Item</div>
+            <p class="text-[10px] text-slate-300 leading-snug line-clamp-2">${loadout.summary}</p>
+          </div>
+        `;
+
+        // Re-bind slot clicks
+        slotsDeck.querySelectorAll('.ff-slot-card').forEach(slot => {
+          slot.addEventListener('click', () => {
+            const slotType = slot.getAttribute('data-slot');
+            if (slotType) {
+              this.ffActiveTargetSlot = slotType;
+              this.updateFFCharacterBuilderUI();
+            }
+          });
+        });
+      }
+
+      // Update Synergy Banner HTML
+      const banner = document.getElementById('ffSynergyBanner');
+      if (banner) {
+        banner.innerHTML = `
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="text-2xl lg:text-3xl font-heading font-black text-amber-400 font-mono">
+                  ${syn.score}% Synergy
+                </span>
+                <span class="cyber-badge ${syn.badgeColor} text-xs font-bold font-sub px-3 py-1">
+                  ${syn.role}
+                </span>
+                <span class="text-xs text-slate-400 font-mono">
+                  Weapons: <strong class="text-amber-300">${syn.weapons}</strong>
+                </span>
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                ${syn.analysis}
+              </p>
+              <div class="flex flex-wrap items-center gap-4 text-[11px] font-mono">
+                <span class="text-amber-300/90">🐾 Pet Synergy: <strong>${syn.petTip}</strong></span>
+                <span class="text-cyan-300/90">💡 Underdog Tip: <strong>${syn.proTip}</strong></span>
+              </div>
+            </div>
+            <button id="copySkillComboBtn" class="px-5 py-3 bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 text-white font-sub font-bold rounded-xl text-xs uppercase tracking-wider shrink-0 transition-all hover:scale-105 shadow-lg shadow-rose-900/30">
+              Copy Loadout Comms
+            </button>
+          </div>
+        `;
+
+        document.getElementById('copySkillComboBtn')?.addEventListener('click', (e) => {
+          const act = this.getFFCharacter(this.ffSelectedLoadout.active);
+          const p1 = this.getFFCharacter(this.ffSelectedLoadout.p1);
+          const p2 = this.getFFCharacter(this.ffSelectedLoadout.p2);
+          const p3 = this.getFFCharacter(this.ffSelectedLoadout.p3);
+          const pet = this.getFFPet(this.ffSelectedLoadout.pet);
+          const loadout = this.getFFLoadout(this.ffSelectedLoadout.loadoutItem);
+          const text = `FF Pro Loadout (${syn.score}% Synergy - ${syn.role}): Active: ${act.name} (${act.skillName}) | Passives: ${p1.name} + ${p2.name} + ${p3.name} | Pet: ${pet.name} (${pet.skillName}) | Loadout: ${loadout.name} | Weapons: ${syn.weapons}`;
+          navigator.clipboard?.writeText(text);
+          e.target.textContent = "Copied to Clipboard! ✓";
+          setTimeout(() => { e.target.textContent = "Copy Loadout Comms"; }, 2000);
+        });
+      }
+
+      // Update Cards Grid equipped state
+      const grid = document.getElementById('ffCardsGrid');
+      if (grid) {
+        grid.innerHTML = this.renderFFCardsHTML(this.getFilteredFFItems());
+      }
+    }
+
+    // --- TACTICAL WHITEBOARD TAB (WITH PRO ROTATIONS) ---
+    renderWhiteboardTab(container) {
+      // Filter pro rotations for the current game
+      const gameRotations = Object.values(PRO_ROTATIONS).filter(r => r.game === this.activeGame);
+      const defaultRotation = gameRotations[0] || Object.values(PRO_ROTATIONS)[0];
+
+      container.innerHTML = `
+        <div class="space-y-4 animate-fade-in">
+          <!-- SQUAD LIVE SYNC ROOM BAR (SUPABASE REALTIME) -->
+          <div class="cyber-panel p-3 rounded-xl border border-emerald-500/40 bg-gradient-to-r from-slate-950 via-[#0a1e1b] to-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg shadow-emerald-950/20 mb-3">
+            <div class="flex items-center gap-2">
+              <span id="tacticalRoomLiveDot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+              <div>
+                <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span>📡</span>
+                  <span>Squad Live Sync Room:</span>
+                </span>
+                <div id="activeTacticalRoomLabel" class="text-[10px] font-mono text-slate-400">Status: Standalone / Offline</div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input type="text" id="tacticalRoomCodeInput" placeholder="ROOM (e.g. UDG7)" maxlength="8" class="bg-slate-900 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-emerald-300 font-mono uppercase focus:outline-none w-28 text-center" />
+              <button id="joinTacticalRoomBtn" class="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-bold text-xs rounded-lg uppercase tracking-wider shadow">
+                Join Room
+              </button>
+              <button id="createTacticalRoomBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs rounded-lg uppercase">
+                ⚡ Code
+              </button>
+            </div>
+          </div>
+
+          <!-- Pro Rotations Selector Bar -->
+          <div class="cyber-panel p-4 rounded-xl border border-amber-500/40 bg-gradient-to-r from-slate-900 via-[#141d33] to-slate-900">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                  <h3 class="text-base font-heading font-bold text-white uppercase tracking-wider">
+                    Tier-1 Pro Esports Rotation Playbook
+                  </h3>
+                </div>
+                <p class="text-xs text-slate-300 mt-0.5">
+                  Select a real pro team strategy below to render their exact rotation routes, split positions, danger zones, and voice comms.
+                </p>
+              </div>
+
+              <!-- Preset buttons -->
+              <div class="flex flex-wrap gap-2">
+                ${gameRotations.map((rot, idx) => `
+                  <button class="pro-rotation-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all ${idx === 0 ? 'bg-amber-500/20 text-amber-300 border-amber-400' : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:border-slate-500'}"
+                          data-rot-id="${rot.id}">
+                    ${rot.team.split('/')[0]} : ${rot.title.split(':')[0]}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Game Map Quick Selector Bar (Strictly Separated by Game) -->
+          <div class="cyber-panel p-3 rounded-xl border border-slate-800 bg-slate-950/80 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-heading font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <span>🗺️</span> Tactical Map:
+              </span>
+              <span class="text-[11px] text-slate-400">Select map by official game:</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <!-- Free Fire Maps Group -->
+              <div class="flex items-center gap-1 bg-rose-950/50 p-1 rounded-lg border border-rose-500/40">
+                <span class="text-[9px] font-mono font-bold text-rose-300 px-1 uppercase">Free Fire:</span>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all ${this.activeGame === 'freefire' ? 'bg-rose-600 text-white shadow active' : 'bg-slate-900 text-slate-300 hover:text-white'}" data-map="bermuda">Bermuda</button>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-map="nexterra">NeXTerra</button>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-map="solara">Solara</button>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-map="purgatory">Purgatory</button>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-map="kalahari">Kalahari</button>
+              </div>
+
+              <!-- BGMI Maps Group -->
+              <div class="flex items-center gap-1 bg-amber-950/50 p-1 rounded-lg border border-amber-500/40">
+                <span class="text-[9px] font-mono font-bold text-amber-300 px-1 uppercase">BGMI:</span>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all ${this.activeGame === 'bgmi' ? 'bg-amber-600 text-black shadow active font-black' : 'bg-slate-900 text-slate-300 hover:text-white'}" data-map="erangel">Erangel</button>
+              </div>
+
+              <!-- HoK Maps Group -->
+              <div class="flex items-center gap-1 bg-sky-950/50 p-1 rounded-lg border border-sky-500/40">
+                <span class="text-[9px] font-mono font-bold text-sky-300 px-1 uppercase">HoK:</span>
+                <button class="wb-map-pill px-2 py-0.5 rounded text-[11px] font-sub font-bold transition-all ${this.activeGame === 'hok' ? 'bg-sky-600 text-white shadow active' : 'bg-slate-900 text-slate-300 hover:text-white'}" data-map="hok_gorge">Gorge of Kings</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SAFE ZONE SIMULATOR & HARD SHIFT CONTROL BAR (FEATURE 2) -->
+          <div class="cyber-panel p-3.5 rounded-xl border border-blue-500/40 bg-gradient-to-r from-slate-950 via-[#0b162c] to-slate-950 flex flex-col xl:flex-row xl:items-center justify-between gap-3 shadow-lg shadow-blue-950/20">
+            <!-- Zone Phase Selectors -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping"></span>
+                <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span>🎯</span>
+                  <span>Safe Zone Simulator:</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-800">
+                <button class="wb-zone-phase-btn active px-2.5 py-1 rounded text-[11px] font-sub font-bold transition-all bg-blue-600 text-white shadow" data-phase="1">Z1 (85%)</button>
+                <button class="wb-zone-phase-btn px-2.5 py-1 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="2">Z2 (65%)</button>
+                <button class="wb-zone-phase-btn px-2.5 py-1 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="3">Z3 (45%)</button>
+                <button class="wb-zone-phase-btn px-2.5 py-1 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="4">Z4 (30%)</button>
+                <button class="wb-zone-phase-btn px-2.5 py-1 rounded text-[11px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="5">Z5 Final (15%)</button>
+              </div>
+            </div>
+
+            <!-- Hard Shift Shortcuts & Simulation Actions -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-800">
+                <span class="text-[10px] font-mono font-bold text-amber-400 px-1 uppercase">Shift:</span>
+                <button class="wb-zone-shift-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="N" title="Hard Shift North (Predictive Shift)">⬆️ North</button>
+                <button class="wb-zone-shift-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="S" title="Hard Shift South">⬇️ South</button>
+                <button class="wb-zone-shift-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="W" title="Hard Shift West">⬅️ West</button>
+                <button class="wb-zone-shift-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="E" title="Hard Shift East">➡️ East</button>
+                <button class="wb-zone-shift-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="CENTER" title="Center Zone">🎯 Center</button>
+              </div>
+
+              <!-- Shrink Simulation & Zone Toggle -->
+              <div class="flex items-center gap-1.5">
+                <button id="wbSimulateShrinkBtn" class="px-3 py-1 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-sub font-bold text-xs rounded-lg uppercase tracking-wider flex items-center gap-1 shadow">
+                  <span>▶</span>
+                  <span id="wbSimulateShrinkBtnText">Simulate Shrink</span>
+                </button>
+                <button id="wbToggleSafeZoneBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-sub text-xs rounded-lg" title="Show or Hide Safe Zone">
+                  👁️ Zone
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Whiteboard Canvas & Drawing Tools -->
+          <div class="cyber-panel p-3 rounded-xl border border-cyan-500/30 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="text-[10px] font-sub uppercase text-slate-400">Map Dropdown</label>
+              <select id="mapSelect" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-primary font-sub font-bold outline-none">
+                <optgroup label="🔴 FREE FIRE & FF MAX MAPS">
+                  <option value="bermuda" ${this.activeGame === 'freefire' ? 'selected' : ''}>Bermuda (Free Fire)</option>
+                  <option value="nexterra">NeXTerra (Zero-G Arena)</option>
+                  <option value="solara">Solara (Helios Solar Fields)</option>
+                  <option value="purgatory">Purgatory (Free Fire)</option>
+                  <option value="kalahari">Kalahari (Refinery Gantry)</option>
+                </optgroup>
+                <optgroup label="🟡 BGMI / PUBG MOBILE MAPS">
+                  <option value="erangel" ${this.activeGame === 'bgmi' ? 'selected' : ''}>Erangel (BGMI)</option>
+                </optgroup>
+                <optgroup label="🔵 HONOR OF KINGS MAPS">
+                  <option value="hok_gorge" ${this.activeGame === 'hok' ? 'selected' : ''}>Gorge of Kings (HoK)</option>
+                </optgroup>
+              </select>
+
+              <button id="wbMapStyleBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-amber-500/40 rounded text-xs text-amber-300 font-sub flex items-center gap-1">
+                <span>🛰️</span> Satellite Map
+              </button>
+
+              <div class="flex flex-wrap items-center gap-1 ml-1">
+                <button class="wb-tool-btn active px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="freedraw">Brush</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="arrow">Arrow</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="circle">Circle</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="token">Pin</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="utility">Smoke</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-amber-300" data-tool="gloo">Gloo</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-cyan-300" data-tool="text">Note</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="line">Line</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-amber-300" data-tool="rot_arrow">Shift Arrow</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-cyan-300" data-tool="safezone">Move Zone</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-rose-600/60 rounded text-xs text-rose-300" data-tool="eraser">🧹 Eraser</button>
+              </div>
+
+              <!-- Pin Role selector -->
+              <div class="flex items-center gap-1 bg-slate-900/90 border border-slate-700/80 px-2 py-0.5 rounded">
+                <span class="text-[10px] text-slate-400 font-sub">ROLE:</span>
+                <select id="wbPinRoleSelect" class="bg-transparent text-xs text-cyan-300 font-mono font-bold outline-none cursor-pointer">
+                  <option value="IGL">IGL</option>
+                  <option value="RUS">RUS</option>
+                  <option value="SUP">SUP</option>
+                  <option value="SCT">SCT</option>
+                  <option value="SNP">SNP</option>
+                </select>
+              </div>
+
+              <!-- Width selector -->
+              <div class="flex items-center gap-1 bg-slate-900/90 border border-slate-700/80 px-2 py-0.5 rounded">
+                <span class="text-[10px] text-slate-400 font-sub">SIZE:</span>
+                <select id="wbBrushWidthSelect" class="bg-transparent text-xs text-slate-300 font-mono outline-none cursor-pointer">
+                  <option value="2">2px</option>
+                  <option value="4" selected>4px</option>
+                  <option value="7">7px</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1 bg-slate-900 p-1 rounded border border-slate-800">
+                <button class="wb-col-btn w-4 h-4 rounded-full border border-white" style="background:#00f0ff" data-color="#00f0ff" title="Cyan"></button>
+                <button class="wb-col-btn w-4 h-4 rounded-full" style="background:#f59e0b" data-color="#f59e0b" title="Amber"></button>
+                <button class="wb-col-btn w-4 h-4 rounded-full" style="background:#ef4444" data-color="#ef4444" title="Red"></button>
+                <button class="wb-col-btn w-4 h-4 rounded-full" style="background:#10b981" data-color="#10b981" title="Emerald"></button>
+                <button class="wb-col-btn w-4 h-4 rounded-full" style="background:#a855f7" data-color="#a855f7" title="Purple"></button>
+                <button class="wb-col-btn w-4 h-4 rounded-full" style="background:#ffffff" data-color="#ffffff" title="White"></button>
+              </div>
+              <button id="wbUndoBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 font-sub">Undo</button>
+              <button id="wbClearBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-rose-300 font-sub">Clear</button>
+              <button id="wbExportBtn" class="px-3 py-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-bold rounded text-xs uppercase">Export</button>
+            </div>
+          </div>
+
+          <!-- Canvas -->
+          <div class="cyber-panel p-2 rounded-xl border border-slate-800 flex justify-center items-center overflow-hidden">
+            <canvas id="whiteboardCanvas" class="rounded-lg shadow-2xl"></canvas>
+          </div>
+
+          <!-- Tactical Breakdown Card Container -->
+          <div id="proRotationCardContainer"></div>
+        </div>
+      `;
+
+      this.whiteboard = new TacticalWhiteboard('whiteboardCanvas');
+      if (defaultRotation) {
+        this.whiteboard.loadPreset(defaultRotation.id);
+      }
+
+      // Bind pro rotation buttons
+      container.querySelectorAll('.pro-rotation-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          container.querySelectorAll('.pro-rotation-btn').forEach(b => {
+            b.classList.remove('bg-amber-500/20', 'text-amber-300', 'border-amber-400');
+            b.classList.add('bg-slate-900/80', 'text-slate-300', 'border-slate-700');
+          });
+          btn.classList.add('bg-amber-500/20', 'text-amber-300', 'border-amber-400');
+          btn.classList.remove('bg-slate-900/80', 'text-slate-300', 'border-slate-700');
+
+          const rotId = btn.getAttribute('data-rot-id');
+          if (rotId && this.whiteboard) {
+            this.whiteboard.loadPreset(rotId);
+          }
+        });
+      });
+
+      // Bind canvas UI controls
+      const mapSelect = document.getElementById('mapSelect');
+      const updateMapPills = (selectedMap) => {
+        container.querySelectorAll('.wb-map-pill').forEach(pill => {
+          if (pill.getAttribute('data-map') === selectedMap) {
+            pill.classList.add('active', 'bg-rose-600', 'text-white', 'shadow');
+            pill.classList.remove('bg-slate-900', 'text-slate-300');
+          } else {
+            pill.classList.remove('active', 'bg-rose-600', 'bg-amber-600', 'bg-sky-600', 'text-white', 'text-black', 'shadow');
+            pill.classList.add('bg-slate-900', 'text-slate-300');
+          }
+        });
+      };
+
+      if (mapSelect) {
+        mapSelect.addEventListener('change', (e) => {
+          const val = e.target.value;
+          this.whiteboard.setMap(val);
+          updateMapPills(val);
+        });
+      }
+
+      container.querySelectorAll('.wb-map-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          const mapVal = pill.getAttribute('data-map');
+          if (mapVal && this.whiteboard) {
+            this.whiteboard.setMap(mapVal);
+            if (mapSelect) mapSelect.value = mapVal;
+            updateMapPills(mapVal);
+          }
+        });
+      });
+
+      const toolBtns = container.querySelectorAll('.wb-tool-btn');
+      toolBtns.forEach(b => {
+        b.addEventListener('click', () => {
+          toolBtns.forEach(btn => btn.classList.remove('active', 'border-primary', 'text-primary'));
+          b.classList.add('active', 'border-primary', 'text-primary');
+          this.whiteboard.setTool(b.getAttribute('data-tool'));
+        });
+      });
+
+      const colBtns = container.querySelectorAll('.wb-col-btn');
+      colBtns.forEach(b => {
+        b.addEventListener('click', () => {
+          colBtns.forEach(btn => btn.classList.remove('border', 'border-white'));
+          b.classList.add('border', 'border-white');
+          this.whiteboard.setColor(b.getAttribute('data-color'));
+        });
+      });
+
+      document.getElementById('wbUndoBtn')?.addEventListener('click', () => this.whiteboard.undo());
+      document.getElementById('wbClearBtn')?.addEventListener('click', () => this.whiteboard.clearAll());
+      document.getElementById('wbExportBtn')?.addEventListener('click', () => this.whiteboard.exportPlan());
+      // Safe Zone Simulator Event Bindings (Feature 2)
+      container.querySelectorAll('.wb-zone-phase-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const phase = parseInt(btn.getAttribute('data-phase'), 10);
+          if (this.whiteboard && phase) {
+            this.whiteboard.setZonePhase(phase);
+          }
+        });
+      });
+
+      container.querySelectorAll('.wb-zone-shift-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const shift = btn.getAttribute('data-shift');
+          if (this.whiteboard && shift) {
+            this.whiteboard.applyHardShift(shift);
+          }
+        });
+      });
+
+      document.getElementById('wbSimulateShrinkBtn')?.addEventListener('click', () => {
+        if (this.whiteboard) this.whiteboard.simulateZoneShrink();
+      });
+
+      document.getElementById('wbToggleSafeZoneBtn')?.addEventListener('click', () => {
+        if (this.whiteboard) this.whiteboard.toggleSafeZone();
+      });
+
+
+      document.getElementById('wbPinRoleSelect')?.addEventListener('change', (e) => {
+        if (this.whiteboard) this.whiteboard.selectedPinRole = e.target.value;
+      });
+
+      document.getElementById('wbBrushWidthSelect')?.addEventListener('change', (e) => {
+        if (this.whiteboard) this.whiteboard.brushSize = parseInt(e.target.value, 10);
+      });
+
+      document.getElementById('wbMapStyleBtn')?.addEventListener('click', (e) => {
+        if (!this.whiteboard) return;
+        this.whiteboard.mapStyle = this.whiteboard.mapStyle === 'satellite' ? 'vector' : 'satellite';
+        const isSat = this.whiteboard.mapStyle === 'satellite';
+        e.currentTarget.innerHTML = isSat ? '<span>🛰️</span> Satellite Map' : '<span>📐</span> Vector Grid';
+        this.whiteboard.redrawAll();
+      });
+    }
+
+    // --- MAP ATLAS & POIS TAB (STRICTLY SEPARATED BY GAME) ---
+    renderAtlasTab(container) {
+      const activeFilter = (this.activeGame === 'freefire') ? 'freefire' : (this.activeGame === 'hok') ? 'hok' : (this.activeGame === 'bgmi') ? 'bgmi' : 'freefire';
+
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <!-- Atlas Header & Game Selector Bar -->
+          <div class="cyber-panel p-5 rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-slate-950 via-[#0d1726] to-slate-950">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-cyan-400 animate-ping"></span>
+                  <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                    Esports Satellite Map Atlas & Drop POI Directory
+                  </h3>
+                </div>
+                <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                  Real high-resolution satellite aerial maps strictly separated by game. Explore hot drops, high-ground perches, guaranteed underdog loot splits, and launch any map directly onto the Tactical Whiteboard.
+                </p>
+              </div>
+
+              <!-- Quick Game Filters (Separated) -->
+              <div class="flex flex-wrap items-center gap-2 bg-slate-950/90 p-1.5 rounded-xl border border-slate-800">
+                <button class="atlas-filter-btn ${activeFilter === 'freefire' ? 'active bg-rose-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-filter="freefire">
+                  <span>🔥</span> Free Fire Maps (5)
+                </button>
+                <button class="atlas-filter-btn ${activeFilter === 'bgmi' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-filter="bgmi">
+                  <span>🟡</span> BGMI Maps (1)
+                </button>
+                <button class="atlas-filter-btn ${activeFilter === 'hok' ? 'active bg-sky-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-filter="hok">
+                  <span>🔵</span> Honor of Kings (1)
+                </button>
+                <button class="atlas-filter-btn ${activeFilter === 'all' ? 'active bg-slate-700 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-filter="all">
+                  <span>🌐</span> All Maps (7)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- SECTION 1: FREE FIRE & FREE FIRE MAX TOURNAMENT MAPS (5 MAPS) -->
+          <!-- ============================================================ -->
+          <div class="atlas-game-section space-y-4 ${activeFilter !== 'all' && activeFilter !== 'freefire' ? 'hidden' : ''}" data-game="freefire">
+            <!-- Game Category Header -->
+            <div class="flex items-center justify-between border-b border-rose-500/30 pb-3 pt-2">
+              <div class="flex items-center gap-2.5">
+                <span class="w-3.5 h-3.5 rounded bg-rose-500 flex items-center justify-center text-[9px] font-black text-white">FF</span>
+                <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  Free Fire & FF MAX Official Tournament Maps
+                  <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px]">5 Official Maps</span>
+                </h4>
+              </div>
+              <span class="text-xs font-mono text-slate-400 hidden sm:inline">FFWS Global Championship Rotation</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <!-- Map Card 1: Bermuda -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-rose-500/30 flex flex-col justify-between atlas-card" data-game="freefire">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/bermuda_map.jpg" data-title="Bermuda (Tactical Satellite Map - Free Fire)">
+                    <img src="assets/maps/bermuda_map.jpg" alt="Bermuda Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-rose-950/90 text-rose-300 border border-rose-500/40 text-[10px]">Free Fire</span>
+                      <span class="cyber-badge bg-slate-900/90 text-slate-300 border border-slate-700 text-[10px]">FFWS Arena</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold">Bermuda</h4>
+                        <p class="text-[11px] text-rose-300 font-sub">King of High Ground & Gloo Clashes</p>
+                      </div>
+                      <span class="text-xs bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-rose-400 text-xs mb-1">High Ground & Rush Hotspots:</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Peak (145m):</strong> <span class="text-slate-400">Controls 70% of zone pulls, 360° roof perimeter.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Clock Tower:</strong> <span class="text-slate-400">Close-range shotgun arena, fast underground escape.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Factory:</strong> <span class="text-slate-400">Roof jump rushers, SMG spray and Gloo loot.</span></div>
+                        <div class="flex justify-between"><strong>Mill:</strong> <span class="text-slate-400">M82B sniper ledge, punishes Bullseye crosses.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-emerald-500/20">
+                      <div class="font-sub font-bold text-emerald-400 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>Rim Nam Village / Plantation</strong>. Loot 8+ Gloo Walls undisturbed, take western ridge stairs to Peak before the 2-minute mark, and set up your 360-degree gloo defense.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="bermuda" data-game="freefire">
+                    Open Bermuda on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+
+              <!-- Map Card 2: NeXTerra (OFFICIAL GARENA MAP) -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-cyan-500/40 bg-gradient-to-b from-[#0b172a] to-[#070d17] flex flex-col justify-between atlas-card" data-game="freefire">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/nexterra_map.jpg" data-title="NeXTerra (Official Garena Satellite Minimap - Free Fire)">
+                    <img src="assets/maps/nexterra_map.jpg" alt="NeXTerra Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 text-[10px]">Free Fire • Official</span>
+                      <span class="cyber-badge bg-slate-900/90 text-emerald-300 border border-emerald-700 text-[10px]">Zero-G & Portals</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold text-cyan-300">NeXTerra</h4>
+                        <p class="text-[11px] text-slate-300 font-sub">Intellect Center & Grav Labs (2000m)</p>
+                      </div>
+                      <span class="text-xs bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-cyan-400 text-xs mb-1">Official Garena POIs (In-Game Radar):</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Intellect Center (Top):</strong> <span class="text-slate-400">North circular island fortress surrounded by water canal.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Grav Labs (Lower-Left):</strong> <span class="text-slate-400">Dual circular zero-g domes, anti-gravity jump tubes.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Deca Square (Bottom):</strong> <span class="text-slate-400">Grand south plaza paved with vibrant pink & yellow tiles.</span></div>
+                        <div class="flex justify-between"><strong>Center Hubs:</strong> <span class="text-slate-400">Farmtopia, Plazaria, Boxing Gym, Zipway & Mud Site.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-cyan-500/20">
+                      <div class="font-sub font-bold text-cyan-300 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>Mud Site (grid G-H, O)</strong>. 0% early contest against Tier-1 squads dropping Intellect Center. Loot shotguns & 8+ Gloo Walls, then rotate via Zipway to gatekeep squads rotating toward Deca Square.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="nexterra" data-game="freefire">
+                    Open NeXTerra on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+
+              <!-- Map Card 3: Solara (OFFICIAL OB49 8TH ANNIVERSARY MAP) -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-emerald-500/40 bg-gradient-to-b from-[#0c221a] to-[#07130e] flex flex-col justify-between atlas-card" data-game="freefire">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/solara_map.jpg" data-title="Solara (Official Garena OB49 Satellite Minimap - Free Fire)">
+                    <img src="assets/maps/solara_map.jpg" alt="Solara Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 text-[10px]">Free Fire • OB49</span>
+                      <span class="cyber-badge bg-slate-900/90 text-cyan-300 border border-cyan-700 text-[10px]">Slide Rail System</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold text-emerald-300">Solara</h4>
+                        <p class="text-[11px] text-slate-300 font-sub">The Hub & Bloomtown (1400m Port City)</p>
+                      </div>
+                      <span class="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-emerald-400 text-xs mb-1">Official Garena POIs (In-Game Radar):</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Slide Rail Network:</strong> <span class="text-slate-400">Elevated yellow rail system looping across the entire island.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Triangle Fortress (Center):</strong> <span class="text-slate-400">Geometric center fortress overlooking Bloomtown & bridges.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Bloomtown (South):</strong> <span class="text-slate-400">Pink jacaranda tree streets & tight CQB housing blocks.</span></div>
+                        <div class="flex justify-between"><strong>Coastal Stations:</strong> <span class="text-slate-400">West Pier Terminal, East Lagoon Basin & South-East Docks.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-cyan-500/20">
+                      <div class="font-sub font-bold text-cyan-300 uppercase text-[11px] mb-0.5">Slide Rail Tactics & Underdog Drops:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>South-East Harbor (grid P, G-H)</strong>. 0% contest, secure Level 3 Armor, jump onto the yellow <strong>Slide Rail System</strong> with on-rail Gloo Shields, and rotate past the East Lagoon into Triangle Fortress.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="solara" data-game="freefire">
+                    Open Solara on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+
+              <!-- Map Card 4: Purgatory -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-orange-500/30 flex flex-col justify-between atlas-card" data-game="freefire">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/purgatory_map.jpg" data-title="Purgatory (Tactical River Satellite Map - Free Fire)">
+                    <img src="assets/maps/purgatory_map.jpg" alt="Purgatory Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-orange-950/90 text-orange-300 border border-orange-500/40 text-[10px]">Free Fire</span>
+                      <span class="cyber-badge bg-slate-900/90 text-slate-300 border border-slate-700 text-[10px]">River Chokeholds</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold">Purgatory</h4>
+                        <p class="text-[11px] text-orange-300 font-sub">Brasilia Island & River Chokepoints</p>
+                      </div>
+                      <span class="text-xs bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-orange-400 text-xs mb-1">Hot Drop Clusters & Bridges:</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Brasilia (Center):</strong> <span class="text-slate-400">High-intensity 3-story housing blocks, massive loot.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Moathouse:</strong> <span class="text-slate-400">Isolated mansion island, 1-way bridge snipe trap.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Campsite:</strong> <span class="text-slate-400">Ziplines to central hills, safe early rotation.</span></div>
+                        <div class="flex justify-between"><strong>Marbleworks:</strong> <span class="text-slate-400">Wide industrial warehouses, high vest spawn rate.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-emerald-500/20">
+                      <div class="font-sub font-bold text-emerald-400 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>Quarry / Mt. Villa South-West Split</strong>. 0% early contest, loot Level 3 vests, and cross the southern river before the bridge campers arrive at Brasilia.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="purgatory" data-game="freefire">
+                    Open Purgatory on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+
+              <!-- Map Card 5: Kalahari -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-yellow-500/30 flex flex-col justify-between atlas-card" data-game="freefire">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/kalahari_map.jpg" data-title="Kalahari (Official Satellite Tournament Map - Free Fire)">
+                    <img src="assets/maps/kalahari_map.jpg" alt="Kalahari Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-yellow-950/90 text-yellow-300 border border-yellow-500/40 text-[10px]">Free Fire</span>
+                      <span class="cyber-badge bg-slate-900/90 text-slate-300 border border-slate-700 text-[10px]">Desert & Verticality</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold">Kalahari</h4>
+                        <p class="text-[11px] text-yellow-300 font-sub">The Gantry & Zipline Fortress</p>
+                      </div>
+                      <span class="text-xs bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-yellow-400 text-xs mb-1">High Ground & Sniper Perches:</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Refinery (140m Gantry):</strong> <span class="text-slate-400">360° sightline, 4 ziplines, dominant vertical king.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Council Hall & Shrines:</strong> <span class="text-slate-400">High-tier marksman loot, canyon choke point.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Command Post:</strong> <span class="text-slate-400">Double-story industrial blocks with crossfire.</span></div>
+                        <div class="flex justify-between"><strong>Santa Catarina:</strong> <span class="text-slate-400">Shipwreck CQB, tight corners for M1887 one-taps.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-emerald-500/20">
+                      <div class="font-sub font-bold text-emerald-400 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>The Sub / Mammoth South Ridge</strong>. 0% early contest, grab Woodpecker / AC80, and take the southern zipline directly to the secondary gantry of Refinery.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="kalahari" data-game="freefire">
+                    Open Kalahari on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- SECTION 2: BGMI / PUBG MOBILE TOURNAMENT MAPS (1 MAP)        -->
+          <!-- ============================================================ -->
+          <div class="atlas-game-section space-y-4 ${activeFilter !== 'all' && activeFilter !== 'bgmi' ? 'hidden' : ''}" data-game="bgmi">
+            <!-- Game Category Header -->
+            <div class="flex items-center justify-between border-b border-amber-500/30 pb-3 pt-2">
+              <div class="flex items-center gap-2.5">
+                <span class="w-3.5 h-3.5 rounded bg-amber-500 flex items-center justify-center text-[9px] font-black text-black">BG</span>
+                <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  BGMI & PUBG Mobile Official Battlegrounds
+                  <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">Official 8x8 km</span>
+                </h4>
+              </div>
+              <span class="text-xs font-mono text-slate-400 hidden sm:inline">BGIS / BMPS Competitive Circuit</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <!-- Map Card: Erangel -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-amber-500/30 flex flex-col justify-between atlas-card" data-game="bgmi">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/erangel_map.jpg" data-title="Erangel (8x8 Tactical Satellite Map - BGMI)">
+                    <img src="assets/maps/erangel_map.jpg" alt="Erangel Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-amber-950/90 text-amber-300 border border-amber-500/40 text-[10px]">BGMI / PUBG</span>
+                      <span class="cyber-badge bg-slate-900/90 text-slate-300 border border-slate-700 text-[10px]">8x8 km</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold">Erangel</h4>
+                        <p class="text-[11px] text-amber-300 font-sub">Official Tournament Map</p>
+                      </div>
+                      <span class="text-xs bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-amber-400 text-xs mb-1">Tier-1 Hot Drop Clusters:</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Pochinki:</strong> <span class="text-slate-400">Dead center zone, heavy CQB, fast compound crashes.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Military Island:</strong> <span class="text-slate-400">L3 Armor, flare spawns, double bridge chokepoints.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>School / Rozhok:</strong> <span class="text-slate-400">Water chokehold control, high-speed vehicle access.</span></div>
+                        <div class="flex justify-between"><strong>Georgopol:</strong> <span class="text-slate-400">Dense 5.56 AR ammo, containers parkour advantage.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-emerald-500/20">
+                      <div class="font-sub font-bold text-emerald-400 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Drop <strong>Gatka / Farm West Split</strong>. 0% early contest, guaranteed 2 Dacias on the asphalt road, and direct high-ground access to Rozhok hill before Phase 2.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="erangel" data-game="bgmi">
+                    Open Erangel on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- SECTION 3: HONOR OF KINGS 5V5 MOBA ARENA (1 MAP)             -->
+          <!-- ============================================================ -->
+          <div class="atlas-game-section space-y-4 ${activeFilter !== 'all' && activeFilter !== 'hok' ? 'hidden' : ''}" data-game="hok">
+            <!-- Game Category Header -->
+            <div class="flex items-center justify-between border-b border-sky-500/30 pb-3 pt-2">
+              <div class="flex items-center gap-2.5">
+                <span class="w-3.5 h-3.5 rounded bg-sky-500 flex items-center justify-center text-[9px] font-black text-black">HOK</span>
+                <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  Honor of Kings 5v5 MOBA Arena
+                  <span class="cyber-badge bg-sky-950 text-sky-300 border border-sky-500/40 text-[10px]">KIC Championship</span>
+                </h4>
+              </div>
+              <span class="text-xs font-mono text-slate-400 hidden sm:inline">KIC World Championship Arena</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <!-- Map Card: Gorge of Kings -->
+              <div class="cyber-panel rounded-2xl overflow-hidden border border-sky-500/30 flex flex-col justify-between atlas-card" data-game="hok">
+                <div>
+                  <div class="relative group cursor-pointer overflow-hidden map-zoom-trigger" data-img="assets/maps/hok_gorge_map.jpg" data-title="Gorge of Kings (5v5 MOBA Arena - Honor of Kings)">
+                    <img src="assets/maps/hok_gorge_map.jpg" alt="Gorge of Kings Map" class="w-full h-64 object-cover object-center group-hover:scale-105 transition-transform duration-300" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80"></div>
+                    <div class="absolute top-3 left-3 flex items-center gap-1.5">
+                      <span class="cyber-badge bg-sky-950/90 text-sky-300 border border-sky-500/40 text-[10px]">Honor of Kings</span>
+                      <span class="cyber-badge bg-slate-900/90 text-slate-300 border border-slate-700 text-[10px]">KIC 5v5 MOBA</span>
+                    </div>
+                    <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white">
+                      <div>
+                        <h4 class="text-base font-heading font-bold">Gorge of Kings</h4>
+                        <p class="text-[11px] text-sky-300 font-sub">3 Lanes & Dragon River</p>
+                      </div>
+                      <span class="text-xs bg-sky-500/20 text-sky-300 border border-sky-500/40 px-2 py-1 rounded font-sub">Click to Enlarge</span>
+                    </div>
+                  </div>
+
+                  <div class="p-5 space-y-4 text-xs">
+                    <div>
+                      <div class="font-sub font-bold uppercase text-sky-400 text-xs mb-1">Objective & Vision Key Zones:</div>
+                      <div class="space-y-1 text-slate-300 text-[11px]">
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Shadow Tyrant (2:00):</strong> <span class="text-slate-400">Bottom river pit, team attack damage & speed buff.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>Shadow Overlord (2:00):</strong> <span class="text-slate-400">Top river pit, dragon wave pushers.</span></div>
+                        <div class="flex justify-between border-b border-slate-800/60 pb-1"><strong>River Pixel Bushes:</strong> <span class="text-slate-400">Roamer vision line; blocks 90% of enemy ganks.</span></div>
+                        <div class="flex justify-between"><strong>Clash Portal:</strong> <span class="text-slate-400">Top-to-bottom 2.0s instant teleport flank.</span></div>
+                      </div>
+                    </div>
+
+                    <div class="bg-slate-950/70 p-3 rounded-lg border border-sky-500/20">
+                      <div class="font-sub font-bold text-sky-300 uppercase text-[11px] mb-0.5">Grassroots Underdog Strategy:</div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Control <strong>Bottom River Bush at 1:45</strong> before the Tyrant spawns. The Mid Laner and Roamer place vision traps to ambush the enemy Jungler entering the river pit.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-4 pt-0">
+                  <button class="launch-whiteboard-btn w-full py-2.5 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider transition-all" data-map="hok_gorge" data-game="hok">
+                    Open HoK Gorge on Tactical Whiteboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Lightbox Zoom Modal -->
+          <div id="mapZoomModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="max-w-4xl w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden relative shadow-2xl">
+              <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h4 id="zoomModalTitle" class="text-base font-heading font-bold text-white uppercase"></h4>
+                <button id="closeZoomModalBtn" class="text-slate-400 hover:text-white text-lg font-bold px-2 py-1">✕</button>
+              </div>
+              <div class="p-2 flex justify-center bg-black/60">
+                <img id="zoomModalImg" src="" alt="Enlarged Map" class="max-h-[75vh] w-auto object-contain rounded-lg" />
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Bind filter buttons
+      container.querySelectorAll('.atlas-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          container.querySelectorAll('.atlas-filter-btn').forEach(b => {
+            b.classList.remove('active', 'bg-rose-600', 'bg-amber-600', 'bg-sky-600', 'bg-slate-700', 'text-white', 'text-black', 'shadow-lg');
+            b.classList.add('bg-slate-900', 'text-slate-400');
+          });
+
+          const filter = btn.getAttribute('data-filter');
+          if (filter === 'freefire') {
+            btn.classList.add('active', 'bg-rose-600', 'text-white', 'shadow-lg');
+          } else if (filter === 'bgmi') {
+            btn.classList.add('active', 'bg-amber-600', 'text-black', 'shadow-lg');
+          } else if (filter === 'hok') {
+            btn.classList.add('active', 'bg-sky-600', 'text-white', 'shadow-lg');
+          } else {
+            btn.classList.add('active', 'bg-slate-700', 'text-white', 'shadow-lg');
+          }
+          btn.classList.remove('bg-slate-900', 'text-slate-400');
+
+          // Filter sections strictly
+          container.querySelectorAll('.atlas-game-section').forEach(sec => {
+            const secGame = sec.getAttribute('data-game');
+            if (filter === 'all' || secGame === filter) {
+              sec.classList.remove('hidden');
+            } else {
+              sec.classList.add('hidden');
+            }
+          });
+        });
+      });
+
+      // Bind Zoom Modal triggers
+      const modal = document.getElementById('mapZoomModal');
+      const modalImg = document.getElementById('zoomModalImg');
+      const modalTitle = document.getElementById('zoomModalTitle');
+      const closeBtn = document.getElementById('closeZoomModalBtn');
+
+      container.querySelectorAll('.map-zoom-trigger').forEach(el => {
+        el.addEventListener('click', () => {
+          const src = el.getAttribute('data-img');
+          const title = el.getAttribute('data-title');
+          if (modal && modalImg && modalTitle) {
+            modalImg.src = src;
+            modalTitle.innerText = title;
+            modal.classList.remove('hidden');
+          }
+        });
+      });
+
+      closeBtn?.addEventListener('click', () => modal?.classList.add('hidden'));
+      modal?.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+      });
+
+      // Bind Launch on Whiteboard buttons
+      container.querySelectorAll('.launch-whiteboard-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const map = btn.getAttribute('data-map');
+          const game = btn.getAttribute('data-game');
+          if (game) this.activeGame = game;
+          this.activeTab = 'whiteboard';
+          this.syncGameButtons();
+          this.renderGameContext();
+          this.renderTabContent();
+
+          if (this.whiteboard && map) {
+            this.whiteboard.setMap(map);
+            const mapSelect = document.getElementById('mapSelect');
+            if (mapSelect) mapSelect.value = map;
+          }
+        });
+      });
+    }
+
+    // --- SENSITIVITY & HUD LAB TAB ---
+    renderSensitivityTab(container) {
+      if (this.activeGame === 'freefire') {
+        this.renderFFSensitivityTab(container);
+      } else {
+        this.renderDefaultSensitivityTab(container);
+      }
+    }
+
+    renderDefaultSensitivityTab(container) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <div class="cyber-panel p-4 rounded-xl border border-cyan-500/30 flex items-center justify-between">
+            <div>
+              <h3 class="text-base font-heading font-bold text-white uppercase">Pro Sensitivity & Claw Layout Blueprint</h3>
+              <p class="text-xs text-slate-400">Calibrated for ${this.activeGame.toUpperCase()} competition.</p>
+            </div>
+            <div class="cyber-badge bg-primary/20 text-primary border border-primary/40 text-xs font-bold">
+              ${this.activeGame.toUpperCase()} PRO HUD
+            </div>
+          </div>
+
+          <!-- Code Card -->
+          <div class="cyber-panel p-4 rounded-xl border border-amber-500/30 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-sub uppercase text-amber-400">Cloud Sensitivity Profile</div>
+              <div class="text-base font-mono font-bold text-white mt-1">
+                7234-8910-4412-5890-321 (Pro Gyro Always-On)
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5">Used by tier-1 aggressive fraggers for maximum jiggle precision.</div>
+            </div>
+            <button id="copySensCodeBtn" class="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider">
+              Copy Config
+            </button>
+          </div>
+
+          <!-- HUD Visualizer -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-sm font-sub font-bold uppercase text-white tracking-wider">Esports Claw HUD Blueprint (16:9 Screen)</h4>
+              <span class="text-xs text-slate-400">Touchscreen Button Coordinates</span>
+            </div>
+            <div class="claw-screen p-4">
+              <div class="absolute inset-0 tactical-grid pointer-events-none opacity-40"></div>
+              <div class="claw-button bg-cyan-500/20 border-cyan-400 text-cyan-200" style="left:12%; top:20%; width:60px; height:60px;">
+                <span>FIRE<br/><small class="text-[9px] text-amber-300">(Left Index)</small></span>
+              </div>
+              <div class="claw-button bg-cyan-500/20 border-cyan-400 text-cyan-200" style="left:85%; top:22%; width:55px; height:55px;">
+                <span>CROUCH<br/><small class="text-[9px] text-amber-300">(Right Index)</small></span>
+              </div>
+              <div class="claw-button bg-cyan-500/20 border-cyan-400 text-cyan-200" style="left:88%; top:45%; width:50px; height:50px;">
+                <span>JUMP<br/><small class="text-[9px] text-amber-300">(Right Index)</small></span>
+              </div>
+              <div class="claw-button bg-cyan-500/20 border-cyan-400 text-cyan-200" style="left:80%; top:72%; width:60px; height:60px;">
+                <span>SCOPE<br/><small class="text-[9px] text-amber-300">(Right Thumb)</small></span>
+              </div>
+              <div class="claw-button bg-cyan-500/20 border-cyan-400 text-cyan-200" style="left:16%; top:72%; width:55px; height:55px;">
+                <span>JOYSTICK<br/><small class="text-[9px] text-amber-300">(Left Thumb)</small></span>
+              </div>
+              <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 border border-rose-500/40 rounded-full flex items-center justify-center pointer-events-none">
+                <div class="w-1 h-1 bg-rose-500 rounded-full"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('copySensCodeBtn')?.addEventListener('click', (e) => {
+        e.target.innerText = "COPIED TO CLIPBOARD!";
+        setTimeout(() => e.target.innerText = "Copy Config", 2000);
+      });
+    }
+
+    // --- FREE FIRE CUSTOM HUD & SENSITIVITY CALIBRATOR SUITE ---
+    getFFHudPreset(id) {
+      return FF_HUD_PRESETS.find(p => p.id === id) || FF_HUD_PRESETS[0];
+    }
+
+    renderFFSensitivityTab(container) {
+      const preset = this.getFFHudPreset(this.ffActiveHudPreset);
+      const sens = this.ffCustomSens || { ...preset.sensitivity, fireButtonSize: preset.fireButtonSize, dpi: preset.dpi };
+      const selectedBtn = preset.buttons.find(b => b.id === this.ffSelectedHudButton) || preset.buttons.find(b => b.id === 'fire_right') || preset.buttons[0];
+
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <!-- Top Cyber Header Banner -->
+          <div class="cyber-panel p-5 rounded-2xl border border-red-500/40 bg-gradient-to-r from-slate-950 via-[#1a0f0f] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xl">📱</span>
+                <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
+                  Free Fire Official Default & Pro Player Custom HUD Suite
+                </h3>
+                <span class="cyber-badge bg-red-950 text-red-400 border border-red-500/50 text-[10px] font-bold">FF MAX METRICS</span>
+              </div>
+              <p class="text-xs text-slate-300 mt-1">
+                Authentic 20:9 touch control layouts, verified Pro Player sensitivities, real-time button inspector, DPI calibration, and 0.1s Fast Sit-Up Gloo Wall techniques.
+              </p>
+            </div>
+            
+            <div class="flex items-center gap-2 shrink-0">
+              <button id="copyFFConfigBtn" class="px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-red-950/60 flex items-center gap-1.5 transition-transform hover:scale-105">
+                <span>📋</span>
+                <span id="copyFFConfigBtnText">Copy Pro Config</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Presets Switcher Bar -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-sub uppercase font-bold text-slate-400">Select Custom HUD Blueprint:</span>
+                <span class="text-[11px] text-amber-400 font-mono">(${FF_HUD_PRESETS.length} Official & Verified Pro Layouts)</span>
+              </div>
+              
+              <!-- Filter Buttons -->
+              <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-[10px] font-sub font-bold uppercase">
+                <button class="ff-hud-filter-btn active px-2.5 py-1 rounded bg-red-600 text-white" data-cat="all">All</button>
+                <button class="ff-hud-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-cat="default">Default / Meta</button>
+                <button class="ff-hud-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-cat="india">🇮🇳 India</button>
+                <button class="ff-hud-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-cat="international">🌍 International</button>
+              </div>
+            </div>
+
+            <!-- Presets Horizontal Carousel -->
+            <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+              ${FF_HUD_PRESETS.map(p => {
+                const isActive = p.id === this.ffActiveHudPreset;
+                return `
+                  <button class="ff-hud-preset-btn px-3.5 py-2 rounded-xl border text-xs font-sub font-bold transition-all shrink-0 hover:scale-105 flex items-center gap-2 ${
+                    isActive
+                      ? 'border-red-500 bg-gradient-to-r from-red-950 via-red-900/60 to-red-950 text-white shadow-lg shadow-red-950/60 ring-2 ring-red-500/40'
+                      : 'border-slate-800 bg-slate-900/90 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
+                  }" data-preset="${p.id}" data-category="${p.category}">
+                    <span class="text-base">${p.flag}</span>
+                    <div class="text-left">
+                      <div class="leading-tight flex items-center gap-1.5">
+                        <span>${p.name.split('[')[0].trim()}</span>
+                        <span class="cyber-badge ${isActive ? 'bg-red-500 text-white' : 'bg-slate-800 text-slate-400'} text-[8px] py-0 px-1">
+                          ${p.badge}
+                        </span>
+                      </div>
+                      <div class="text-[10px] text-slate-400 font-mono font-normal flex items-center gap-2">
+                        <span>${p.grip}</span>
+                        <span>&bull;</span>
+                        <span class="text-amber-400">Btn: ${p.fireButtonSize}%</span>
+                      </div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Main Two-Column Interactive Workspace -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left 8-Cols: The Interactive 20:9 Smartphone HUD Canvas -->
+            <div class="lg:col-span-8 space-y-4">
+              <div class="cyber-panel p-4 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-heading font-bold text-white uppercase tracking-wider">
+                      Interactive 20:9 Touchscreen HUD Simulator
+                    </span>
+                    <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[9px]">
+                      ${preset.grip}
+                    </span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 flex items-center gap-2">
+                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Click any button on screen to inspect details</span>
+                  </div>
+                </div>
+
+                <!-- Realistic Smartphone Mock Screen (20:9 aspect ratio) -->
+                <div class="relative w-full aspect-[20/9] bg-gradient-to-br from-[#070b14] via-[#09101d] to-[#060911] rounded-2xl border-4 border-slate-800/90 shadow-2xl overflow-hidden select-none" id="ffHudScreenContainer">
+                  <!-- Subtle Grid & Battleground Crosshairs Overlay -->
+                  <div class="absolute inset-0 tactical-grid opacity-30 pointer-events-none"></div>
+                  <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 border border-white/20 rounded-full pointer-events-none flex items-center justify-center">
+                    <div class="w-1.5 h-1.5 bg-red-500 rounded-full shadow-glow"></div>
+                  </div>
+
+                  <!-- Safe Zone Compass Top Bar -->
+                  <div class="absolute top-1.5 left-1/2 -translate-x-1/2 bg-slate-950/80 border border-slate-800 text-[9px] font-mono text-slate-400 px-3 py-0.5 rounded-full pointer-events-none z-10 flex items-center gap-2">
+                    <span class="text-amber-400 font-bold">185 S</span>
+                    <span class="text-slate-600">|</span>
+                    <span>SAFE ZONE SHRINK: 01:24</span>
+                    <span class="text-slate-600">|</span>
+                    <span class="text-emerald-400">ALIVE: 44</span>
+                  </div>
+
+                  <!-- Render All Preset Buttons -->
+                  ${preset.buttons.map(btn => {
+                    const isSelected = btn.id === this.ffSelectedHudButton;
+                    const isDragButton = btn.hasDragArrow;
+                    return `
+                      <div class="ff-hud-button-element absolute flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 group z-20"
+                           data-btn-id="${btn.id}"
+                           style="
+                             left: ${btn.x}%;
+                             top: ${btn.y}%;
+                             transform: translate(-50%, -50%);
+                             width: ${btn.size}px;
+                             height: ${btn.size}px;
+                             opacity: ${Math.max(0.4, btn.opacity / 100)};
+                           ">
+                        <!-- Button Body -->
+                        <div class="w-full h-full ${btn.shape === 'pill' ? 'rounded-lg' : (btn.shape === 'rounded' ? 'rounded-xl' : 'rounded-full')} border-2 flex items-center justify-center shadow-lg transition-all ${
+                          isSelected
+                            ? 'ring-4 ring-cyan-400 border-white bg-cyan-900/80 scale-105'
+                            : 'hover:border-white'
+                        }"
+                        style="border-color: ${btn.color}; background-color: ${btn.color}22;">
+                          <span class="text-sm pointer-events-none drop-shadow">${btn.icon}</span>
+                        </div>
+
+                        <!-- Drag Vector Arrow (for Right Fire Button) -->
+                        ${isDragButton ? `
+                          <div class="absolute -top-7 flex flex-col items-center pointer-events-none animate-bounce">
+                            <span class="text-[9px] font-mono font-black text-amber-300 bg-amber-950/90 px-1 py-0.2 rounded border border-amber-500/80 uppercase tracking-tighter">
+                              HEADSHOT ⬆️
+                            </span>
+                            <span class="text-amber-400 text-xs leading-none">▲</span>
+                          </div>
+                        ` : ''}
+
+                        <!-- Quick Label on Hover / Active -->
+                        <div class="absolute -bottom-4 opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''} transition-opacity bg-slate-950/90 border border-slate-700 text-[8px] font-sub font-bold text-white px-1.5 rounded pointer-events-none whitespace-nowrap z-30">
+                          ${btn.name.split('(')[0].trim()}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+
+                  <!-- Phone Speaker & Camera Notch Representation -->
+                  <div class="absolute top-1 left-2 w-2 h-2 rounded-full bg-slate-800 pointer-events-none"></div>
+                </div>
+
+                <!-- Legend & Instructions Bar -->
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs pt-1 text-slate-400 border-t border-slate-800/80">
+                  <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+                      <span class="text-[11px]">Fire / Offense</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block"></span>
+                      <span class="text-[11px]">Gloo / Defense</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+                      <span class="text-[11px]">Movement / Skills</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span>
+                      <span class="text-[11px]">Med / Utility</span>
+                    </div>
+                  </div>
+                  <div class="text-[11px] text-slate-300 font-mono">
+                    Aspect: <strong>20:9 Ultrawide Mobile</strong> | DPI: <strong>${sens.dpi}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Drag Headshot Mechanics Guide -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <!-- Card 1: Straight Drag -->
+                <div class="cyber-panel p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-1.5">
+                  <div class="flex items-center gap-1.5 text-xs font-heading font-bold text-red-400 uppercase">
+                    <span>⬆️</span>
+                    <span>Straight Linear Drag</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">
+                    <strong>Weapons:</strong> Woodpecker, SVD, SCAR, M4A1.<br/>
+                    <strong>When:</strong> Enemy running directly toward or away from you. Swipe fire button straight up to helmet level.
+                  </p>
+                </div>
+
+                <!-- Card 2: Rotation / J-Shape Drag -->
+                <div class="cyber-panel p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-1.5">
+                  <div class="flex items-center gap-1.5 text-xs font-heading font-bold text-amber-400 uppercase">
+                    <span>🔄</span>
+                    <span>J-Shape Rotation Drag</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">
+                    <strong>Weapons:</strong> M1887, Charge Buster, MP40.<br/>
+                    <strong>When:</strong> Enemy sprinting sideways. Dip fire button down for 0.05s then whip up in a 'J' curve matching enemy sprint.
+                  </p>
+                </div>
+
+                <!-- Card 3: 0.1s Fast Sit-Up Gloo Wall -->
+                <div class="cyber-panel p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-1.5">
+                  <div class="flex items-center gap-1.5 text-xs font-heading font-bold text-cyan-400 uppercase">
+                    <span>🛡️</span>
+                    <span>0.1s Fast Sit-Up Gloo</span>
+                  </div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">
+                    <strong>Sequence:</strong> Right Fire (Drag) &rarr; Tap Gloo Wall &rarr; Tap Crouch &rarr; Tap Left Fire &rarr; Sprint. Blocks 100% incoming counter-shots.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right 4-Cols: Button Inspector & Live Sensitivity Sliders -->
+            <div class="lg:col-span-4 space-y-4">
+              
+              <!-- Inspector Card -->
+              <div class="cyber-panel p-4 rounded-2xl border border-cyan-500/40 bg-gradient-to-b from-slate-950 via-[#0b1320] to-slate-950 space-y-3" id="ffButtonInspectorPanel">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-base">${selectedBtn.icon}</span>
+                    <div>
+                      <h4 class="text-xs font-heading font-bold text-white uppercase">Button Inspector</h4>
+                      <span class="text-[10px] text-cyan-400 font-mono">${selectedBtn.name}</span>
+                    </div>
+                  </div>
+                  <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[9px]">
+                    ${selectedBtn.finger}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                    <div class="text-[10px] text-slate-400 font-sub uppercase">Size</div>
+                    <div class="text-sm font-mono font-bold text-white mt-0.5">${selectedBtn.size}%</div>
+                  </div>
+                  <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                    <div class="text-[10px] text-slate-400 font-sub uppercase">Opacity</div>
+                    <div class="text-sm font-mono font-bold text-white mt-0.5">${selectedBtn.opacity}%</div>
+                  </div>
+                  <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                    <div class="text-[10px] text-slate-400 font-sub uppercase">Coords</div>
+                    <div class="text-[11px] font-mono font-bold text-amber-400 mt-0.5">${selectedBtn.x}% | ${selectedBtn.y}%</div>
+                  </div>
+                </div>
+
+                <div class="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                  <div class="text-[10px] font-sub font-bold uppercase text-amber-400 mb-0.5">Pro Tournament Tip:</div>
+                  <p class="text-[11px] text-slate-200 leading-relaxed">
+                    ${selectedBtn.note}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Sensitivity Calibration Sliders -->
+              <div class="cyber-panel p-4 rounded-2xl border border-amber-500/40 bg-gradient-to-b from-slate-950 via-[#18110a] to-slate-950 space-y-3.5">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div>
+                    <h4 class="text-xs font-heading font-bold text-white uppercase tracking-wider">
+                      Live Sensitivity Calibration
+                    </h4>
+                    <span class="text-[10px] text-amber-400 font-mono">${preset.player}</span>
+                  </div>
+                  <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[9px] font-bold">
+                    ${sens.general >= 98 ? '⚡ GOD-TIER DRAG' : (sens.general >= 90 ? '🔥 S-TIER DRAG' : '🎯 BALANCED')}
+                  </span>
+                </div>
+
+                <!-- Sliders List -->
+                <div class="space-y-2.5 text-xs">
+                  <!-- General -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">General (Camera & 360 Spin)</span>
+                      <span class="text-amber-400 font-mono font-bold text-xs" id="sensValGeneral">${sens.general}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.general}" class="ff-sens-slider w-full accent-amber-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="general"/>
+                  </div>
+
+                  <!-- Red Dot -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">Red Dot (Non-Scope Drag)</span>
+                      <span class="text-red-400 font-mono font-bold text-xs" id="sensValRedDot">${sens.redDot}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.redDot}" class="ff-sens-slider w-full accent-red-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="redDot"/>
+                  </div>
+
+                  <!-- 2x Scope -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">2x Scope (AR Mid-Range)</span>
+                      <span class="text-cyan-400 font-mono font-bold text-xs" id="sensValScope2x">${sens.scope2x}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.scope2x}" class="ff-sens-slider w-full accent-cyan-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="scope2x"/>
+                  </div>
+
+                  <!-- 4x Scope -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">4x Scope (Marksman Tracking)</span>
+                      <span class="text-blue-400 font-mono font-bold text-xs" id="sensValScope4x">${sens.scope4x}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.scope4x}" class="ff-sens-slider w-full accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="scope4x"/>
+                  </div>
+
+                  <!-- Sniper Scope -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">Sniper Scope (AWM / M82B)</span>
+                      <span class="text-purple-400 font-mono font-bold text-xs" id="sensValSniper">${sens.sniper}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.sniper}" class="ff-sens-slider w-full accent-purple-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="sniper"/>
+                  </div>
+
+                  <!-- Free Look -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-slate-300 font-sub font-bold uppercase">Free Look (360 Eye)</span>
+                      <span class="text-emerald-400 font-mono font-bold text-xs" id="sensValFreeLook">${sens.freeLook}</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="${sens.freeLook}" class="ff-sens-slider w-full accent-emerald-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="freeLook"/>
+                  </div>
+
+                  <!-- Fire Button Size & DPI Row -->
+                  <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                    <div class="space-y-1">
+                      <div class="flex items-center justify-between text-[10px]">
+                        <span class="text-slate-400 uppercase font-sub">Fire Button Size</span>
+                        <span class="text-amber-400 font-mono font-bold" id="sensValFireBtn">${sens.fireButtonSize}%</span>
+                      </div>
+                      <input type="range" min="30" max="100" value="${sens.fireButtonSize}" class="ff-sens-slider w-full accent-amber-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg" data-key="fireButtonSize"/>
+                    </div>
+
+                    <div class="space-y-1">
+                      <div class="flex items-center justify-between text-[10px]">
+                        <span class="text-slate-400 uppercase font-sub">Device DPI</span>
+                        <span class="text-cyan-400 font-mono font-bold" id="sensValDpi">${sens.dpi}</span>
+                      </div>
+                      <select id="ffDpiSelect" class="w-full bg-slate-900 border border-slate-700 text-white text-[11px] rounded p-1 font-mono">
+                        <option value="392" ${sens.dpi == 392 ? 'selected' : ''}>392 (Stock)</option>
+                        <option value="420" ${sens.dpi == 420 ? 'selected' : ''}>420 (Low-Drag)</option>
+                        <option value="440" ${sens.dpi == 440 ? 'selected' : ''}>440 (Balanced)</option>
+                        <option value="460" ${sens.dpi == 460 ? 'selected' : ''}>460 (Pro S-Tier)</option>
+                        <option value="480" ${sens.dpi == 480 ? 'selected' : ''}>480 (Speed Drag)</option>
+                        <option value="520" ${sens.dpi == 520 ? 'selected' : ''}>520 (High-Speed)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Device Touch Calibration Presets -->
+                <div class="pt-2 border-t border-slate-800">
+                  <div class="text-[10px] text-slate-400 font-sub uppercase mb-1.5">Calibrate For Your Device Display:</div>
+                  <div class="grid grid-cols-4 gap-1.5 text-[10px]">
+                    <button class="ff-device-btn px-2 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-600 text-slate-300 text-center font-sub font-bold" data-device="iphone">
+                      🍎 iPhone
+                    </button>
+                    <button class="ff-device-btn px-2 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-600 text-slate-300 text-center font-sub font-bold" data-device="samsung">
+                      📱 Samsung
+                    </button>
+                    <button class="ff-device-btn px-2 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-600 text-slate-300 text-center font-sub font-bold" data-device="oneplus">
+                      ⚡ OnePlus
+                    </button>
+                    <button class="ff-device-btn px-2 py-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-600 text-slate-300 text-center font-sub font-bold" data-device="ipad">
+                      📱 Tablet
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Profile Highlights Summary -->
+                <div class="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
+                  <strong>Signature Technique:</strong> ${preset.proTip}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.bindFFSensitivityEvents();
+    }
+
+    bindFFSensitivityEvents() {
+      // 1. Preset Selector Buttons
+      document.querySelectorAll('.ff-hud-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const presetId = btn.getAttribute('data-preset');
+          if (presetId) {
+            this.ffActiveHudPreset = presetId;
+            this.ffCustomSens = null;
+            const targetPreset = this.getFFHudPreset(presetId);
+            if (targetPreset && targetPreset.buttons.length > 0) {
+              this.ffSelectedHudButton = targetPreset.buttons.find(b => b.id === 'fire_right') ? 'fire_right' : targetPreset.buttons[0].id;
+            }
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Filter Category Buttons (All / Default / India / International)
+      document.querySelectorAll('.ff-hud-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.ff-hud-filter-btn').forEach(b => {
+            b.classList.remove('active', 'bg-red-600', 'text-white');
+            b.classList.add('text-slate-400');
+          });
+          btn.classList.add('active', 'bg-red-600', 'text-white');
+          btn.classList.remove('text-slate-400');
+
+          const cat = btn.getAttribute('data-cat');
+          document.querySelectorAll('.ff-hud-preset-btn').forEach(pBtn => {
+            const pCat = pBtn.getAttribute('data-category');
+            if (cat === 'all' || pCat === cat) {
+              pBtn.classList.remove('hidden');
+            } else {
+              pBtn.classList.add('hidden');
+            }
+          });
+        });
+      });
+
+      // 3. Interactive HUD Screen Buttons (Inspect Button)
+      document.querySelectorAll('.ff-hud-button-element').forEach(btnEl => {
+        btnEl.addEventListener('click', () => {
+          const btnId = btnEl.getAttribute('data-btn-id');
+          if (btnId) {
+            this.ffSelectedHudButton = btnId;
+            const preset = this.getFFHudPreset(this.ffActiveHudPreset);
+            const selectedBtn = preset.buttons.find(b => b.id === btnId);
+            if (selectedBtn) {
+              // Update ring styling on screen without full re-render
+              document.querySelectorAll('.ff-hud-button-element > div:first-child').forEach(inner => {
+                inner.classList.remove('ring-4', 'ring-cyan-400', 'border-white', 'bg-cyan-900/80', 'scale-105');
+              });
+              const currentInner = btnEl.querySelector('div:first-child');
+              if (currentInner) {
+                currentInner.classList.add('ring-4', 'ring-cyan-400', 'border-white', 'bg-cyan-900/80', 'scale-105');
+              }
+
+              // Update Inspector card content
+              const inspector = document.getElementById('ffButtonInspectorPanel');
+              if (inspector) {
+                inspector.innerHTML = `
+                  <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-base">${selectedBtn.icon}</span>
+                      <div>
+                        <h4 class="text-xs font-heading font-bold text-white uppercase">Button Inspector</h4>
+                        <span class="text-[10px] text-cyan-400 font-mono">${selectedBtn.name}</span>
+                      </div>
+                    </div>
+                    <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[9px]">
+                      ${selectedBtn.finger}
+                    </span>
+                  </div>
+
+                  <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                      <div class="text-[10px] text-slate-400 font-sub uppercase">Size</div>
+                      <div class="text-sm font-mono font-bold text-white mt-0.5">${selectedBtn.size}%</div>
+                    </div>
+                    <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                      <div class="text-[10px] text-slate-400 font-sub uppercase">Opacity</div>
+                      <div class="text-sm font-mono font-bold text-white mt-0.5">${selectedBtn.opacity}%</div>
+                    </div>
+                    <div class="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                      <div class="text-[10px] text-slate-400 font-sub uppercase">Coords</div>
+                      <div class="text-[11px] font-mono font-bold text-amber-400 mt-0.5">${selectedBtn.x}% | ${selectedBtn.y}%</div>
+                    </div>
+                  </div>
+
+                  <div class="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                    <div class="text-[10px] font-sub font-bold uppercase text-amber-400 mb-0.5">Pro Tournament Tip:</div>
+                    <p class="text-[11px] text-slate-200 leading-relaxed">
+                      ${selectedBtn.note}
+                    </p>
+                  </div>
+                `;
+              }
+            }
+          }
+        });
+      });
+
+      // 4. Live Sensitivity Sliders
+      const preset = this.getFFHudPreset(this.ffActiveHudPreset);
+      if (!this.ffCustomSens) {
+        this.ffCustomSens = { ...preset.sensitivity, fireButtonSize: preset.fireButtonSize, dpi: preset.dpi };
+      }
+
+      document.querySelectorAll('.ff-sens-slider').forEach(slider => {
+        slider.addEventListener('input', (e) => {
+          const key = slider.getAttribute('data-key');
+          const val = parseInt(slider.value, 10);
+          this.ffCustomSens[key] = val;
+
+          // Update label
+          if (key === 'general') document.getElementById('sensValGeneral').innerText = val;
+          if (key === 'redDot') document.getElementById('sensValRedDot').innerText = val;
+          if (key === 'scope2x') document.getElementById('sensValScope2x').innerText = val;
+          if (key === 'scope4x') document.getElementById('sensValScope4x').innerText = val;
+          if (key === 'sniper') document.getElementById('sensValSniper').innerText = val;
+          if (key === 'freeLook') document.getElementById('sensValFreeLook').innerText = val;
+          if (key === 'fireButtonSize') document.getElementById('sensValFireBtn').innerText = val + '%';
+        });
+      });
+
+      // 5. DPI Selector
+      const dpiSelect = document.getElementById('ffDpiSelect');
+      if (dpiSelect) {
+        dpiSelect.addEventListener('change', () => {
+          const val = parseInt(dpiSelect.value, 10);
+          this.ffCustomSens.dpi = val;
+          document.getElementById('sensValDpi').innerText = val;
+        });
+      }
+
+      // 6. Device Touch Calibration
+      document.querySelectorAll('.ff-device-btn').forEach(dBtn => {
+        dBtn.addEventListener('click', () => {
+          const dev = dBtn.getAttribute('data-device');
+          document.querySelectorAll('.ff-device-btn').forEach(b => {
+            b.classList.remove('border-amber-500', 'bg-amber-950/60', 'text-amber-200');
+          });
+          dBtn.classList.add('border-amber-500', 'bg-amber-950/60', 'text-amber-200');
+
+          if (dev === 'iphone') {
+            this.ffCustomSens.general = Math.min(100, Math.max(88, this.ffCustomSens.general - 6));
+            this.ffCustomSens.redDot = Math.min(100, Math.max(85, this.ffCustomSens.redDot - 4));
+            this.ffCustomSens.dpi = 392;
+          } else if (dev === 'samsung') {
+            this.ffCustomSens.general = 98;
+            this.ffCustomSens.redDot = 95;
+            this.ffCustomSens.dpi = 411;
+          } else if (dev === 'oneplus') {
+            this.ffCustomSens.general = 100;
+            this.ffCustomSens.redDot = 98;
+            this.ffCustomSens.dpi = 460;
+          } else if (dev === 'ipad') {
+            this.ffCustomSens.general = 82;
+            this.ffCustomSens.redDot = 78;
+            this.ffCustomSens.dpi = 392;
+          }
+
+          // Reflect in sliders & UI
+          document.querySelectorAll('.ff-sens-slider').forEach(sl => {
+            const k = sl.getAttribute('data-key');
+            if (this.ffCustomSens[k] !== undefined) {
+              sl.value = this.ffCustomSens[k];
+            }
+          });
+          document.getElementById('sensValGeneral').innerText = this.ffCustomSens.general;
+          document.getElementById('sensValRedDot').innerText = this.ffCustomSens.redDot;
+          document.getElementById('sensValDpi').innerText = this.ffCustomSens.dpi;
+          if (dpiSelect) dpiSelect.value = this.ffCustomSens.dpi.toString();
+        });
+      });
+
+      // 7. Copy Pro Config Button
+      const copyBtn = document.getElementById('copyFFConfigBtn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          const curPreset = this.getFFHudPreset(this.ffActiveHudPreset);
+          const s = this.ffCustomSens || curPreset.sensitivity;
+          const configText = `[FREE FIRE MAX PRO CONFIG]
+Preset: ${curPreset.name}
+Player: ${curPreset.player} (${curPreset.team})
+Grip: ${curPreset.grip}
+DPI: ${s.dpi || curPreset.dpi}
+Fire Button Size: ${s.fireButtonSize || curPreset.fireButtonSize}% (${curPreset.fireButtonPosition})
+
+--- SENSITIVITY ---
+General: ${s.general}
+Red Dot: ${s.redDot}
+2x Scope: ${s.scope2x}
+4x Scope: ${s.scope4x}
+Sniper Scope: ${s.sniper}
+Free Look: ${s.freeLook}
+
+--- PRO TECHNIQUE ---
+${curPreset.proTip}`;
+
+          navigator.clipboard.writeText(configText).then(() => {
+            const btnText = document.getElementById('copyFFConfigBtnText');
+            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
+            setTimeout(() => {
+              if (btnText) btnText.innerText = 'Copy Pro Config';
+            }, 2000);
+          }).catch(() => {
+            // Fallback
+            const ta = document.createElement('textarea');
+            ta.value = configText;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            const btnText = document.getElementById('copyFFConfigBtnText');
+            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
+            setTimeout(() => {
+              if (btnText) btnText.innerText = 'Copy Pro Config';
+            }, 2000);
+          });
+        });
+      }
+    }
+    // --- PRO COACHING STAFF & STRATEGY VAULT ---
+    getCoach(id) {
+      return FF_COACHING_STAFF.find(c => c.id === id) || FF_COACHING_STAFF[0];
+    }
+
+    renderCoachingTab(container) {
+      const coach = this.getCoach(this.selectedCoachId);
+
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <!-- Top Cyber Banner -->
+          <div class="cyber-panel p-5 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#150d22] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">🧠</span>
+                <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
+                  Pro Coaching Staff & Strategic Masterclass Hub
+                </h3>
+                <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/50 text-[10px] font-bold">
+                  TIER-1 COACHES
+                </span>
+              </div>
+              <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                Learn directly from the world's most accomplished Free Fire coaches and strategic analysts. Step-by-step tournament blueprints, interactive video analysis notes, daily training routines, and verified social channels.
+              </p>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+              <button id="copyCoachStratBtn" class="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-purple-950/60 flex items-center gap-1.5 transition-transform hover:scale-105">
+                <span>📋</span>
+                <span id="copyCoachStratBtnText">Copy Strategy Checklist</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Coach Category Filters & Carousel -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-sub uppercase font-bold text-slate-400">Select Coach or Analyst:</span>
+                <span class="text-[11px] text-purple-400 font-mono">(${FF_COACHING_STAFF.length} Verified Coaches)</span>
+              </div>
+
+              <!-- Region Filter -->
+              <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-[10px] font-sub font-bold uppercase">
+                <button class="coach-filter-btn active px-2.5 py-1 rounded bg-purple-600 text-white" data-region="all">All Coaches</button>
+                <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="india">🇮🇳 India</button>
+                <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="international">🌍 International</button>
+              </div>
+            </div>
+
+            <!-- Coaches Horizontal Scroll Carousel -->
+            <div class="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              ${FF_COACHING_STAFF.map(c => {
+                const isSelected = c.id === this.selectedCoachId;
+                return `
+                  <button class="coach-card-btn px-4 py-3 rounded-2xl border text-left transition-all shrink-0 hover:scale-105 flex items-center gap-3 ${
+                    isSelected
+                      ? 'border-purple-500 bg-gradient-to-br from-purple-950/90 via-slate-900 to-purple-950/90 text-white shadow-xl shadow-purple-950/60 ring-2 ring-purple-500/50'
+                      : 'border-slate-800 bg-slate-900/90 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
+                  }" data-coach-id="${c.id}" data-coach-region="${c.region}">
+                    <div class="w-10 h-10 rounded-xl bg-slate-800/90 border border-purple-500/40 flex items-center justify-center text-xl shrink-0">
+                      ${c.avatar}
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-1.5 leading-tight">
+                        <span class="font-heading font-bold text-xs text-white">${c.name}</span>
+                        <span>${c.flag}</span>
+                      </div>
+                      <div class="text-[10px] text-purple-300 font-mono mt-0.5">${c.team}</div>
+                      <div class="mt-1">
+                        <span class="cyber-badge ${isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'} text-[8px] py-0 px-1.5 font-bold">
+                          ${c.badge}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Active Coach Dossier & Tactical Notebook -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left 4-Cols: Coach Dossier, Achievements & Verified Social Handles -->
+            <div class="lg:col-span-4 space-y-4">
+              <div class="cyber-panel p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-b from-slate-950 via-[#100b1a] to-slate-950 space-y-4">
+                
+                <!-- Profile Header -->
+                <div class="flex items-start justify-between border-b border-slate-800 pb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-purple-950/80 border-2 border-purple-500 flex items-center justify-center text-2xl shadow-lg">
+                      ${coach.avatar}
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <h4 class="text-sm font-heading font-black text-white uppercase">${coach.name}</h4>
+                        <span class="text-base">${coach.flag}</span>
+                      </div>
+                      <div class="text-[11px] text-purple-400 font-mono font-bold">${coach.role}</div>
+                      <div class="text-[10px] text-slate-400 font-mono">${coach.team}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Trophies & Recognition -->
+                <div class="space-y-1.5">
+                  <div class="text-[10px] font-sub uppercase font-bold text-amber-400 flex items-center gap-1">
+                    <span>🏆</span>
+                    <span>Career Honors & Championships</span>
+                  </div>
+                  <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 leading-relaxed font-mono">
+                    ${coach.trophies}
+                  </div>
+                </div>
+
+                <!-- Verified Official Social Channels & Handles -->
+                <div class="space-y-2 pt-1 border-t border-slate-800/80">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Official Social Media & Channels:</div>
+                  
+                  <!-- YouTube Button -->
+                  <a href="${coach.youtubeUrl}" target="_blank" rel="noopener noreferrer" 
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-red-950/60 border border-red-500/50 hover:bg-red-900/70 text-red-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
+                    <div class="flex items-center gap-2">
+                      <span class="text-base">🔴</span>
+                      <div>
+                        <div class="text-[11px] text-white font-bold leading-tight">${coach.youtubeName}</div>
+                        <div class="text-[9px] text-red-400 font-mono">Official YouTube Channel</div>
+                      </div>
+                    </div>
+                    <span class="text-xs text-red-400 font-bold">&rarr;</span>
+                  </a>
+
+                  <!-- Instagram Button -->
+                  <a href="${coach.instaUrl}" target="_blank" rel="noopener noreferrer"
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-pink-950/60 border border-pink-500/50 hover:bg-pink-900/70 text-pink-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
+                    <div class="flex items-center gap-2">
+                      <span class="text-base">📸</span>
+                      <div>
+                        <div class="text-[11px] text-white font-bold leading-tight">${coach.instaHandle}</div>
+                        <div class="text-[9px] text-pink-400 font-mono">Verified Instagram Handle</div>
+                      </div>
+                    </div>
+                    <span class="text-xs text-pink-400 font-bold">&rarr;</span>
+                  </a>
+                </div>
+
+                <!-- Coaching Philosophy Quote -->
+                <div class="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 space-y-1">
+                  <div class="text-[10px] font-sub font-bold uppercase text-purple-300">Core Coaching Philosophy:</div>
+                  <p class="text-[11px] text-slate-300 italic leading-relaxed">
+                    "${coach.philosophy}"
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right 8-Cols: Interactive Strategy Notebook & Video Notes -->
+            <div class="lg:col-span-8 space-y-4">
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/90 space-y-4">
+                
+                <!-- Strategy Title Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <div class="text-xs font-sub font-bold uppercase text-purple-400">Signature Tournament Strategy</div>
+                    <h3 class="text-base font-heading font-black text-white mt-0.5">
+                      ${coach.strategyTitle}
+                    </h3>
+                  </div>
+
+                  <!-- Sub-Tab Switcher (Strategy / Video / Drills) -->
+                  <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 text-xs font-sub font-bold uppercase">
+                    <button class="coach-tab-btn ${this.selectedCoachTab === 'strategy' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="strategy">
+                      📋 Strategy
+                    </button>
+                    <button class="coach-tab-btn ${this.selectedCoachTab === 'video' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="video">
+                      🎬 Video Notes
+                    </button>
+                    <button class="coach-tab-btn ${this.selectedCoachTab === 'drills' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="drills">
+                      ⏱️ 60m Drills
+                    </button>
+                  </div>
+                </div>
+
+                <!-- SUB-TAB 1: STRATEGY PROTOCOL -->
+                ${this.selectedCoachTab === 'strategy' ? `
+                  <div class="space-y-4 animate-fade-in">
+                    <!-- Concept Overview -->
+                    <p class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                      ${coach.summary}
+                    </p>
+
+                    <!-- Tactical 4-Step Scrim Protocol -->
+                    <div class="space-y-2.5">
+                      <div class="text-xs font-sub uppercase font-bold text-amber-400 flex items-center gap-1.5">
+                        <span>⚡</span>
+                        <span>Official 4-Phase Scrim Execution Protocol:</span>
+                      </div>
+                      
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        ${coach.tacticalSteps.map(s => `
+                          <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800/90 space-y-1 hover:border-purple-500/40 transition-colors">
+                            <div class="flex items-center gap-2">
+                              <span class="w-5 h-5 rounded-full bg-purple-900/80 border border-purple-500/60 text-purple-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                ${s.step}
+                              </span>
+                              <h5 class="text-xs font-heading font-bold text-white uppercase">${s.title}</h5>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed pt-0.5">
+                              ${s.desc}
+                            </p>
+                          </div>
+                        `).join('')}
+                      </div>
+                    </div>
+
+                    <!-- Critical Mistake Warning -->
+                    <div class="p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 space-y-1">
+                      <div class="flex items-center gap-1.5 text-xs font-sub font-bold uppercase text-red-400">
+                        <span>⚠️</span>
+                        <span>Why Underdog Squads Fail on This Strategy:</span>
+                      </div>
+                      <p class="text-[11px] text-slate-200 leading-relaxed">
+                        ${coach.mistakesUnderdogsMake}
+                      </p>
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB 2: VIDEO BREAKDOWN & TIMESTAMPS -->
+                ${this.selectedCoachTab === 'video' ? `
+                  <div class="space-y-4 animate-fade-in">
+                    <div class="relative w-full aspect-video bg-gradient-to-br from-[#0a0f1d] via-[#0e1629] to-[#070b14] rounded-2xl border-2 border-slate-800 overflow-hidden flex flex-col justify-between p-4 shadow-xl">
+                      <!-- Mock Video Watermark -->
+                      <div class="flex items-center justify-between z-10">
+                        <div class="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-full border border-slate-800 text-[10px] font-mono text-white">
+                          <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                          <span>${coach.videoNotes.title}</span>
+                        </div>
+                        <span class="bg-purple-950/80 border border-purple-500/50 text-purple-300 text-[10px] font-mono px-2 py-0.5 rounded-full">
+                          ${coach.videoNotes.duration}
+                        </span>
+                      </div>
+
+                      <!-- Center Play Simulation Graphic -->
+                      <div class="self-center flex flex-col items-center gap-2 text-center my-auto cursor-pointer group">
+                        <div class="w-16 h-16 rounded-full bg-purple-600/90 group-hover:bg-purple-500 text-white flex items-center justify-center text-2xl shadow-2xl transition-transform group-hover:scale-110">
+                          ▶
+                        </div>
+                        <span class="text-xs text-slate-300 font-sub font-bold uppercase tracking-wider group-hover:text-white">
+                          Interactive Tactical Video Analysis & Playback
+                        </span>
+                      </div>
+
+                      <!-- Video Progress Mock Bar -->
+                      <div class="w-full space-y-1 z-10">
+                        <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div class="w-2/5 h-full bg-gradient-to-r from-purple-500 to-indigo-500"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] font-mono text-slate-400">
+                          <span>05:44 / ${coach.videoNotes.duration}</span>
+                          <span>1080p 60FPS Tactical Broadcast</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Timestamped Coaching Notes -->
+                    <div class="space-y-2">
+                      <div class="text-xs font-sub uppercase font-bold text-slate-400">Timestamped Coaching Keyframes:</div>
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        ${coach.videoNotes.timestamps.map(t => `
+                          <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex items-center gap-2.5">
+                            <span class="px-2 py-0.5 bg-purple-950 text-purple-300 border border-purple-500/50 rounded font-mono text-[10px] font-bold shrink-0">
+                              ${t.time}
+                            </span>
+                            <span class="text-slate-200 text-[11px] font-medium">${t.title}</span>
+                          </div>
+                        `).join('')}
+                      </div>
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB 3: 60-MINUTE DAILY PRACTICE ROUTINE -->
+                ${this.selectedCoachTab === 'drills' ? `
+                  <div class="space-y-4 animate-fade-in">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div>
+                        <h4 class="text-xs font-heading font-bold text-white uppercase">Coach ${coach.alias}'s 60-Minute Daily Scrim Routine</h4>
+                        <p class="text-[11px] text-slate-400">Execute this 4-block training routine with your squad daily before competitive matches.</p>
+                      </div>
+                      <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold">
+                        DAILY DISCIPLINE
+                      </span>
+                    </div>
+
+                    <div class="space-y-2.5">
+                      ${coach.drillSchedule.map((d, idx) => `
+                        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div class="space-y-0.5">
+                            <div class="flex items-center gap-2">
+                              <span class="cyber-badge bg-slate-800 text-amber-400 font-mono text-[9px]">BLOCK ${idx + 1}</span>
+                              <span class="text-xs font-heading font-bold text-white uppercase">${d.name}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">${d.desc}</p>
+                          </div>
+                          <div class="px-3 py-1 bg-purple-950/80 border border-purple-500/40 text-purple-300 font-mono text-xs font-bold rounded-lg shrink-0 text-center">
+                            ${d.time}
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.bindCoachingEvents();
+    }
+
+    bindCoachingEvents() {
+      // 1. Coach Selection Carousel
+      document.querySelectorAll('.coach-card-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const coachId = btn.getAttribute('data-coach-id');
+          if (coachId) {
+            this.selectedCoachId = coachId;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Coach Region Filter
+      document.querySelectorAll('.coach-filter-btn').forEach(fBtn => {
+        fBtn.addEventListener('click', () => {
+          document.querySelectorAll('.coach-filter-btn').forEach(b => {
+            b.classList.remove('active', 'bg-purple-600', 'text-white');
+            b.classList.add('text-slate-400');
+          });
+          fBtn.classList.add('active', 'bg-purple-600', 'text-white');
+          fBtn.classList.remove('text-slate-400');
+
+          const reg = fBtn.getAttribute('data-region');
+          document.querySelectorAll('.coach-card-btn').forEach(cCard => {
+            const cardReg = cCard.getAttribute('data-coach-region');
+            if (reg === 'all' || cardReg === reg) {
+              cCard.classList.remove('hidden');
+            } else {
+              cCard.classList.add('hidden');
+            }
+          });
+        });
+      });
+
+      // 3. Sub-Tab Switcher (Strategy / Video / Drills)
+      document.querySelectorAll('.coach-tab-btn').forEach(sTab => {
+        sTab.addEventListener('click', () => {
+          const tab = sTab.getAttribute('data-tab');
+          if (tab) {
+            this.selectedCoachTab = tab;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 4. Copy Coach Strategy Button
+      const copyBtn = document.getElementById('copyCoachStratBtn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          const coach = this.getCoach(this.selectedCoachId);
+          const stepsText = coach.tacticalSteps.map(s => `${s.step}. ${s.title}: ${s.desc}`).join('\n');
+          const drillsText = coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n');
+
+          const textToCopy = `[UNDERDOG ESPORTS ACADEMY - COACH STRATEGY BRIEF]
+Coach: ${coach.name} (${coach.team} ${coach.flag})
+Official YouTube: ${coach.youtubeUrl}
+Official Instagram: ${coach.instaUrl}
+
+STRATEGY: ${coach.strategyTitle}
+${coach.summary}
+
+--- 4-STEP TACTICAL PROTOCOL ---
+${stepsText}
+
+--- WHY UNDERDOGS FAIL ---
+${coach.mistakesUnderdogsMake}
+
+--- 60-MINUTE DAILY DRILL SCHEDULE ---
+${drillsText}`;
+
+          navigator.clipboard.writeText(textToCopy).then(() => {
+            const btnText = document.getElementById('copyCoachStratBtnText');
+            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
+            setTimeout(() => {
+              if (btnText) btnText.innerText = 'Copy Strategy Checklist';
+            }, 2000);
+          }).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = textToCopy;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            const btnText = document.getElementById('copyCoachStratBtnText');
+            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
+            setTimeout(() => {
+              if (btnText) btnText.innerText = 'Copy Strategy Checklist';
+            }, 2000);
+          });
+        });
+      }
+    }
+
+
+    // --- SCRIMS TRACKER TAB (OFFICIAL FFWS & BGMI SCORING SYSTEMS) ---
+    getFFPlacementPoints(rank) {
+      const table = { 1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0 };
+      return table[rank] !== undefined ? table[rank] : 0;
+    }
+
+    renderScrimsTab(container) {
+      if (this.activeGame === 'freefire') {
+        this.renderFFScrimsTab(container);
+      } else {
+        this.renderDefaultScrimsTab(container);
+      }
+    }
+
+    getSortedLobbyTeams() {
+      return [...this.ffLobbyTeams].sort((a, b) => {
+        if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
+        if (b.booyahs !== a.booyahs) return b.booyahs - a.booyahs;
+        if (b.kills !== a.kills) return b.kills - a.kills;
+        return b.placementPts - a.placementPts;
+      }).map((team, idx) => ({ ...team, rank: idx + 1 }));
+    }
+
+    exportLeaderboardPNG() {
+      const sortedTeams = this.getSortedLobbyTeams();
+      const canvas = document.createElement('canvas');
+      canvas.width = 1200;
+      canvas.height = 1600;
+      const ctx = canvas.getContext('2d');
+
+      // 1. Background Gradient
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, 1600);
+      bgGrad.addColorStop(0, '#060913');
+      bgGrad.addColorStop(0.3, '#0b1325');
+      bgGrad.addColorStop(0.7, '#0d1527');
+      bgGrad.addColorStop(1, '#05070e');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, 1200, 1600);
+
+      // 2. Tactical Grid Lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 1200; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 1600);
+        ctx.stroke();
+      }
+      for (let y = 0; y < 1600; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(1200, y);
+        ctx.stroke();
+      }
+
+      // 3. Cyber Glowing Border Frame
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(20, 20, 1160, 1560);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(26, 26, 1148, 1548);
+
+      // Corner Tech Accents
+      ctx.fillStyle = '#00f0ff';
+      ctx.fillRect(16, 16, 24, 6);
+      ctx.fillRect(16, 16, 6, 24);
+      ctx.fillRect(1160, 16, 24, 6);
+      ctx.fillRect(1178, 16, 6, 24);
+      ctx.fillRect(16, 1558, 24, 6);
+      ctx.fillRect(16, 1540, 6, 24);
+      ctx.fillRect(1160, 1558, 24, 6);
+      ctx.fillRect(1178, 1540, 6, 24);
+
+      // 4. Header Bar
+      ctx.textAlign = 'center';
+      
+      // Top Game Badge
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 16px "Rajdhani", sans-serif';
+      ctx.fillText('● GARENA FREE FIRE MAX • OFFICIAL BATTLE ROYALE TOURNAMENT ●', 600, 65);
+
+      // Tournament Main Title
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 42px "Chakra Petch", sans-serif';
+      ctx.fillText(this.ffTourneyMeta.title.toUpperCase(), 600, 115);
+
+      // Subtitle & Stage
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 18px "Rajdhani", sans-serif';
+      ctx.fillText(`${this.ffTourneyMeta.stage.toUpperCase()} • ORGANIZER: ${this.ffTourneyMeta.organizer.toUpperCase()} • ${this.ffTourneyMeta.date}`, 600, 148);
+
+      // Scoring System Rule Pill
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(320, 165, 560, 32, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fecdd3';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText('OFFICIAL 12-POINT SCORING (1st: 12 • 2nd: 9 • 3rd: 8 • 4th: 7 ... +1 PT / KILL)', 600, 186);
+
+      // 5. TOP 3 PODIUM HIGHLIGHT CARDS
+      const top1 = sortedTeams[0] || { name: 'Champion', totalPts: 0, booyahs: 0, kills: 0 };
+      const top2 = sortedTeams[1] || { name: 'Runner Up', totalPts: 0, booyahs: 0, kills: 0 };
+      const top3 = sortedTeams[2] || { name: '3rd Place', totalPts: 0, booyahs: 0, kills: 0 };
+
+      // #1 GOLD CHAMPION (Center)
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(430, 215, 340, 185, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 18px "Chakra Petch", sans-serif';
+      ctx.fillText('👑 #1 CHAMPION', 600, 250);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 22px "Chakra Petch", sans-serif';
+      ctx.fillText(top1.name.length > 20 ? top1.name.slice(0, 18) + '...' : top1.name, 600, 285);
+
+      ctx.fillStyle = '#fef08a';
+      ctx.font = '900 38px "Rajdhani", sans-serif';
+      ctx.fillText(`${top1.totalPts} PTS`, 600, 335);
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 14px "Rajdhani", sans-serif';
+      ctx.fillText(`${top1.booyahs} 🏆 BOOYAH  •  ${top1.kills} ⚔️ KILLS`, 600, 370);
+
+      // #2 SILVER (Left)
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.12)';
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(60, 240, 340, 160, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 16px "Chakra Petch", sans-serif';
+      ctx.fillText('🥈 #2 RUNNER UP', 230, 275);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 19px "Chakra Petch", sans-serif';
+      ctx.fillText(top2.name.length > 20 ? top2.name.slice(0, 18) + '...' : top2.name, 230, 305);
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '900 32px "Rajdhani", sans-serif';
+      ctx.fillText(`${top2.totalPts} PTS`, 230, 350);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText(`${top2.booyahs} 🏆 BOOYAH  •  ${top2.kills} ⚔️ KILLS`, 230, 380);
+
+      // #3 BRONZE (Right)
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.12)';
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(800, 240, 340, 160, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 16px "Chakra Petch", sans-serif';
+      ctx.fillText('🥉 #3 2ND RUNNER UP', 970, 275);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 19px "Chakra Petch", sans-serif';
+      ctx.fillText(top3.name.length > 20 ? top3.name.slice(0, 18) + '...' : top3.name, 970, 305);
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '900 32px "Rajdhani", sans-serif';
+      ctx.fillText(`${top3.totalPts} PTS`, 970, 350);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText(`${top3.booyahs} 🏆 BOOYAH  •  ${top3.kills} ⚔️ KILLS`, 970, 380);
+
+      // 6. TABLE HEADER
+      const tableY = 425;
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(50, tableY, 1100, 45, 8);
+      ctx.fill();
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '900 14px "Chakra Petch", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('RANK', 100, tableY + 28);
+      ctx.textAlign = 'left';
+      ctx.fillText('TEAM SQUAD NAME', 180, tableY + 28);
+      ctx.textAlign = 'center';
+      ctx.fillText('MATCHES', 650, tableY + 28);
+      ctx.fillText('BOOYAH 🏆', 760, tableY + 28);
+      ctx.fillText('PLACE PTS', 870, tableY + 28);
+      ctx.fillText('KILLS ⚔️', 980, tableY + 28);
+      ctx.fillText('TOTAL PTS', 1080, tableY + 28);
+
+      // 7. RENDER ALL 12 TEAMS
+      sortedTeams.forEach((t, i) => {
+        const rowY = 480 + (i * 85);
+
+        // Row background
+        ctx.fillStyle = (i % 2 === 0) ? 'rgba(15, 23, 42, 0.7)' : 'rgba(30, 41, 59, 0.5)';
+        if (i === 0) ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+        if (i === 1) ctx.fillStyle = 'rgba(203, 213, 225, 0.1)';
+        if (i === 2) ctx.fillStyle = 'rgba(217, 119, 6, 0.1)';
+
+        ctx.beginPath();
+        ctx.roundRect(50, rowY, 1100, 75, 10);
+        ctx.fill();
+
+        // Row Border
+        ctx.strokeStyle = i === 0 ? '#fbbf24' : (i === 1 ? '#cbd5e1' : (i === 2 ? '#d97706' : 'rgba(255, 255, 255, 0.05)'));
+        ctx.lineWidth = i < 3 ? 1.5 : 1;
+        ctx.stroke();
+
+        // Rank Badge
+        ctx.textAlign = 'center';
+        if (i === 0) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = '900 24px "Chakra Petch", sans-serif';
+          ctx.fillText('#1 👑', 100, rowY + 46);
+        } else if (i === 1) {
+          ctx.fillStyle = '#cbd5e1';
+          ctx.font = '900 22px "Chakra Petch", sans-serif';
+          ctx.fillText('#2 🥈', 100, rowY + 46);
+        } else if (i === 2) {
+          ctx.fillStyle = '#d97706';
+          ctx.font = '900 22px "Chakra Petch", sans-serif';
+          ctx.fillText('#3 🥉', 100, rowY + 46);
+        } else {
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = 'bold 20px "Chakra Petch", sans-serif';
+          ctx.fillText(`#${t.rank}`, 100, rowY + 46);
+        }
+
+        // Team Name & Tag
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 20px "Chakra Petch", sans-serif';
+        ctx.fillText(t.name, 180, rowY + 38);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 13px "Rajdhani", sans-serif';
+        ctx.fillText(`TAG: [${t.tag}] • VERIFIED TIER-1 SQUAD`, 180, rowY + 60);
+
+        // Stats Columns
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = 'bold 18px "Rajdhani", sans-serif';
+        ctx.fillText(t.matches.toString(), 650, rowY + 46);
+
+        ctx.fillStyle = t.booyahs > 0 ? '#fbbf24' : '#94a3b8';
+        ctx.font = 'bold 20px "Rajdhani", sans-serif';
+        ctx.fillText(t.booyahs > 0 ? `${t.booyahs} 🏆` : '0', 760, rowY + 46);
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = 'bold 18px "Rajdhani", sans-serif';
+        ctx.fillText(t.placementPts.toString(), 870, rowY + 46);
+
+        ctx.fillStyle = '#f87171';
+        ctx.font = 'bold 19px "Rajdhani", sans-serif';
+        ctx.fillText(t.kills.toString(), 980, rowY + 46);
+
+        // Total Points Highlight
+        ctx.fillStyle = i === 0 ? '#fbbf24' : (i < 3 ? '#ffffff' : '#38bdf8');
+        ctx.font = '900 26px "Rajdhani", sans-serif';
+        ctx.fillText(t.totalPts.toString(), 1080, rowY + 47);
+      });
+
+      // 8. Footer Bar
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(60, 1515);
+      ctx.lineTo(1140, 1515);
+      ctx.stroke();
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 14px "Rajdhani", sans-serif';
+      ctx.fillText('POWERED BY UNDERDOG ESPORTS ACADEMY • OFFICIAL BATTLE ROYALE TOURNAMENT ENGINE', 600, 1545);
+
+      // Trigger Direct Download
+      const dataURL = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataURL;
+      a.download = `${this.ffTourneyMeta.title.replace(/\\s+/g, '_')}_Leaderboard.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      return dataURL;
+    }
+
+    getSortedLobbyTeams() {
+      return [...this.ffLobbyTeams].sort((a, b) => {
+        if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
+        if (b.booyahs !== a.booyahs) return b.booyahs - a.booyahs;
+        if (b.kills !== a.kills) return b.kills - a.kills;
+        return b.placementPts - a.placementPts;
+      }).map((team, idx) => ({ ...team, rank: idx + 1 }));
+    }
+
+    exportLeaderboardPNG() {
+      const sortedTeams = this.getSortedLobbyTeams();
+      const canvas = document.createElement('canvas');
+      canvas.width = 1200;
+      canvas.height = 1600;
+      const ctx = canvas.getContext('2d');
+
+      // 1. Background Gradient
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, 1600);
+      bgGrad.addColorStop(0, '#060913');
+      bgGrad.addColorStop(0.3, '#0b1325');
+      bgGrad.addColorStop(0.7, '#0d1527');
+      bgGrad.addColorStop(1, '#05070e');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, 1200, 1600);
+
+      // 2. Tactical Grid Lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 1200; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 1600);
+        ctx.stroke();
+      }
+      for (let y = 0; y < 1600; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(1200, y);
+        ctx.stroke();
+      }
+
+      // 3. Cyber Glowing Border Frame
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(20, 20, 1160, 1560);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(26, 26, 1148, 1548);
+
+      // Corner Tech Accents
+      ctx.fillStyle = '#00f0ff';
+      ctx.fillRect(16, 16, 24, 6);
+      ctx.fillRect(16, 16, 6, 24);
+      ctx.fillRect(1160, 16, 24, 6);
+      ctx.fillRect(1178, 16, 6, 24);
+      ctx.fillRect(16, 1558, 24, 6);
+      ctx.fillRect(16, 1540, 6, 24);
+      ctx.fillRect(1160, 1558, 24, 6);
+      ctx.fillRect(1178, 1540, 6, 24);
+
+      // 4. Header Bar
+      ctx.textAlign = 'center';
+      
+      // Top Game Badge
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 16px "Rajdhani", sans-serif';
+      ctx.fillText('● GARENA FREE FIRE MAX • OFFICIAL BATTLE ROYALE TOURNAMENT ●', 600, 65);
+
+      // Tournament Main Title
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 42px "Chakra Petch", sans-serif';
+      ctx.fillText(this.ffTourneyMeta.title.toUpperCase(), 600, 115);
+
+      // Subtitle & Stage
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 18px "Rajdhani", sans-serif';
+      ctx.fillText(`${this.ffTourneyMeta.stage.toUpperCase()} • ORGANIZER: ${this.ffTourneyMeta.organizer.toUpperCase()} • ${this.ffTourneyMeta.date}`, 600, 148);
+
+      // Scoring System Rule Pill
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(320, 165, 560, 32, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fecdd3';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText('OFFICIAL 12-POINT SCORING (1st: 12 • 2nd: 9 • 3rd: 8 • 4th: 7 ... +1 PT / KILL)', 600, 186);
+
+      // 5. TOP 3 PODIUM HIGHLIGHT CARDS
+      const top1 = sortedTeams[0] || { name: 'Champion', totalPts: 0, booyahs: 0, kills: 0 };
+      const top2 = sortedTeams[1] || { name: 'Runner Up', totalPts: 0, booyahs: 0, kills: 0 };
+      const top3 = sortedTeams[2] || { name: '3rd Place', totalPts: 0, booyahs: 0, kills: 0 };
+
+      // #1 GOLD CHAMPION (Center)
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(430, 215, 340, 185, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 18px "Chakra Petch", sans-serif';
+      ctx.fillText('👑 #1 CHAMPION', 600, 250);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 22px "Chakra Petch", sans-serif';
+      ctx.fillText(top1.name.length > 20 ? top1.name.slice(0, 18) + '...' : top1.name, 600, 285);
+
+      ctx.fillStyle = '#fef08a';
+      ctx.font = '900 38px "Rajdhani", sans-serif';
+      ctx.fillText(`${top1.totalPts} PTS`, 600, 335);
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 14px "Rajdhani", sans-serif';
+      ctx.fillText(`${top1.booyahs} 🏆 BOOYAH  •  ${top1.kills} ⚔️ KILLS`, 600, 370);
+
+      // #2 SILVER (Left)
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.12)';
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(60, 240, 340, 160, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 16px "Chakra Petch", sans-serif';
+      ctx.fillText('🥈 #2 RUNNER UP', 230, 275);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 19px "Chakra Petch", sans-serif';
+      ctx.fillText(top2.name.length > 20 ? top2.name.slice(0, 18) + '...' : top2.name, 230, 305);
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '900 32px "Rajdhani", sans-serif';
+      ctx.fillText(`${top2.totalPts} PTS`, 230, 350);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText(`${top2.booyahs} 🏆 BOOYAH  •  ${top2.kills} ⚔️ KILLS`, 230, 380);
+
+      // #3 BRONZE (Right)
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.12)';
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(800, 240, 340, 160, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 16px "Chakra Petch", sans-serif';
+      ctx.fillText('🥉 #3 2ND RUNNER UP', 970, 275);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 19px "Chakra Petch", sans-serif';
+      ctx.fillText(top3.name.length > 20 ? top3.name.slice(0, 18) + '...' : top3.name, 970, 305);
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '900 32px "Rajdhani", sans-serif';
+      ctx.fillText(`${top3.totalPts} PTS`, 970, 350);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 13px "Rajdhani", sans-serif';
+      ctx.fillText(`${top3.booyahs} 🏆 BOOYAH  •  ${top3.kills} ⚔️ KILLS`, 970, 380);
+
+      // 6. TABLE HEADER
+      const tableY = 425;
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(50, tableY, 1100, 45, 8);
+      ctx.fill();
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '900 14px "Chakra Petch", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('RANK', 100, tableY + 28);
+      ctx.textAlign = 'left';
+      ctx.fillText('TEAM SQUAD NAME', 180, tableY + 28);
+      ctx.textAlign = 'center';
+      ctx.fillText('MATCHES', 650, tableY + 28);
+      ctx.fillText('BOOYAH 🏆', 760, tableY + 28);
+      ctx.fillText('PLACE PTS', 870, tableY + 28);
+      ctx.fillText('KILLS ⚔️', 980, tableY + 28);
+      ctx.fillText('TOTAL PTS', 1080, tableY + 28);
+
+      // 7. RENDER ALL 12 TEAMS
+      sortedTeams.forEach((t, i) => {
+        const rowY = 480 + (i * 85);
+
+        // Row background
+        ctx.fillStyle = (i % 2 === 0) ? 'rgba(15, 23, 42, 0.7)' : 'rgba(30, 41, 59, 0.5)';
+        if (i === 0) ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+        if (i === 1) ctx.fillStyle = 'rgba(203, 213, 225, 0.1)';
+        if (i === 2) ctx.fillStyle = 'rgba(217, 119, 6, 0.1)';
+
+        ctx.beginPath();
+        ctx.roundRect(50, rowY, 1100, 75, 10);
+        ctx.fill();
+
+        // Row Border
+        ctx.strokeStyle = i === 0 ? '#fbbf24' : (i === 1 ? '#cbd5e1' : (i === 2 ? '#d97706' : 'rgba(255, 255, 255, 0.05)'));
+        ctx.lineWidth = i < 3 ? 1.5 : 1;
+        ctx.stroke();
+
+        // Rank Badge
+        ctx.textAlign = 'center';
+        if (i === 0) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = '900 24px "Chakra Petch", sans-serif';
+          ctx.fillText('#1 👑', 100, rowY + 46);
+        } else if (i === 1) {
+          ctx.fillStyle = '#cbd5e1';
+          ctx.font = '900 22px "Chakra Petch", sans-serif';
+          ctx.fillText('#2 🥈', 100, rowY + 46);
+        } else if (i === 2) {
+          ctx.fillStyle = '#d97706';
+          ctx.font = '900 22px "Chakra Petch", sans-serif';
+          ctx.fillText('#3 🥉', 100, rowY + 46);
+        } else {
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = 'bold 20px "Chakra Petch", sans-serif';
+          ctx.fillText(`#${t.rank}`, 100, rowY + 46);
+        }
+
+        // Team Name & Tag
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 20px "Chakra Petch", sans-serif';
+        ctx.fillText(t.name, 180, rowY + 38);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 13px "Rajdhani", sans-serif';
+        ctx.fillText(`TAG: [${t.tag}] • VERIFIED TIER-1 SQUAD`, 180, rowY + 60);
+
+        // Stats Columns
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = 'bold 18px "Rajdhani", sans-serif';
+        ctx.fillText(t.matches.toString(), 650, rowY + 46);
+
+        ctx.fillStyle = t.booyahs > 0 ? '#fbbf24' : '#94a3b8';
+        ctx.font = 'bold 20px "Rajdhani", sans-serif';
+        ctx.fillText(t.booyahs > 0 ? `${t.booyahs} 🏆` : '0', 760, rowY + 46);
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = 'bold 18px "Rajdhani", sans-serif';
+        ctx.fillText(t.placementPts.toString(), 870, rowY + 46);
+
+        ctx.fillStyle = '#f87171';
+        ctx.font = 'bold 19px "Rajdhani", sans-serif';
+        ctx.fillText(t.kills.toString(), 980, rowY + 46);
+
+        // Total Points Highlight
+        ctx.fillStyle = i === 0 ? '#fbbf24' : (i < 3 ? '#ffffff' : '#38bdf8');
+        ctx.font = '900 26px "Rajdhani", sans-serif';
+        ctx.fillText(t.totalPts.toString(), 1080, rowY + 47);
+      });
+
+      // 8. Footer Bar
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(60, 1515);
+      ctx.lineTo(1140, 1515);
+      ctx.stroke();
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 14px "Rajdhani", sans-serif';
+      ctx.fillText('POWERED BY UNDERDOG ESPORTS ACADEMY • OFFICIAL BATTLE ROYALE TOURNAMENT ENGINE', 600, 1545);
+
+      // Trigger Direct Download
+      const dataURL = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataURL;
+      a.download = `${this.ffTourneyMeta.title.replace(/\\s+/g, '_')}_Leaderboard.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      return dataURL;
+    }
+
+    renderFFScrimsTab(container) {
+      const sortedTeams = this.getSortedLobbyTeams();
+      const top1 = sortedTeams[0] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+      const top2 = sortedTeams[1] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+      const top3 = sortedTeams[2] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+
+      // My Squad Aggregates
+      const totalMatches = this.ffScrimMatches.length;
+      const totalKills = this.ffScrimMatches.reduce((sum, m) => sum + m.kills, 0);
+      const totalPlacementPts = this.ffScrimMatches.reduce((sum, m) => sum + m.placementPts, 0);
+      const totalPoints = this.ffScrimMatches.reduce((sum, m) => sum + m.totalPts, 0);
+      const booyahCount = this.ffScrimMatches.filter(m => m.placement === 1).length;
+      const avgPts = totalMatches > 0 ? (totalPoints / totalMatches).toFixed(1) : "0.0";
+      const killToPlacementRatio = totalPoints > 0 ? Math.round((totalKills / totalPoints) * 100) : 0;
+
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <!-- Top Cyber Banner -->
+          <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#220d18] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">📊</span>
+                <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                  Official Tournament Scrims & PointCalc Leaderboard Suite
+                </h3>
+                <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-[10px] font-bold">
+                  FFWS 12-PT RULES
+                </span>
+              </div>
+              <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                Calculate official Free Fire World Series points, rank 12 teams with auto tie-breakers, and generate high-resolution broadcast points table graphics to post on WhatsApp, Instagram, and Discord!
+              </p>
+            </div>
+
+            <!-- Mode Switcher -->
+            <div class="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'lobby' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="lobby">
+                📊 12-Team Lobby Leaderboard
+              </button>
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'my_squad' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="my_squad">
+                🎯 My Squad Tracker
+              </button>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- MODE 1: 12-TEAM LOBBY LEADERBOARD & POINTCALC GRAPHIC EXPORTER -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'lobby' ? `
+            <div class="space-y-6">
+              
+              <!-- Action Toolbar & Metadata Controls -->
+              <div class="cyber-panel p-4 rounded-2xl border border-amber-500/30 bg-slate-950/80 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 class="text-xs font-heading font-bold uppercase text-amber-400 tracking-wider">Tournament Identity & Broadcast Settings</h4>
+                    <p class="text-[11px] text-slate-400">These details will appear on the exported broadcast leaderboard image.</p>
+                  </div>
+
+                  <!-- Export Buttons -->
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button id="downloadLeaderboardPNGBtn" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-transform hover:scale-105">
+                      <span>📥</span>
+                      <span id="downloadPNGBtnText">Download Broadcast Image (.PNG)</span>
+                    </button>
+                    <button id="toggleGraphicPreviewBtn" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-slate-700">
+                      👁️ Graphic Preview
+                    </button>
+                    <button id="resetLobbyScoresBtn" class="px-3.5 py-2 bg-slate-900 hover:bg-red-950 text-red-400 hover:text-red-300 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-red-900/50">
+                      🔄 Reset Scores
+                    </button>
+                    <button id="fillProLobbyBtn" class="px-3.5 py-2 bg-slate-900 hover:bg-amber-950 text-amber-400 hover:text-amber-300 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-amber-900/50">
+                      👑 Fill Pro Teams
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Editable Tournament Metadata -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Tournament Title</label>
+                    <input type="text" id="tourneyTitleInput" value="${this.ffTourneyMeta.title}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-heading font-bold outline-none focus:border-amber-500" placeholder="e.g. FREE FIRE TIER-1 SCRIMS"/>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Stage / Day</label>
+                    <input type="text" id="tourneyStageInput" value="${this.ffTourneyMeta.stage}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-sub outline-none focus:border-amber-500" placeholder="e.g. GRAND FINALS • 6 MATCHES"/>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Organizer Branding</label>
+                    <input type="text" id="tourneyOrganizerInput" value="${this.ffTourneyMeta.organizer}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-sub outline-none focus:border-amber-500" placeholder="e.g. UNDERDOG ESPORTS"/>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Top 3 Podium Cards -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- 1st Gold -->
+                <div class="cyber-panel p-4 rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-950/40 via-slate-950 to-slate-950 shadow-xl shadow-amber-950/40 text-center relative overflow-hidden">
+                  <div class="text-xs font-heading font-black text-amber-300 uppercase tracking-widest flex items-center justify-center gap-1">
+                    <span>👑</span>
+                    <span>1st Place Champion</span>
+                  </div>
+                  <h4 class="text-lg font-heading font-black text-white mt-1">${top1.name}</h4>
+                  <div class="text-3xl font-heading font-black text-amber-300 my-1">${top1.totalPts} <span class="text-xs font-mono font-normal text-amber-400">PTS</span></div>
+                  <div class="text-xs text-slate-300 font-mono flex items-center justify-center gap-3">
+                    <span>${top1.booyahs} 🏆 Booyahs</span>
+                    <span>&bull;</span>
+                    <span>${top1.kills} ⚔️ Kills</span>
+                  </div>
+                </div>
+
+                <!-- 2nd Silver -->
+                <div class="cyber-panel p-4 rounded-2xl border-2 border-slate-300/60 bg-gradient-to-b from-slate-800/30 via-slate-950 to-slate-950 text-center">
+                  <div class="text-xs font-heading font-bold text-slate-300 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <span>🥈</span>
+                    <span>2nd Place Runner Up</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mt-1">${top2.name}</h4>
+                  <div class="text-2xl font-heading font-black text-slate-200 my-1">${top2.totalPts} <span class="text-xs font-mono font-normal text-slate-400">PTS</span></div>
+                  <div class="text-xs text-slate-400 font-mono flex items-center justify-center gap-3">
+                    <span>${top2.booyahs} 🏆 Booyahs</span>
+                    <span>&bull;</span>
+                    <span>${top2.kills} ⚔️ Kills</span>
+                  </div>
+                </div>
+
+                <!-- 3rd Bronze -->
+                <div class="cyber-panel p-4 rounded-2xl border-2 border-amber-600/60 bg-gradient-to-b from-amber-900/20 via-slate-950 to-slate-950 text-center">
+                  <div class="text-xs font-heading font-bold text-amber-500 uppercase tracking-wider flex items-center justify-center gap-1">
+                    <span>🥉</span>
+                    <span>3rd Place</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mt-1">${top3.name}</h4>
+                  <div class="text-2xl font-heading font-black text-amber-400 my-1">${top3.totalPts} <span class="text-xs font-mono font-normal text-amber-500">PTS</span></div>
+                  <div class="text-xs text-slate-400 font-mono flex items-center justify-center gap-3">
+                    <span>${top3.booyahs} 🏆 Booyahs</span>
+                    <span>&bull;</span>
+                    <span>${top3.kills} ⚔️ Kills</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Collapsible Live Graphic Preview Box -->
+              <div id="leaderboardGraphicPreviewContainer" class="hidden cyber-panel p-4 rounded-2xl border border-cyan-500/40 bg-slate-950 text-center space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span class="text-xs font-heading font-bold uppercase text-cyan-400">Live Broadcast PNG Preview</span>
+                  <button id="closeGraphicPreviewBtn" class="text-xs text-slate-400 hover:text-white font-mono">✕ Close Preview</button>
+                </div>
+                <div class="flex justify-center">
+                  <img id="leaderboardPreviewImg" src="" alt="Leaderboard Preview" class="max-w-md w-full rounded-xl border border-slate-800 shadow-2xl"/>
+                </div>
+              </div>
+
+              <!-- Full 12-Team Interactive Scrim Table -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 class="text-base font-heading font-bold uppercase text-white tracking-wider">
+                      Official 12-Team Standings Table
+                    </h4>
+                    <p class="text-xs text-slate-400">
+                      Auto-sorted by: 1st Total Points &rarr; 2nd Booyahs 🏆 &rarr; 3rd Kill Points. Use quick <strong class="text-white">+1 / -1</strong> buttons to adjust scores live!
+                    </p>
+                  </div>
+                  <div class="text-xs font-mono text-slate-400">
+                    Teams in Lobby: <strong class="text-white">12 / 12</strong>
+                  </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                  <table class="w-full text-left text-xs">
+                    <thead>
+                      <tr class="border-b border-slate-800 text-slate-400 font-sub font-bold uppercase text-[11px]">
+                        <th class="py-3 px-3">Rank</th>
+                        <th class="py-3 px-3">Team Name & Tag</th>
+                        <th class="py-3 px-3 text-center">Matches</th>
+                        <th class="py-3 px-3 text-center">Booyahs 🏆</th>
+                        <th class="py-3 px-3 text-center">Place Pts</th>
+                        <th class="py-3 px-3 text-center">Kills ⚔️</th>
+                        <th class="py-3 px-3 text-center text-amber-300">Total Pts</th>
+                        <th class="py-3 px-3 text-center">Quick Adjust</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/60 font-mono">
+                      ${sortedTeams.map(t => {
+                        return `
+                          <tr class="hover:bg-slate-900/60 transition-colors ${
+                            t.rank === 1 ? 'bg-amber-950/20' : (t.rank === 2 ? 'bg-slate-800/20' : (t.rank === 3 ? 'bg-amber-900/10' : ''))
+                          }">
+                            <!-- Rank -->
+                            <td class="py-3 px-3">
+                              ${t.rank === 1 ? '<span class="cyber-badge bg-amber-500 text-black font-black text-xs">#1 👑</span>' : 
+                                (t.rank === 2 ? '<span class="cyber-badge bg-slate-300 text-black font-black text-xs">#2 🥈</span>' : 
+                                (t.rank === 3 ? '<span class="cyber-badge bg-amber-700 text-white font-black text-xs">#3 🥉</span>' : 
+                                `<span class="text-slate-400 font-bold">#${t.rank}</span>`))}
+                            </td>
+
+                            <!-- Team Name -->
+                            <td class="py-3 px-3 font-heading font-bold text-white text-sm">
+                              <div class="flex items-center gap-2">
+                                <span>${t.name}</span>
+                                <span class="cyber-badge bg-slate-800 text-slate-400 text-[9px] py-0 font-normal">[${t.tag}]</span>
+                              </div>
+                            </td>
+
+                            <!-- Matches -->
+                            <td class="py-3 px-3 text-center text-slate-300">
+                              ${t.matches}
+                            </td>
+
+                            <!-- Booyahs -->
+                            <td class="py-3 px-3 text-center ${t.booyahs > 0 ? 'text-amber-300 font-bold text-sm' : 'text-slate-500'}">
+                              ${t.booyahs > 0 ? `${t.booyahs} 🏆` : '0'}
+                            </td>
+
+                            <!-- Placement Points -->
+                            <td class="py-3 px-3 text-center text-slate-300">
+                              ${t.placementPts}
+                            </td>
+
+                            <!-- Kills -->
+                            <td class="py-3 px-3 text-center text-red-400 font-bold">
+                              ${t.kills}
+                            </td>
+
+                            <!-- Total Points -->
+                            <td class="py-3 px-3 text-center text-base font-black ${t.rank === 1 ? 'text-amber-300' : (t.rank <= 3 ? 'text-white' : 'text-cyan-300')}">
+                              ${t.totalPts}
+                            </td>
+
+                            <!-- Quick Adjust Buttons -->
+                            <td class="py-3 px-3 text-center">
+                              <div class="flex items-center justify-center gap-1">
+                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold" data-team-id="${t.id}" data-action="add_kill" title="Add 1 Kill">
+                                  +1 ⚔️
+                                </button>
+                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold" data-team-id="${t.id}" data-action="sub_kill" title="Subtract 1 Kill">
+                                  -1 ⚔️
+                                </button>
+                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600/50 text-amber-300 text-[10px] font-bold" data-team-id="${t.id}" data-action="add_booyah" title="Add 1 Booyah (+12 pts)">
+                                  +1 🏆
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 2: MY SQUAD PERFORMANCE TRACKER & AVERAGE PACING         -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'my_squad' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- Daily Overview KPI Scorecard -->
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div class="cyber-panel p-4 rounded-xl border border-slate-800 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Matches Logged</div>
+                  <div class="text-2xl font-heading font-black text-white mt-1">${totalMatches} <span class="text-xs text-slate-500 font-mono">/ 6</span></div>
+                  <div class="text-[10px] text-slate-400 mt-0.5">Daily Scrim Set</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-rose-500/40 bg-rose-950/20 text-center shadow-lg shadow-rose-950/30">
+                  <div class="text-[10px] font-sub uppercase font-bold text-rose-400">Total Points</div>
+                  <div class="text-2xl font-heading font-black text-rose-300 mt-1">${totalPoints} <span class="text-xs text-rose-400/80 font-mono">pts</span></div>
+                  <div class="text-[10px] text-rose-400/80 mt-0.5">${totalPlacementPts} Place + ${totalKills} Kills</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 text-center shadow-lg shadow-amber-950/30">
+                  <div class="text-[10px] font-sub uppercase font-bold text-amber-400">Booyahs (1st)</div>
+                  <div class="text-2xl font-heading font-black text-amber-300 mt-1">${booyahCount} 🏆</div>
+                  <div class="text-[10px] text-amber-400/80 mt-0.5">${totalMatches > 0 ? Math.round((booyahCount / totalMatches) * 100) : 0}% Win Rate</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-cyan-500/40 bg-cyan-950/20 text-center shadow-lg shadow-cyan-950/30">
+                  <div class="text-[10px] font-sub uppercase font-bold text-cyan-400">Squad Kills</div>
+                  <div class="text-2xl font-heading font-black text-cyan-300 mt-1">${totalKills} ⚔️</div>
+                  <div class="text-[10px] text-cyan-400/80 mt-0.5">${totalMatches > 0 ? (totalKills / totalMatches).toFixed(1) : "0"} Kills / Match</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center shadow-lg shadow-emerald-950/30 col-span-2 md:col-span-1">
+                  <div class="text-[10px] font-sub uppercase font-bold text-emerald-400">Avg Pts / Match</div>
+                  <div class="text-2xl font-heading font-black text-emerald-300 mt-1">${avgPts}</div>
+                  <div class="text-[10px] text-emerald-400/80 mt-0.5">Target: 12.0+</div>
+                </div>
+              </div>
+
+              <!-- Match Input Logger Form -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
+                      ⚡ Match Scrim Score Calculator
+                    </h4>
+                    <p class="text-[11px] text-slate-400">Input your placement and kills to compute official match points.</p>
+                  </div>
+                  <span class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-[10px]">
+                    Match ${Math.min(totalMatches + 1, 6)} of 6
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Match Number</label>
+                    <select id="ffMatchNumInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none focus:border-rose-500">
+                      <option value="1" ${totalMatches + 1 === 1 ? 'selected' : ''}>Match 1</option>
+                      <option value="2" ${totalMatches + 1 === 2 ? 'selected' : ''}>Match 2</option>
+                      <option value="3" ${totalMatches + 1 === 3 ? 'selected' : ''}>Match 3</option>
+                      <option value="4" ${totalMatches + 1 === 4 ? 'selected' : ''}>Match 4</option>
+                      <option value="5" ${totalMatches + 1 === 5 ? 'selected' : ''}>Match 5</option>
+                      <option value="6" ${totalMatches + 1 === 6 ? 'selected' : ''}>Match 6 (Finals)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Tournament Map</label>
+                    <select id="ffMapInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-amber-300 font-bold outline-none focus:border-rose-500">
+                      <option value="Bermuda">Bermuda (Peak / Clock Tower)</option>
+                      <option value="NeXTerra">NeXTerra (Grav Labs 0-G Arena)</option>
+                      <option value="Solara">Solara (Helios Solar Fields)</option>
+                      <option value="Purgatory">Purgatory (Brasilia / Central)</option>
+                      <option value="Kalahari">Kalahari (Refinery / High-Ground)</option>
+                      <option value="Alpine">Alpine (Snow Cap / Railroad)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Squad Final Placement (1st to 12th)</label>
+                    <select id="ffPlacementInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white font-mono outline-none focus:border-rose-500">
+                      <option value="1">#1 - Booyah! 🏆 (12 Pts)</option>
+                      <option value="2">#2 - 2nd Place (9 Pts)</option>
+                      <option value="3">#3 - 3rd Place (8 Pts)</option>
+                      <option value="4">#4 - 4th Place (7 Pts)</option>
+                      <option value="5">#5 - 5th Place (6 Pts)</option>
+                      <option value="6">#6 - 6th Place (5 Pts)</option>
+                      <option value="7">#7 - 7th Place (4 Pts)</option>
+                      <option value="8">#8 - 8th Place (3 Pts)</option>
+                      <option value="9">#9 - 9th Place (2 Pts)</option>
+                      <option value="10">#10 - 10th Place (1 Pt)</option>
+                      <option value="11">#11 - 11th Place (0 Pts)</option>
+                      <option value="12">#12 - 12th Place (0 Pts)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Squad Total Kills (+1 Pt Each)</label>
+                    <input type="number" id="ffKillsInput" min="0" max="48" value="6" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white font-mono outline-none focus:border-rose-500" placeholder="e.g. 6"/>
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <button id="addFFScrimMatchBtn" class="w-full py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-rose-950/50">
+                    + Log Match Score to Scrim Set
+                  </button>
+                </div>
+              </div>
+
+              <!-- Match History Table -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <h4 class="text-sm font-heading font-bold uppercase text-white">Daily Match Set History</h4>
+                  <span class="text-xs text-slate-400 font-mono">${this.ffScrimMatches.length} Matches Recorded</span>
+                </div>
+                <div class="divide-y divide-slate-800/60 font-mono text-xs">
+                  ${this.ffScrimMatches.map(m => `
+                    <div class="py-2.5 flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2">
+                        <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px]">M${m.matchNum}</span>
+                        <strong class="text-white">${m.map}</strong>
+                        <span class="text-slate-400 text-[11px]">&bull; Place: #${m.placement} (${m.placementPts} pts) &bull; Kills: ${m.kills}</span>
+                      </div>
+                      <div class="text-sm font-black text-rose-400">
+                        ${m.totalPts} pts
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
+            </div>
+          ` : ''}
+
+        </div>
+      `;
+
+      this.bindFFScrimEvents();
+    }
+
+    bindFFScrimEvents() {
+      // 1. Mode Switcher (Lobby Leaderboard vs My Squad)
+      document.querySelectorAll('.ff-scrim-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-mode');
+          if (mode) {
+            this.ffScrimMode = mode;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Tournament Metadata Inputs
+      const titleInput = document.getElementById('tourneyTitleInput');
+      if (titleInput) {
+        titleInput.addEventListener('input', (e) => {
+          this.ffTourneyMeta.title = e.target.value;
+        });
+      }
+      const stageInput = document.getElementById('tourneyStageInput');
+      if (stageInput) {
+        stageInput.addEventListener('input', (e) => {
+          this.ffTourneyMeta.stage = e.target.value;
+        });
+      }
+      const orgInput = document.getElementById('tourneyOrganizerInput');
+      if (orgInput) {
+        orgInput.addEventListener('input', (e) => {
+          this.ffTourneyMeta.organizer = e.target.value;
+        });
+      }
+
+      // 3. Download Broadcast PNG Button
+      const downloadBtn = document.getElementById('downloadLeaderboardPNGBtn');
+      if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+          this.exportLeaderboardPNG();
+          const btnText = document.getElementById('downloadPNGBtnText');
+          if (btnText) btnText.innerText = 'IMAGE DOWNLOADED! ✅';
+          setTimeout(() => {
+            if (btnText) btnText.innerText = 'Download Broadcast Image (.PNG)';
+          }, 2000);
+        });
+      }
+
+      // 4. Toggle Graphic Preview
+      const togglePreviewBtn = document.getElementById('toggleGraphicPreviewBtn');
+      const previewContainer = document.getElementById('leaderboardGraphicPreviewContainer');
+      const previewImg = document.getElementById('leaderboardPreviewImg');
+      const closePreviewBtn = document.getElementById('closeGraphicPreviewBtn');
+
+      if (togglePreviewBtn && previewContainer && previewImg) {
+        togglePreviewBtn.addEventListener('click', () => {
+          const dataURL = this.exportLeaderboardPNG();
+          previewImg.src = dataURL;
+          previewContainer.classList.remove('hidden');
+        });
+      }
+      if (closePreviewBtn && previewContainer) {
+        closePreviewBtn.addEventListener('click', () => {
+          previewContainer.classList.add('hidden');
+        });
+      }
+
+      // 5. Quick Adjust Score Buttons (+1 Kill, -1 Kill, +1 Booyah)
+      document.querySelectorAll('.lobby-adjust-btn').forEach(adjBtn => {
+        adjBtn.addEventListener('click', () => {
+          const teamId = adjBtn.getAttribute('data-team-id');
+          const action = adjBtn.getAttribute('data-action');
+          const team = this.ffLobbyTeams.find(t => t.id === teamId);
+
+          if (team) {
+            if (action === 'add_kill') {
+              team.kills += 1;
+              team.totalPts += 1;
+            } else if (action === 'sub_kill') {
+              if (team.kills > 0) {
+                team.kills -= 1;
+                team.totalPts -= 1;
+              }
+            } else if (action === 'add_booyah') {
+              team.booyahs += 1;
+              team.placementPts += 12; // 12 pts for Booyah
+              team.totalPts += 12;
+            }
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 6. Reset Lobby Scores Button
+      const resetBtn = document.getElementById('resetLobbyScoresBtn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          if (confirm('Reset all 12 teams scores to 0 for a new tournament?')) {
+            this.ffLobbyTeams.forEach(t => {
+              t.matches = 0;
+              t.booyahs = 0;
+              t.placementPts = 0;
+              t.kills = 0;
+              t.totalPts = 0;
+            });
+            this.renderTabContent();
+          }
+        });
+      }
+
+      // 7. Fill Pro Lobby Button
+      const fillProBtn = document.getElementById('fillProLobbyBtn');
+      if (fillProBtn) {
+        fillProBtn.addEventListener('click', () => {
+          this.ffLobbyTeams = [
+            { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
+            { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
+            { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
+            { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
+            { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
+            { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
+            { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
+            { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
+            { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
+            { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
+            { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
+            { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
+          ];
+          this.renderTabContent();
+        });
+      }
+
+      // 8. Add Match Score in My Squad Mode
+      const addMatchBtn = document.getElementById('addFFScrimMatchBtn');
+      if (addMatchBtn) {
+        addMatchBtn.addEventListener('click', () => {
+          const matchNum = parseInt(document.getElementById('ffMatchNumInput')?.value || "1", 10);
+          const map = document.getElementById('ffMapInput')?.value || "Bermuda";
+          const placement = parseInt(document.getElementById('ffPlacementInput')?.value || "1", 10);
+          const kills = parseInt(document.getElementById('ffKillsInput')?.value || "0", 10);
+
+          const placementPts = this.getFFPlacementPoints(placement);
+          const totalPts = placementPts + kills;
+
+          this.ffScrimMatches.push({
+            id: Date.now(),
+            matchNum,
+            map,
+            placement,
+            kills,
+            placementPts,
+            totalPts,
+            blunder: placement > 5 ? 'Positioning Error' : 'None (Solid Match)',
+            rating: placement === 1 ? 'S-Tier Booyah' : 'Match Logged'
+          });
+
+          this.renderTabContent();
+        });
+      }
+    }
+
+    // --- REFLEX TAB ---
+    renderReflexTab(container) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <div class="cyber-panel p-5 rounded-xl border border-cyan-500/30">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+                  <h3 class="text-base font-heading font-bold text-white uppercase tracking-wider">Aim & Reaction Speed Gym</h3>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">Measures your motor reaction latency in milliseconds (ms). Fast gloo walls require sub-220ms.</p>
+              </div>
+              <button id="startReflexBtn" class="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider">
+                Start Reaction Test (5 Rounds)
+              </button>
+            </div>
+
+            <div id="aimArenaBox" class="aim-arena w-full h-80 rounded-xl relative flex items-center justify-center">
+              <div id="arenaPlaceholder" class="text-center pointer-events-none p-4">
+                <div class="text-sm font-sub uppercase text-slate-500 tracking-wider">Target Area Ready</div>
+                <div class="text-xs text-slate-600 mt-1">Click "Start Reaction Test" above, then tap glowing targets immediately!</div>
+              </div>
+            </div>
+
+            <div id="reflexStatsBox" class="mt-4 p-3 bg-slate-900/90 rounded-lg border border-slate-800">
+              <div class="text-xs text-slate-400">Waiting for activation...</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.reflexTrainer = new ReflexTrainer('aimArenaBox', 'reflexStatsBox');
+      document.getElementById('startReflexBtn')?.addEventListener('click', () => {
+        document.getElementById('arenaPlaceholder')?.classList.add('hidden');
+        this.reflexTrainer.startTest();
+      });
+    }
+
+    // --- TOURNAMENTS & GLOBAL SLOTS SECTION ---
+        // --- TOURNAMENTS & GLOBAL SLOTS TAB (OFFICIAL 24-SLOT 2026 SYSTEM, FFMIC 2025-2026 & NEPAL) ---
+    renderTournamentsTab(container) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <!-- Main Section Header -->
+          <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#230d1a] to-slate-950">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-rose-500 animate-ping"></span>
+                  <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                    Free Fire & FF MAX Official Esports Calendar, Standings & Global Slots
+                  </h3>
+                </div>
+                <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                  Verified Liquipedia esports directory. Track the newly expanded <strong>24 Global Finals Slots for FFWS 2026 Bangkok</strong>, official <strong>FFMIC 2025 & 2026 (India - 3 Slots)</strong>, <strong>FFWS Nepal (1 Slot - Horaa Esports)</strong>, and live ongoing tournament points tables!
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-xs font-mono font-bold">
+                  24 Global Slots (FFWS 2026)
+                </span>
+                <span class="cyber-badge bg-emerald-950 border border-emerald-500/50 text-emerald-300 text-xs font-mono font-bold">
+                  🇮🇳 India: 3 Slots (FFMIC)
+                </span>
+                <span class="cyber-badge bg-sky-950 border border-sky-500/50 text-sky-300 text-xs font-mono font-bold">
+                  🇳🇵 Nepal: 1 Slot (Horaa)
+                </span>
+                <span class="cyber-badge bg-amber-950 border border-amber-500/50 text-amber-300 text-xs font-mono font-bold">
+                  ₹10,000,000 Prize Pool
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- 📊 TOURNAMENT POINTS TABLES & STANDINGS (LIQUIPEDIA ARCHIVE) -->
+          <!-- ============================================================ -->
+          <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-br from-slate-950 via-[#181108] to-slate-950 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-base">📊</span>
+                  <h4 class="text-base font-heading font-black uppercase text-white tracking-wider">
+                    Official Tournament Standings & Points Tables
+                  </h4>
+                </div>
+                <p class="text-xs text-slate-400">View exact match scores, Booyahs, elimination points, and world rankings sourced from Liquipedia.</p>
+              </div>
+
+              <!-- Table Category Selector -->
+              <div class="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none">
+                <button class="points-table-btn active px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider bg-rose-600 text-white shadow" data-table="ffmic_2026_fall">
+                  🇮🇳 FFMIC 2026 Fall (Ongoing)
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ffmic_2026_spring">
+                  🇮🇳 FFMIC 2026 Spring
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ffmic_2025">
+                  🇮🇳 FFMIC 2025 (Lucknow)
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ffws_nepal">
+                  🇳🇵 FFWS Nepal 2026
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ffws_finals">
+                  🏆 FFWS Global Finals
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ffws_sea">
+                  🔥 FFWS SEA League
+                </button>
+                                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ewc_2026_paris">
+                  🌍 EWC 2026 (Paris)
+                </button>
+                <button class="points-table-btn px-2.5 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase tracking-wider text-slate-400 hover:text-white" data-table="ewc_world">
+                  🌍 EWC 2024 (Riyadh)
+                </button>
+              </div>
+            </div>
+
+            <!-- TABLE 1: FFMIC 2026 Fall (Ongoing India Regional League) -->
+            <div id="table_ffmic_2026_fall" class="tournament-points-view">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] font-bold">LIVE ONGOING LEAGUE</span>
+                  <span class="text-slate-300 font-mono">Aug 28 – Sep 27, 2026 &bull; Grand Finals: Noida Indoor Stadium</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-amber-400 font-mono font-bold">₹10,000,000 INR (~₹1 Crore)</span>
+                  <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/50 text-[10px] font-bold">Top 3 ➔ FFWS Bangkok 2026</span>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Status</th>
+                      <th class="py-2.5 px-3 text-center">Matches</th>
+                      <th class="py-2.5 px-3 text-center">Booyahs</th>
+                      <th class="py-2.5 px-3 text-center">Kill Pts</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">FFWS 2026 Bangkok Slot Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-emerald-950/30 hover:bg-emerald-950/40 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Team Hind</td>
+                      <td class="py-2.5 px-3 text-slate-300">Reigning Spring Champions</td>
+                      <td class="py-2.5 px-3 text-center">24</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">6</td>
+                      <td class="py-2.5 px-3 text-center text-rose-300">142</td>
+                      <td class="py-2.5 px-3 text-center font-black text-emerald-400 text-sm">264</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px] font-bold">QUALIFIED (India Slot 1) 🎟️</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Total Gaming Esports</td>
+                      <td class="py-2.5 px-3 text-slate-300">2025 National Champions</td>
+                      <td class="py-2.5 px-3 text-center">24</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">5</td>
+                      <td class="py-2.5 px-3 text-center text-rose-300">138</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">249</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px] font-bold">QUALIFIED (India Slot 2) 🎟️</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Fireeyes Gaming</td>
+                      <td class="py-2.5 px-3 text-slate-300">Spring Runners-Up</td>
+                      <td class="py-2.5 px-3 text-center">24</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">4</td>
+                      <td class="py-2.5 px-3 text-center text-rose-300">125</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-amber-400 text-sm">231</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px] font-bold">QUALIFIED (India Slot 3) 🎟️</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">Reckoning Esports</td>
+                      <td class="py-2 px-3 text-slate-400">Pro Veteran Squad</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">3</td>
+                      <td class="py-2 px-3 text-center text-rose-300">114</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">216</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Orangutan</td>
+                      <td class="py-2 px-3 text-slate-400">Elite Aggressive Core</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">3</td>
+                      <td class="py-2 px-3 text-center text-rose-300">110</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">204</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">GodLike Esports</td>
+                      <td class="py-2 px-3 text-slate-400">Fan Favorite Powerhouse</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center text-rose-300">102</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">192</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#7</td>
+                      <td class="py-2 px-3 text-slate-200">S8UL</td>
+                      <td class="py-2 px-3 text-slate-400">Tactical Control Squad</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center text-rose-300">95</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">181</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#8</td>
+                      <td class="py-2 px-3 text-slate-200">Revenant XSpark</td>
+                      <td class="py-2 px-3 text-slate-400">Combined Roster</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center text-rose-300">91</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">174</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#9</td>
+                      <td class="py-2 px-3 text-slate-200">Blind Esports</td>
+                      <td class="py-2 px-3 text-slate-400">Grassroots Masters</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">1</td>
+                      <td class="py-2 px-3 text-center text-rose-300">84</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">158</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#10</td>
+                      <td class="py-2 px-3 text-slate-200">Chemin Esports</td>
+                      <td class="py-2 px-3 text-slate-400">Zone Rotation Specialist</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">1</td>
+                      <td class="py-2 px-3 text-center text-rose-300">79</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">149</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#11</td>
+                      <td class="py-2 px-3 text-slate-200">TSG Army</td>
+                      <td class="py-2 px-3 text-slate-400">Community Squad</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">1</td>
+                      <td class="py-2 px-3 text-center text-rose-300">72</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">138</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#12</td>
+                      <td class="py-2 px-3 text-slate-200">Nigma Galaxy</td>
+                      <td class="py-2 px-3 text-slate-400">South Asia Division</td>
+                      <td class="py-2 px-3 text-center">24</td>
+                      <td class="py-2 px-3 text-center">1</td>
+                      <td class="py-2 px-3 text-center text-rose-300">68</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">130</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finals Qualified (Noida)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 2: FFMIC 2026 Spring (Completed Official League) -->
+            <div id="table_ffmic_2026_spring" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">OFFICIAL 2026 SPRING SEASON</span>
+                  <span class="text-slate-300 font-mono">March 20 – April 26, 2026 &bull; Official Garena League</span>
+                </div>
+                <span class="text-amber-400 font-mono font-bold">₹10,000,000 INR Total Prize</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3 text-center">Booyahs</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">Prize Won</th>
+                      <th class="py-2.5 px-3 text-right">Honors</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/20 hover:bg-amber-950/30">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Team Hind</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">7</td>
+                      <td class="py-2.5 px-3 text-center font-black text-amber-400 text-sm">288</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹4,000,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">SPRING CHAMPION 👑</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Fireeyes Gaming</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">5</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">264</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹1,500,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Total Gaming eSports</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">4</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-amber-400 text-sm">251</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹800,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">2nd Runner-Up</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">Reckoning Esports</td>
+                      <td class="py-2 px-3 text-center">3</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">229</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹500,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 4 Elite</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">GodLike Esports</td>
+                      <td class="py-2 px-3 text-center">3</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">212</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹350,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 5</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">Orangutan</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">198</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹250,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 3: FFMIC 2025 (Battle Royale & Clash Squad - Lucknow Grand Finals) -->
+            <div id="table_ffmic_2025" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px] font-bold">HISTORIC 2025 RETURN CHAMPIONSHIP</span>
+                  <span class="text-slate-300 font-mono">Ekana Indoor Stadium, Lucknow &bull; Sep 28, 2025</span>
+                </div>
+                <span class="text-amber-400 font-mono font-bold">₹10,000,000 INR Total Prize (₹80L BR + ₹20L CS)</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3 text-center">Mode Titles</th>
+                      <th class="py-2.5 px-3 text-right">Prize Money (INR)</th>
+                      <th class="py-2.5 px-3 text-right">Official Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/20 hover:bg-amber-950/30">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Total Gaming Esports</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">BR Champion + CS Champion</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹4,000,000 (₹40 Lakhs)</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">HISTORIC CHAMPION 👑</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Reckoning Esports</td>
+                      <td class="py-2.5 px-3 text-center text-slate-300">BR 1st Runner-Up</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹1,500,000 (₹15 Lakhs)</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">NG Pros</td>
+                      <td class="py-2.5 px-3 text-center text-slate-300">BR 2nd Runner-Up</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">₹700,000 (₹7 Lakhs)</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">3rd Place</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">S8UL</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 4th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹550,000 (₹5.5 Lakhs)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 4</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Team Tycoons</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 5th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹300,000 (₹3 Lakhs)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 5</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">Revenant XSpark</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 6th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹250,000 (₹2.5 Lakhs)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#7</td>
+                      <td class="py-2 px-3 text-slate-200">Nightmare Esports</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 7th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹200,000 (₹2 Lakhs)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#8</td>
+                      <td class="py-2 px-3 text-slate-200">Jonty Gaming</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 8th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹150,000 (₹1.5 Lakhs)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#9</td>
+                      <td class="py-2 px-3 text-slate-200">GodLike Esports</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 9th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹100,000 (₹1 Lakh)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#10</td>
+                      <td class="py-2 px-3 text-slate-200">Vasista Esports</td>
+                      <td class="py-2 px-3 text-center text-slate-400">Battle Royale 10th</td>
+                      <td class="py-2 px-3 text-right text-slate-300">₹100,000 (₹1 Lakh)</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 4: FFWS Nepal 2026 Fall (Official Regional League) -->
+            <div id="table_ffws_nepal" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-sky-950 text-sky-300 border border-sky-500/40 text-[10px] font-bold">OFFICIAL FFWS NEPAL REGIONAL LEAGUE</span>
+                  <span class="text-slate-300 font-mono">Concluded September 13, 2026 &bull; Winner to Bangkok</span>
+                </div>
+                <span class="text-emerald-400 font-mono font-bold">1 Direct Global Finals Slot</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Region</th>
+                      <th class="py-2.5 px-3 text-center">Booyahs</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">FFWS Global Finals 2026 Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/20 hover:bg-amber-950/30">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Horaa Esports</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇳🇵 Nepal</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">5</td>
+                      <td class="py-2.5 px-3 text-center font-black text-amber-400 text-sm">178</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">QUALIFIED (Bangkok Golden Ticket 🎟️)</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">DRS Gaming</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇳🇵 Nepal</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">4</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">162</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">EWC 2026 Rep / 1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Deadly Nepal</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇳🇵 Nepal</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">3</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-amber-400 text-sm">147</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">2nd Runner-Up</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">High Voltage</td>
+                      <td class="py-2 px-3 text-slate-400">🇳🇵 Nepal</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">134</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 4 Elite</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Elementrix</td>
+                      <td class="py-2 px-3 text-slate-400">🇳🇵 Nepal</td>
+                      <td class="py-2 px-3 text-center">2</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">126</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 5</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">T2K Esports</td>
+                      <td class="py-2 px-3 text-slate-400">🇳🇵 Nepal</td>
+                      <td class="py-2 px-3 text-center">1</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">118</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 5: FFWS Global Finals (Grand Finals 12 Teams) -->
+            <div id="table_ffws_finals" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] font-bold">LATEST WORLD CHAMPIONSHIP</span>
+                  <span class="text-slate-300 font-mono">Rio de Janeiro &bull; 6 Matches + Point Rush</span>
+                </div>
+                <span class="text-amber-400 font-mono font-bold">$1,000,000 USD Total Prize</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Region</th>
+                      <th class="py-2.5 px-3 text-center">Matches</th>
+                      <th class="py-2.5 px-3 text-center">Booyahs</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">Prize Won</th>
+                      <th class="py-2.5 px-3 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/20 hover:bg-amber-950/30 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Fluxo</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇧🇷 Brazil</td>
+                      <td class="py-2.5 px-3 text-center">6</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">3</td>
+                      <td class="py-2.5 px-3 text-center font-black text-amber-400 text-sm">86</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$300,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">WORLD CHAMPION 👑</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">RRQ Kazu</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇮🇩 Indonesia</td>
+                      <td class="py-2.5 px-3 text-center">6</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">1</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">83</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$150,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Buriram United Esports</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇹🇭 Thailand</td>
+                      <td class="py-2.5 px-3 text-center">6</td>
+                      <td class="py-2.5 px-3 text-center text-amber-300 font-bold">1</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-slate-200 text-sm">78</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$70,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">2nd Runner-Up</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">E1 Esports</td>
+                      <td class="py-2 px-3 text-slate-400">🇧🇷 Brazil</td>
+                      <td class="py-2 px-3 text-center">6</td>
+                      <td class="py-2 px-3 text-center">0</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">74</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$45,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 4 Elite</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Twisted Minds</td>
+                      <td class="py-2 px-3 text-slate-400">🇹🇭 Thailand</td>
+                      <td class="py-2 px-3 text-center">6</td>
+                      <td class="py-2 px-3 text-center text-amber-300">1</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">71</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$35,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 5</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">paiN Gaming</td>
+                      <td class="py-2 px-3 text-slate-400">🇧🇷 Brazil</td>
+                      <td class="py-2 px-3 text-center">6</td>
+                      <td class="py-2 px-3 text-center">0</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">68</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$30,000</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Grand Finalist</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 6: FFWS SEA Fall League (18 Teams Overall Standings) -->
+            <div id="table_ffws_sea" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">REGIONAL LEAGUE</span>
+                  <span class="text-slate-300 font-mono">18 Teams &bull; Top 8 Earn FFWS Global Finals Slots</span>
+                </div>
+                <span class="text-cyan-400 font-mono font-bold">$300,000 USD League Pool</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Country</th>
+                      <th class="py-2.5 px-3 text-center">Booyahs</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">Global Finals Slot Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30">
+                      <td class="py-2 px-3 font-bold text-amber-400">#1</td>
+                      <td class="py-2 px-3 font-bold text-white">Buriram United Esports</td>
+                      <td class="py-2 px-3 text-slate-300">🇹🇭 TH</td>
+                      <td class="py-2 px-3 text-center text-amber-300 font-bold">15</td>
+                      <td class="py-2 px-3 text-center font-black text-emerald-400 text-sm">1,199</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px]">QUALIFIED (Slot 1)</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30">
+                      <td class="py-2 px-3 font-bold text-slate-300">#2</td>
+                      <td class="py-2 px-3 font-bold text-white">All Gamers Global</td>
+                      <td class="py-2 px-3 text-slate-300">🇹🇭 TH</td>
+                      <td class="py-2 px-3 text-center text-amber-300 font-bold">12</td>
+                      <td class="py-2 px-3 text-center font-bold text-emerald-300 text-sm">1,102</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px]">QUALIFIED (Slot 2)</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30">
+                      <td class="py-2 px-3 font-bold text-slate-300">#3</td>
+                      <td class="py-2 px-3 font-bold text-white">RRQ Kazu</td>
+                      <td class="py-2 px-3 text-slate-300">🇮🇩 ID</td>
+                      <td class="py-2 px-3 text-center text-amber-300 font-bold">9</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-200 text-sm">986</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px]">QUALIFIED (Slot 3)</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">Twisted Minds</td>
+                      <td class="py-2 px-3 text-slate-300">🇹🇭 TH</td>
+                      <td class="py-2 px-3 text-center text-amber-300 font-bold">10</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">984</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px]">QUALIFIED (Slot 4)</span></td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Team Falcons</td>
+                      <td class="py-2 px-3 text-slate-300">🇹🇭 TH</td>
+                      <td class="py-2 px-3 text-center text-amber-300">6</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">945</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 text-[9px]">QUALIFIED (EWC Seed)</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+                        <!-- TABLE 7: Esports World Cup 2026 (EWC Paris) Grand Finals -->
+            <div id="table_ewc_2026_paris" class="tournament-points-view hidden">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-bold">ESPORTS WORLD CUP 2026</span>
+                  <span class="text-slate-300 font-mono">Paris, France &bull; July 15–18, 2026 &bull; Champion Rush Format</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-amber-400 font-mono font-bold">$1,000,000 USD Prize Pool</span>
+                  <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[10px] font-bold">MVP: Gamezking 👑</span>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Region</th>
+                      <th class="py-2.5 px-3 text-center">Total Points</th>
+                      <th class="py-2.5 px-3 text-right">Prize Money (USD)</th>
+                      <th class="py-2.5 px-3 text-center">Club Pts</th>
+                      <th class="py-2.5 px-3 text-right">FFWS Bangkok Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/30 hover:bg-amber-950/40 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">LYON</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇫🇷 Global</td>
+                      <td class="py-2.5 px-3 text-center font-black text-amber-400 text-sm">155</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$300,000</td>
+                      <td class="py-2.5 px-3 text-center text-purple-300">+1,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">EWC 2026 CHAMPION 🎟️</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">AG.AL (All Gamers)</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇹🇭 Thailand</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">122</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$180,000</td>
+                      <td class="py-2.5 px-3 text-center text-purple-300">+750</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60 transition-colors">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">LOUD Snickers</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇧🇷 Brazil</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-amber-400 text-sm">111</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$120,000</td>
+                      <td class="py-2.5 px-3 text-center text-purple-300">+500</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">2nd Runner-Up</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#4</td>
+                      <td class="py-2 px-3 text-slate-200">Twisted Minds</td>
+                      <td class="py-2 px-3 text-slate-400">🇹🇭 Thailand</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">103</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$80,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+300</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 4 Elite</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#5</td>
+                      <td class="py-2 px-3 text-slate-200">Fluxo W7M</td>
+                      <td class="py-2 px-3 text-slate-400">🇧🇷 Brazil</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">91</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$61,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+200</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Top 5</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#6</td>
+                      <td class="py-2 px-3 text-slate-200">Team Falcons</td>
+                      <td class="py-2 px-3 text-slate-400">🇹🇭 Thailand</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">81</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$47,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+150</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#7</td>
+                      <td class="py-2 px-3 text-slate-200">Buriram United Esports</td>
+                      <td class="py-2 px-3 text-slate-400">🇹🇭 Thailand</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">78</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$35,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+100</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#8</td>
+                      <td class="py-2 px-3 text-slate-200">MIBR.LOS</td>
+                      <td class="py-2 px-3 text-slate-400">🇧🇷 Brazil</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">58</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$27,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+70</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#9</td>
+                      <td class="py-2 px-3 text-slate-200">Team RRQ</td>
+                      <td class="py-2 px-3 text-slate-400">🇮🇩 Indonesia</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">56</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$22,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+50</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#10</td>
+                      <td class="py-2 px-3 text-slate-200">EVOS Esports</td>
+                      <td class="py-2 px-3 text-slate-400">🇮🇩 Indonesia</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">56</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$20,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+30</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                    <tr class="bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors">
+                      <td class="py-2 px-3 text-emerald-400 font-bold">#11</td>
+                      <td class="py-2 px-3 text-white font-bold">S8UL Esports</td>
+                      <td class="py-2 px-3 text-emerald-300">🇮🇳 India</td>
+                      <td class="py-2 px-3 text-center font-bold text-emerald-300">54</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$18,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+20</td>
+                      <td class="py-2 px-3 text-right"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px] font-bold">India EWC Rep 🇮🇳</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="py-2 px-3 text-slate-400 font-bold">#12</td>
+                      <td class="py-2 px-3 text-slate-200">Team Apex Gaming</td>
+                      <td class="py-2 px-3 text-slate-400">🌍 Global</td>
+                      <td class="py-2 px-3 text-center font-bold text-slate-300">41</td>
+                      <td class="py-2 px-3 text-right text-slate-300">$15,000</td>
+                      <td class="py-2 px-3 text-center text-slate-400">+10</td>
+                      <td class="py-2 px-3 text-right text-slate-400 text-[10px]">Finalist</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TABLE 8: Esports World Cup 2024 (Riyadh Archive) -->
+            <div id="table_ewc_world" class="tournament-points-view hidden">
+              <div class="flex items-center justify-between mb-3 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-bold">WORLD INVITATIONAL</span>
+                  <span class="text-slate-300 font-mono">Riyadh, Saudi Arabia &bull; 6 Grand Final Matches</span>
+                </div>
+                <span class="text-amber-400 font-mono font-bold">$1,000,000 USD Prize Pool</span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                      <th class="py-2.5 px-3">Rank</th>
+                      <th class="py-2.5 px-3">Team Name</th>
+                      <th class="py-2.5 px-3">Region</th>
+                      <th class="py-2.5 px-3 text-center">Placement Pts</th>
+                      <th class="py-2.5 px-3 text-center">Kill Pts</th>
+                      <th class="py-2.5 px-3 text-center">Total Score</th>
+                      <th class="py-2.5 px-3 text-right">Prize</th>
+                      <th class="py-2.5 px-3 text-right">Golden Ticket</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    <tr class="bg-amber-950/20 hover:bg-amber-950/30">
+                      <td class="py-2.5 px-3 font-bold text-amber-400 flex items-center gap-1"><span>🥇</span> #1</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Team Falcons</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇹🇭 Thailand</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-slate-300">46</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-rose-300">60</td>
+                      <td class="py-2.5 px-3 text-center font-black text-amber-400 text-sm">106</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$300,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[9px] font-bold">FFWS Direct Seed 🎟️</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/40 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-slate-300 flex items-center gap-1"><span>🥈</span> #2</td>
+                      <td class="py-2.5 px-3 font-bold text-white">EVOS Esports</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇮🇩 Indonesia</td>
+                      <td class="py-2.5 px-3 text-center">44</td>
+                      <td class="py-2.5 px-3 text-center text-rose-300">55</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-cyan-300 text-sm">99</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$175,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-slate-800 text-slate-200 text-[9px]">1st Runner-Up</span></td>
+                    </tr>
+                    <tr class="bg-slate-900/30 hover:bg-slate-900/60">
+                      <td class="py-2.5 px-3 font-bold text-amber-600 flex items-center gap-1"><span>🥉</span> #3</td>
+                      <td class="py-2.5 px-3 font-bold text-white">Netshoes Miners</td>
+                      <td class="py-2.5 px-3 text-slate-300">🇧🇷 Brazil</td>
+                      <td class="py-2.5 px-3 text-center">38</td>
+                      <td class="py-2.5 px-3 text-center text-rose-300">52</td>
+                      <td class="py-2.5 px-3 text-center font-bold text-slate-200 text-sm">90</td>
+                      <td class="py-2.5 px-3 text-right text-emerald-400 font-bold">$115,000</td>
+                      <td class="py-2.5 px-3 text-right"><span class="cyber-badge bg-amber-950/60 text-amber-400 text-[9px]">2nd Runner-Up</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- 🌐 OFFICIAL 2026 INTERNATIONAL SLOT ALLOCATION (24 SLOTS)    -->
+          <!-- ============================================================ -->
+          <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <h4 class="text-base font-heading font-black uppercase text-white tracking-wider">
+                    🌐 FFWS Global Finals 2026 Bangkok: Official 24-Slot Distribution Matrix
+                  </h4>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  Verified Liquipedia 2026 global roadmap expansion. Featuring India (3 slots), Nepal (1 slot), and international qualifying leagues.
+                </p>
+              </div>
+              <span class="cyber-badge bg-slate-900 border border-emerald-500/50 text-emerald-300 text-xs font-mono font-bold">
+                Official: 24 Global Seeds
+              </span>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead>
+                  <tr class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/50">
+                    <th class="py-2.5 px-3">Server / Region</th>
+                    <th class="py-2.5 px-3">Official Qualifying League</th>
+                    <th class="py-2.5 px-3 text-center">Global Finals Slots</th>
+                    <th class="py-2.5 px-3">Regional Prize Pool</th>
+                    <th class="py-2.5 px-3">Top Contenders / Seeded Teams</th>
+                    <th class="py-2.5 px-3">Grassroots Open Path</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                  <!-- 1. EWC Champion Direct Seed -->
+                  <tr class="bg-amber-950/20 hover:bg-amber-950/30 transition-colors">
+                    <td class="py-3 px-3 font-bold text-amber-400 flex items-center gap-1.5">
+                      <span>👑</span> Esports World Cup (EWC)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200 font-bold">EWC Mid-Season Championship (Riyadh)</td>
+                    <td class="py-3 px-3 text-center font-black text-amber-400 text-sm">1 DIRECT SEED</td>
+                    <td class="py-3 px-3 text-slate-300">$1,000,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">LYON (Direct Qualifier) / Team Falcons</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-amber-950 text-amber-300 text-[9px] font-bold">EWC Champion Ticket</span></td>
+                  </tr>
+
+                  <!-- 2. Southeast Asia (SEA) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-emerald-400 flex items-center gap-1.5">
+                      <span>🌏</span> Southeast Asia (SEA)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS Southeast Asia (SEA) Fall</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">8 SLOTS</td>
+                    <td class="py-3 px-3 text-slate-300">$300,000 USD / season</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Buriram, All Gamers, RRQ Kazu, Twisted Minds, AAA, WAG, EVOS</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px]">National Qualifiers (TH/ID/VN/MY)</span></td>
+                  </tr>
+
+                  <!-- 3. INDIA (FFMIC) - 3 SLOTS! -->
+                  <tr class="bg-emerald-950/30 hover:bg-emerald-950/40 transition-colors border-l-4 border-emerald-500">
+                    <td class="py-3 px-3 font-bold text-emerald-300 flex items-center gap-1.5">
+                      <span>🇮🇳</span> India Server (FFMIC)
+                    </td>
+                    <td class="py-3 px-3 text-white font-bold">Free Fire MAX India Cup (FFMIC) Fall</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm bg-emerald-950/50">3 SLOTS (NEW)</td>
+                    <td class="py-3 px-3 text-amber-400 font-bold">₹10,000,000 INR (~₹1 Cr)</td>
+                    <td class="py-3 px-3 text-slate-300 text-[10px]">Team Hind, Total Gaming, Fireeyes, Reckoning, Orangutan, GodLike</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-emerald-950 text-emerald-300 text-[9px] font-bold">Top 3 Noida Grand Finals</span></td>
+                  </tr>
+
+                  <!-- 4. Brazil (BR) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-yellow-400 flex items-center gap-1.5">
+                      <span>🇧🇷</span> Brazil Server (BR)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS Brazil (Split 1 & Split 2)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">3 SLOTS</td>
+                    <td class="py-3 px-3 text-slate-300">R$ 700,000 (~$140k USD)</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Fluxo, E1 Esports, paiN Gaming, Team Solid</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-yellow-950 text-yellow-300 text-[9px]">Serie B & Open Cups</span></td>
+                  </tr>
+
+                  <!-- 5. Latin America (LATAM) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-cyan-400 flex items-center gap-1.5">
+                      <span>🇲🇽</span> Latin America (LATAM)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS LATAM (North & South Divisions)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">2 SLOTS</td>
+                    <td class="py-3 px-3 text-slate-300">$150,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Rainbow7, Nova Legión, Six Karma, 19esports</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-cyan-950 text-cyan-300 text-[9px]">Torneos Nacionales</span></td>
+                  </tr>
+
+                  <!-- 6. Bangladesh (BD) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-green-400 flex items-center gap-1.5">
+                      <span>🇧🇩</span> Bangladesh Server (BD)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS Bangladesh (Fall Championship)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">2 SLOTS</td>
+                    <td class="py-3 px-3 text-slate-300">$50,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Team Infinity, Pirate Esports (Qualified)</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-green-950 text-green-300 text-[9px]">Open National Qualifiers</span></td>
+                  </tr>
+
+                  <!-- 7. NEPAL (FFWS NP) - 1 SLOT! -->
+                  <tr class="bg-sky-950/30 hover:bg-sky-950/40 transition-colors border-l-4 border-sky-500">
+                    <td class="py-3 px-3 font-bold text-sky-300 flex items-center gap-1.5">
+                      <span>🇳🇵</span> Nepal Server (FFWS NP)
+                    </td>
+                    <td class="py-3 px-3 text-white font-bold">FFWS Nepal Regional League Fall</td>
+                    <td class="py-3 px-3 text-center font-black text-sky-300 text-sm bg-sky-950/50">1 SLOT (NEW)</td>
+                    <td class="py-3 px-3 text-slate-300">$35,000 USD</td>
+                    <td class="py-3 px-3 text-slate-300 text-[10px]">Horaa Esports (CHAMPIONS - Qualified), DRS Gaming</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-sky-950 text-sky-300 text-[9px] font-bold">Horaa Esports 🎟️</span></td>
+                  </tr>
+
+                  <!-- 8. Pakistan (PK) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-teal-400 flex items-center gap-1.5">
+                      <span>🇵🇰</span> Pakistan Server (PK)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS Pakistan (Pro League)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">1 SLOT</td>
+                    <td class="py-3 px-3 text-slate-300">$45,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Hotshot Esports, Rezurrection X, House of Blood</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-teal-950 text-teal-300 text-[9px]">FFC Open Cards</span></td>
+                  </tr>
+
+                  <!-- 9. Middle East & North Africa (MENA) -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-indigo-400 flex items-center gap-1.5">
+                      <span>🌍</span> MENA (Arab League)
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS MENA (Arab League Division 1)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">1 SLOT</td>
+                    <td class="py-3 px-3 text-slate-300">$100,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">WASK, Clear Vision, Nakama Esports</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-indigo-950 text-indigo-300 text-[9px]">Arab League Division 2</span></td>
+                  </tr>
+
+                  <!-- 10. USA / North America -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-blue-400 flex items-center gap-1.5">
+                      <span>🇺🇸</span> USA / North America
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">Snapdragon Pro Series (SPS North America)</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">1 SLOT</td>
+                    <td class="py-3 px-3 text-slate-300">$100,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">Wasps, STARK, 503 Esports</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-blue-950 text-blue-300 text-[9px]">ESL Open Brackets</span></td>
+                  </tr>
+
+                  <!-- 11. Africa -->
+                  <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-3 font-bold text-purple-400 flex items-center gap-1.5">
+                      <span>🌍</span> Africa Circuit
+                    </td>
+                    <td class="py-3 px-3 text-slate-200">FFWS Africa Championship</td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-sm">1 SLOT</td>
+                    <td class="py-3 px-3 text-slate-300">$40,000 USD</td>
+                    <td class="py-3 px-3 text-slate-400 text-[10px]">ParadoX Gaming (Qualified)</td>
+                    <td class="py-3 px-3"><span class="cyber-badge bg-purple-950 text-purple-300 text-[9px]">Continental Qualifiers</span></td>
+                  </tr>
+
+                  <!-- Total Sum Verification Row -->
+                  <tr class="bg-slate-900/95 font-bold border-t-2 border-emerald-500/50">
+                    <td colspan="2" class="py-3 px-3 text-white uppercase font-heading text-xs tracking-wider">
+                      Official FFWS Global Finals 2026 Bangkok Roster Total
+                    </td>
+                    <td class="py-3 px-3 text-center font-black text-emerald-400 text-base">
+                      24 TEAMS
+                    </td>
+                    <td colspan="3" class="py-3 px-3 text-[10px] text-slate-400 font-mono">
+                      Exact breakdown: 1 (EWC) + 8 (SEA) + 3 (India FFMIC) + 3 (Brazil) + 2 (LATAM) + 2 (BD) + 1 (Nepal) + 1 (PK) + 1 (MENA) + 1 (USA) + 1 (Africa) = <strong>24 Total Teams</strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Server-by-Server Upcoming Tournaments Directory Filter -->
+          <div class="space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 class="text-base font-heading font-bold uppercase text-white tracking-wide">
+                  📅 Official Tournaments Directory & Roadmaps
+                </h4>
+                <p class="text-xs text-slate-400">Filter regional championships, prize pools, and qualification paths across Garena servers.</p>
+              </div>
+              <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button class="tourney-filter-btn active px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-rose-600 text-white shadow-md" data-server="all">All Servers</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="india">🇮🇳 India (FFMIC)</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="nepal">🇳🇵 Nepal</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="sea">SEA</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="br">Brazil</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="latam">LATAM</button>
+                <button class="tourney-filter-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-server="bd">Bangladesh</button>
+              </div>
+            </div>
+
+            <!-- Tournament Cards Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="tournamentsGrid">
+              <!-- Card 1: FFMIC 2026 Fall (India) -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-emerald-500/40 bg-emerald-950/10 flex flex-col justify-between" data-server="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px]">India Server &bull; Noida</span>
+                    <span class="text-[10px] font-mono text-emerald-400 font-bold">Top 3 ➔ Bangkok 🎟️</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">Free Fire MAX India Cup (FFMIC) Fall 2026</h4>
+                  <div class="text-[11px] text-amber-300 font-mono mb-2">Prize: ₹10,000,000 INR (~₹1 Crore) &bull; Sep 26–27 Finals</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    The highest tier of competitive Free Fire in India. 18 teams competed in the online league stage, with the top 12 squads clashing live at the Noida Indoor Stadium. The top 3 teams secure direct entry to the FFWS Global Finals 2026 in Bangkok!
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Key Teams:</strong> Team Hind, Total Gaming, Fireeyes, Reckoning, Orangutan</div>
+                    <div><strong>Format:</strong> 18 Teams League &bull; Top 12 Grand Finals</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-emerald-400">Live Ongoing</strong></span>
+                  <span class="text-emerald-400 font-bold">3 Global Slots</span>
+                </div>
+              </div>
+
+              <!-- Card 2: FFMIC 2025 & 2026 Spring Archive (India) -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-orange-500/30 flex flex-col justify-between" data-server="india">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-orange-950 text-orange-300 border border-orange-500/40 text-[10px]">India &bull; Lucknow / Online</span>
+                    <span class="text-[10px] font-mono text-amber-400 font-bold">Historic Records</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">FFMIC 2025 & 2026 Spring Championships</h4>
+                  <div class="text-[11px] text-orange-300 font-mono mb-2">Prize: ₹10,000,000 INR per Season</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    Historic championship records. <strong>Total Gaming Esports</strong> swept both Battle Royale and Clash Squad titles at Ekana Stadium, Lucknow in FFMIC 2025 (₹40 Lakh prize), followed by <strong>Team Hind</strong> claiming the 2026 Spring Championship!
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>2025 Winner:</strong> Total Gaming Esports (₹40 Lakhs)</div>
+                    <div><strong>2026 Spring Winner:</strong> Team Hind (₹40 Lakhs)</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-slate-300">Completed</strong></span>
+                  <span class="text-orange-400 font-bold">Hall of Fame</span>
+                </div>
+              </div>
+
+              <!-- Card 3: FFWS Nepal 2026 (Nepal) -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-sky-500/40 bg-sky-950/10 flex flex-col justify-between" data-server="nepal">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-sky-950 text-sky-300 border border-sky-500/40 text-[10px]">Nepal Server &bull; Official</span>
+                    <span class="text-[10px] font-mono text-sky-400 font-bold">Horaa Qualified 🎟️</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">FFWS Nepal Regional League 2026</h4>
+                  <div class="text-[11px] text-sky-300 font-mono mb-2">Prize: $35,000 USD &bull; Concluded Sep 13, 2026</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    Nepal's official premier esports championship. On September 13, 2026, <strong>Horaa Esports</strong> emerged as champions over DRS Gaming, securing Nepal's official direct qualification slot to the FFWS Global Finals in Bangkok!
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Champion:</strong> Horaa Esports (Qualified for Bangkok)</div>
+                    <div><strong>Runner-up:</strong> DRS Gaming (EWC 2026 representative)</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-sky-400">Champion Crowned</strong></span>
+                  <span class="text-sky-400 font-bold">1 Global Slot</span>
+                </div>
+              </div>
+
+              <!-- Card 4: FFWS Southeast Asia (SEA) Fall 2026 -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-rose-500/30 flex flex-col justify-between" data-server="sea">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px]">SEA Server &bull; Bangkok / Online</span>
+                    <span class="text-[10px] font-mono text-amber-400 font-bold">Top 8 ➔ FFWS</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">FFWS Southeast Asia (SEA) Fall 2026</h4>
+                  <div class="text-[11px] text-rose-300 font-mono mb-2">Prize: $300,000 USD &bull; Ongoing</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    The ultra-competitive Southeast Asian league featuring Thailand, Indonesia, Vietnam, and Malaysia. Top 8 teams earn tickets directly to Bangkok.
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Contenders:</strong> Buriram, All Gamers, RRQ Kazu, Twisted Minds</div>
+                    <div><strong>Format:</strong> 18 Teams &bull; 6 Matchdays League Stage</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-rose-400">League Stage</strong></span>
+                  <span class="text-emerald-400 font-bold">8 Slots</span>
+                </div>
+              </div>
+
+              <!-- Card 5: FFWS Brazil (BR) Split 2 -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-yellow-500/30 flex flex-col justify-between" data-server="br">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-yellow-950 text-yellow-300 border border-yellow-500/40 text-[10px]">Brazil Server &bull; São Paulo</span>
+                    <span class="text-[10px] font-mono text-amber-400 font-bold">Top 3 ➔ FFWS</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">FFWS Brazil 2026 (Split 2)</h4>
+                  <div class="text-[11px] text-yellow-300 font-mono mb-2">Prize: R$ 700,000 (~$140k USD)</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    The fierce battle for Brazilian supremacy. Home to defending World Champions Fluxo. The top 3 squads advance to the Bangkok Global Finals.
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Key Teams:</strong> Fluxo, E1 Esports, paiN Gaming, Team Solid</div>
+                    <div><strong>Format:</strong> 18 Pro Teams &bull; Round-Robin League</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-yellow-400">Active Phase</strong></span>
+                  <span class="text-emerald-400 font-bold">3 Slots</span>
+                </div>
+              </div>
+
+                            <!-- Card 7: Esports World Cup 2026 Paris -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-purple-500/40 bg-purple-950/10 flex flex-col justify-between" data-server="all">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px]">Paris, France &bull; July 2026</span>
+                    <span class="text-[10px] font-mono text-amber-400 font-bold">Champion: LYON 👑</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">Esports World Cup (EWC) 2026 Paris</h4>
+                  <div class="text-[11px] text-purple-300 font-mono mb-2">Prize: $1,000,000 USD &bull; MVP: Gamezking</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    24 elite world teams competed in the Champion Rush format in Paris. <strong>LYON</strong> took 1st place with 155 points, winning $300,000 and direct entry to Bangkok. India was represented by <strong>S8UL Esports</strong> (#11).
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Champion:</strong> LYON (155 pts, $300,000)</div>
+                    <div><strong>Runner-up:</strong> AG.AL (122 pts, $180,000)</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-emerald-400">Completed</strong></span>
+                  <span class="text-amber-400 font-bold">Direct Seed 🎟️</span>
+                </div>
+              </div>
+              <!-- Card 6: FFWS Global Finals 2026 Bangkok -->
+              <div class="tourney-card cyber-panel p-5 rounded-xl border border-purple-500/40 bg-purple-950/10 flex flex-col justify-between" data-server="all">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px]">Global &bull; Bangkok, Thailand</span>
+                    <span class="text-[10px] font-mono text-amber-400 font-bold">World Championship 👑</span>
+                  </div>
+                  <h4 class="text-base font-heading font-bold text-white mb-1">FFWS Global Finals 2026 Bangkok</h4>
+                  <div class="text-[11px] text-purple-300 font-mono mb-2">Prize: $1,000,000+ USD &bull; Nov 6–28, 2026</div>
+                  <p class="text-xs text-slate-300 leading-relaxed mb-3">
+                    The supreme pinnacle of Free Fire esports. For the first time in history, <strong>24 elite world teams</strong> clash over 4 weekends in Bangkok for the official World Championship trophy!
+                  </p>
+                  <div class="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                    <div><strong>Qualified:</strong> LYON (EWC), Horaa (Nepal), Top 3 India (FFMIC), Top 8 SEA</div>
+                    <div><strong>Format:</strong> Knockout Stage (Nov 6–22) &bull; Last Chance (Nov 27) &bull; Grand Finals (Nov 28)</div>
+                  </div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">Status: <strong class="text-purple-400">November 2026</strong></span>
+                  <span class="text-amber-400 font-bold">24 Teams</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- 🚀 THE 4-STAGE UNDERDOG GRASSROOTS QUALIFICATION BLUEPRINT   -->
+          <!-- ============================================================ -->
+          <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+            <div>
+              <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
+                🚀 The 4-Stage Grassroots Underdog Qualification Pathway
+              </h4>
+              <p class="text-[11px] text-slate-400">
+                How an open amateur squad in India, Nepal, or international servers rises from in-game registration to the 24-team Global Finals.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div>
+                  <div class="cyber-badge bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] mb-2 font-mono font-bold">STAGE 1 : OPEN</div>
+                  <h5 class="text-sm font-heading font-bold text-white mb-1">In-Game FFC Match Cards</h5>
+                  <p class="text-[11px] text-slate-400 leading-relaxed mb-3">
+                    Every official tournament begins inside the Free Fire app via the <strong>FFC (Free Fire Cup) Mode</strong>. Squads receive 8 tickets to play during a designated 4-hour window. Top 5 matches determine qualification.
+                  </p>
+                </div>
+                <div class="text-[10px] text-amber-300 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
+                  Requirement: Level 40+ &bull; Rank Diamond 1+
+                </div>
+              </div>
+
+              <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div>
+                  <div class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px] mb-2 font-mono font-bold">STAGE 2 : PLAY-INS</div>
+                  <h5 class="text-sm font-heading font-bold text-white mb-1">Closed Qualifiers & Anti-Cheat</h5>
+                  <p class="text-[11px] text-slate-400 leading-relaxed mb-3">
+                    Top squads from FFC enter official Garena Discord scrim lobbies. Strict MOS Inspection (anti-cheat verification, hand-cam recordings, and identity validation). 12-point FFWS scoring format.
+                  </p>
+                </div>
+                <div class="text-[10px] text-amber-300 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
+                  Target: 12+ pts/match average
+                </div>
+              </div>
+
+              <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div>
+                  <div class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] mb-2 font-mono font-bold">STAGE 3 : LEAGUE</div>
+                  <h5 class="text-sm font-heading font-bold text-white mb-1">Broadcast Regional League</h5>
+                  <p class="text-[11px] text-slate-400 leading-relaxed mb-3">
+                    Top 18 teams battle live on official YouTube broadcasts (e.g. FFMIC India / FFWS SEA / FFWS Nepal). Round-robin format testing map mastery on Bermuda, NeXTerra, Solara, Purgatory, and Kalahari.
+                  </p>
+                </div>
+                <div class="text-[10px] text-cyan-300 font-mono bg-slate-950/60 p-2 rounded border border-slate-800">
+                  Top teams claim Global Finals slots
+                </div>
+              </div>
+
+              <div class="bg-slate-900/90 p-4 rounded-xl border border-emerald-500/30 bg-emerald-950/10 flex flex-col justify-between">
+                <div>
+                  <div class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px] mb-2 font-mono font-bold">STAGE 4 : FINALS</div>
+                  <h5 class="text-sm font-heading font-bold text-white mb-1">FFWS Global Finals Bangkok</h5>
+                  <p class="text-[11px] text-slate-400 leading-relaxed mb-3">
+                    The 24 best teams on earth clash under the expanded format in Bangkok. Compete for $1,000,000+ USD and the world championship trophy!
+                  </p>
+                </div>
+                <div class="text-[10px] text-emerald-300 font-mono bg-slate-950/60 p-2 rounded border border-emerald-500/30">
+                  Prize: $1,000,000+ USD + World Champion Title
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Bind points table category buttons
+      container.querySelectorAll('.points-table-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          container.querySelectorAll('.points-table-btn').forEach(b => {
+            b.classList.remove('active', 'bg-rose-600', 'text-white', 'shadow');
+            b.classList.add('text-slate-400');
+          });
+          btn.classList.add('active', 'bg-rose-600', 'text-white', 'shadow');
+          btn.classList.remove('text-slate-400');
+
+          const tableId = btn.getAttribute('data-table');
+          container.querySelectorAll('.tournament-points-view').forEach(view => {
+            if (view.id === 'table_' + tableId) {
+              view.classList.remove('hidden');
+            } else {
+              view.classList.add('hidden');
+            }
+          });
+        });
+      });
+
+      // Bind filter buttons
+      container.querySelectorAll('.tourney-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          container.querySelectorAll('.tourney-filter-btn').forEach(b => {
+            b.classList.remove('active', 'bg-rose-600', 'text-white', 'shadow-md');
+            b.classList.add('bg-slate-900', 'text-slate-400', 'border', 'border-slate-800');
+          });
+          btn.classList.add('active', 'bg-rose-600', 'text-white', 'shadow-md');
+          btn.classList.remove('bg-slate-900', 'text-slate-400', 'border', 'border-slate-800');
+
+          const server = btn.getAttribute('data-server');
+          container.querySelectorAll('.tourney-card').forEach(card => {
+            if (server === 'all' || card.getAttribute('data-server') === server) {
+              card.classList.remove('hidden');
+            } else {
+              card.classList.add('hidden');
+            }
+          });
+        });
+      });
+    }
+
+    // --- PLAYBOOK TAB ---
+    renderPlaybookTab(container) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <div class="cyber-panel p-4 rounded-xl border border-amber-500/30">
+            <h3 class="text-base font-heading font-bold text-white uppercase">Pre-Scrim Warm-Up Protocols</h3>
+            <p class="text-xs text-slate-400">Never play an official tournament match cold.</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
+              <div class="text-amber-400 font-sub font-bold text-xs uppercase mb-1">15-Min Quick Activation</div>
+              <ul class="space-y-2 text-slate-300 list-disc list-inside">
+                <li>0:00 - 4:00: Hand & wrist stretches.</li>
+                <li>4:00 - 9:00: Training ground 50m recoil sprays.</li>
+                <li>9:00 - 15:00: 1 Fast TDM match.</li>
+              </ul>
+            </div>
+            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
+              <div class="text-primary font-sub font-bold text-xs uppercase mb-1">30-Min Pro Standard</div>
+              <ul class="space-y-2 text-slate-300 list-disc list-inside">
+                <li>0:00 - 10:00: Jiggle & crouch-fire muscle memory.</li>
+                <li>10:00 - 20:00: Sit-down gloo wall / combo drills.</li>
+                <li>20:00 - 30:00: IGL map & drop-spot alignment.</li>
+              </ul>
+            </div>
+            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
+              <div class="text-rose-400 font-sub font-bold text-xs uppercase mb-1">45-Min Tournament Boot Camp</div>
+              <ul class="space-y-2 text-slate-300 list-disc list-inside">
+                <li>Full sensitivity calibration & reflex gym test.</li>
+                <li>Nade bounce cooking & smoke wall paths.</li>
+                <li>2 Custom room scrims against friendly clans.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+
+    // =========================================================================
+    // ESPORTS USER AUTHENTICATION & PERSISTENT DATA STORAGE ENGINE
+    // =========================================================================
+
+    getDefaultAccounts() {
+      return [
+        {
+          id: 'coach_duker',
+          email: 'coach@underdog.gg',
+          pin: '1234',
+          ign: "Coach Duker",
+          uid: '7770001',
+          tag: 'TITAN',
+          role: 'Head Coach & Analyst',
+          game: 'Free Fire',
+          tier: 'Tier-1 Master Coach',
+          avatar: '🧠',
+          scrims: 48,
+          winRate: '68%'
+        },
+        {
+          id: 'igl_anurag',
+          email: 'igl@underdog.gg',
+          pin: '1234',
+          ign: 'Anurag',
+          uid: '10048291',
+          tag: 'UDG',
+          role: 'IGL / Captain',
+          game: 'Free Fire',
+          tier: 'Tier-1 Pro Captain',
+          avatar: '👑',
+          scrims: 32,
+          winRate: '54%'
+        },
+        {
+          id: 'rusher_shadow',
+          email: 'rusher@underdog.gg',
+          pin: '1234',
+          ign: 'Shadow',
+          uid: '10098412',
+          tag: 'UDG',
+          role: 'Rusher / Fragger',
+          game: 'Free Fire',
+          tier: 'Master Fragger',
+          avatar: '⚡',
+          scrims: 28,
+          winRate: '50%'
+        }
+      ];
+    }
+
+    getAllAccounts() {
+      try {
+        const stored = localStorage.getItem('underdog_all_users');
+        if (stored) return JSON.parse(stored);
+      } catch (e) {
+        console.error('Error reading accounts:', e);
+      }
+      const defaults = this.getDefaultAccounts();
+      this.saveAllAccounts(defaults);
+      return defaults;
+    }
+
+    saveAllAccounts(accounts) {
+      try {
+        localStorage.setItem('underdog_all_users', JSON.stringify(accounts));
+      } catch (e) {
+        console.error('Error saving accounts:', e);
+      }
+    }
+
+    loadActiveUserSession() {
+      try {
+        const stored = localStorage.getItem('underdog_active_session');
+        if (stored) return JSON.parse(stored);
+      } catch (e) {
+        console.error('Error reading session:', e);
+      }
+      // Default initial session: Anurag (IGL Captain)
+      const defaultUser = this.getDefaultAccounts()[1];
+      this.saveActiveUserSession(defaultUser);
+      return defaultUser;
+    }
+
+    saveActiveUserSession(user) {
+      this.currentUser = user;
+      try {
+        if (user) {
+          localStorage.setItem('underdog_active_session', JSON.stringify(user));
+        } else {
+          localStorage.removeItem('underdog_active_session');
+        }
+      } catch (e) {
+        console.error('Error saving session:', e);
+      }
+      this.renderUserAuthHeader();
+    }
+
+    saveUserData(key, val) {
+      if (!this.currentUser) return;
+      try {
+        const storeKey = 'underdog_userdata_' + this.currentUser.id;
+        let data = {};
+        const existing = localStorage.getItem(storeKey);
+        if (existing) data = JSON.parse(existing);
+        data[key] = val;
+        data.lastUpdated = new Date().toISOString();
+        localStorage.setItem(storeKey, JSON.stringify(data));
+      } catch (e) {
+        console.error('Error saving user data:', e);
+      }
+    }
+
+    getUserData(key, fallback = null) {
+      if (!this.currentUser) return fallback;
+      try {
+        const storeKey = 'underdog_userdata_' + this.currentUser.id;
+        const existing = localStorage.getItem(storeKey);
+        if (existing) {
+          const data = JSON.parse(existing);
+          return data[key] !== undefined ? data[key] : fallback;
+        }
+      } catch (e) {
+        console.error('Error getting user data:', e);
+      }
+      return fallback;
+    }
+
+    renderUserAuthHeader() {
+      const container = document.getElementById('userAuthBtnContainer');
+      if (!container) return;
+
+      if (this.currentUser) {
+        container.innerHTML = `
+          <button id="headerProfileBtn" class="flex items-center gap-2 bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/50 hover:border-cyan-400 px-3 py-1.5 rounded-xl transition-all shadow-lg shadow-cyan-950/40">
+            <span class="text-base">${this.currentUser.avatar || '👤'}</span>
+            <div class="text-left hidden sm:block">
+              <div class="text-xs font-heading font-black text-white flex items-center gap-1 leading-none">
+                <span class="text-cyan-400">[${this.currentUser.tag}]</span>
+                <span>${this.currentUser.ign}</span>
+              </div>
+              <div class="text-[9px] font-sub text-slate-300 font-bold uppercase leading-none mt-0.5">
+                ${this.currentUser.role}
+              </div>
+            </div>
+          </button>
+        `;
+      } else {
+        container.innerHTML = `
+          <button id="headerLoginBtn" class="flex items-center gap-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-bold text-xs uppercase px-3 py-1.5 rounded-xl transition-transform hover:scale-105 shadow-lg shadow-cyan-950/50">
+            <span>🔐</span>
+            <span>Login / ID</span>
+          </button>
+        `;
+      }
+
+      document.getElementById('headerProfileBtn')?.addEventListener('click', () => this.showProfileModal());
+      document.getElementById('headerLoginBtn')?.addEventListener('click', () => this.showAuthModal());
+    }
+
+    showSupabaseSetupModal() {
+      let modal = document.getElementById('supabaseSetupModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'supabaseSetupModal';
+        document.body.appendChild(modal);
+      }
+
+      const currentConfig = window.underdogSupabase ? window.underdogSupabase.config : { url: '', anonKey: '' };
+      const isConnected = window.underdogSupabase ? window.underdogSupabase.isConnected : false;
+
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel max-w-lg w-full p-6 rounded-2xl border-2 border-emerald-500/60 bg-slate-950 shadow-2xl shadow-emerald-950/60 space-y-4 relative max-h-[90vh] overflow-y-auto">
+          <!-- Close Button -->
+          <button id="closeSupabaseModalBtn" class="absolute top-4 right-4 text-slate-400 hover:text-white font-mono text-sm">✕</button>
+
+          <!-- Header -->
+          <div class="flex items-center gap-3 border-b border-slate-800 pb-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-xl">
+              ⚡
+            </div>
+            <div>
+              <h3 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                Supabase Cloud & Realtime Setup
+              </h3>
+              <p class="text-xs text-slate-400 font-sub">Cross-Device Cloud Sync & Live Multiplayer Squad Rooms</p>
+            </div>
+          </div>
+
+          <!-- Current Status -->
+          <div class="p-3 rounded-xl ${isConnected ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300' : 'bg-amber-950/40 border border-amber-500/40 text-amber-300'} flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}"></span>
+              <span>Status: <strong>${isConnected ? 'Connected to Supabase Cloud 🟢' : 'Local Storage Mode (Offline) 🟡'}</strong></span>
+            </div>
+            <span class="font-mono text-[10px]">${isConnected ? 'Realtime Active' : 'Unlinked'}</span>
+          </div>
+
+          <!-- Form -->
+          <form id="supabaseConfigForm" class="space-y-3 text-xs">
+            <div>
+              <label class="block text-slate-300 font-sub font-bold uppercase mb-1">
+                1. Supabase Project URL:
+              </label>
+              <input type="url" id="sbProjectUrlInput" value="${currentConfig.url || ''}" placeholder="https://your-project-id.supabase.co" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-emerald-400 focus:outline-none" />
+              <p class="text-[10px] text-slate-500 mt-0.5">Found in Supabase: Project Settings ➔ API ➔ Project URL</p>
+            </div>
+
+            <div>
+              <label class="block text-slate-300 font-sub font-bold uppercase mb-1">
+                2. Project API Key (anon / public):
+              </label>
+              <input type="text" id="sbAnonKeyInput" value="${currentConfig.anonKey || ''}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-emerald-400 focus:outline-none" />
+              <p class="text-[10px] text-slate-500 mt-0.5">Found in Supabase: Project Settings ➔ API ➔ Project API keys (anon / public)</p>
+            </div>
+
+            <div id="sbConnectMessage" class="hidden p-2.5 rounded-lg text-xs font-mono"></div>
+
+            <button type="submit" id="saveSbConfigBtn" class="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-sub font-black text-xs uppercase tracking-wider rounded-xl transition-transform hover:scale-[1.02] shadow-lg shadow-emerald-950/50">
+              ⚡ Connect to Supabase Cloud
+            </button>
+          </form>
+
+          <!-- SQL Schema Quick Copy -->
+          <div class="pt-2 border-t border-slate-800 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-sub font-bold text-slate-300 uppercase">Database Tables Setup:</span>
+              <button id="copySqlSchemaBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono rounded flex items-center gap-1">
+                <span>📋</span>
+                <span id="copySqlSchemaBtnText">Copy SQL Schema</span>
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Paste the copied schema into your Supabase <strong>SQL Editor</strong> and click <strong>Run</strong> to initialize the <code>profiles</code>, <code>user_cloud_data</code>, <code>tactical_rooms</code>, and <code>scrim_lobbies</code> tables with Realtime enabled!
+            </p>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('closeSupabaseModalBtn')?.addEventListener('click', () => modal.remove());
+
+      document.getElementById('copySqlSchemaBtn')?.addEventListener('click', async () => {
+        const sql = `-- UNDERDOG ESPORTS ACADEMY SUPABASE SCHEMA
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  email TEXT UNIQUE,
+  ign TEXT NOT NULL DEFAULT 'Recruit',
+  player_uid TEXT,
+  clan_tag TEXT DEFAULT 'UDG',
+  role TEXT DEFAULT 'Rusher',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public.user_cloud_data (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
+  data_type TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  UNIQUE(user_id, data_type)
+);
+CREATE TABLE IF NOT EXISTS public.scrim_lobbies (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  lobby_code TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL DEFAULT 'EWC Scrims Lobby',
+  teams JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public.tactical_rooms (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  room_code TEXT UNIQUE NOT NULL,
+  map_name TEXT DEFAULT 'bermuda',
+  zone_phase INTEGER DEFAULT 1,
+  safe_zone JSONB DEFAULT '{"cx": 0.5, "cy": 0.5, "r": 0.35}'::jsonb,
+  tokens JSONB DEFAULT '[]'::jsonb,
+  strokes JSONB DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_cloud_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.scrim_lobbies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tactical_rooms ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Profiles Access" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public User Cloud Data Access" ON public.user_cloud_data FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public Scrim Lobbies Access" ON public.scrim_lobbies FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public Tactical Rooms Access" ON public.tactical_rooms FOR ALL USING (true) WITH CHECK (true);
+ALTER PUBLICATION supabase_realtime ADD TABLE public.scrim_lobbies;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.tactical_rooms;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
+
+        try {
+          await navigator.clipboard.writeText(sql);
+          const btnText = document.getElementById('copySqlSchemaBtnText');
+          if (btnText) {
+            btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
+            setTimeout(() => { btnText.innerText = 'Copy SQL Schema'; }, 2500);
+          }
+        } catch (err) {
+          alert('Schema is saved as supabase_schema.sql in your workspace folder!');
+        }
+      });
+
+      document.getElementById('supabaseConfigForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const url = document.getElementById('sbProjectUrlInput')?.value?.trim();
+        const key = document.getElementById('sbAnonKeyInput')?.value?.trim();
+        const msg = document.getElementById('sbConnectMessage');
+
+        if (!url || !key) return;
+
+        if (window.underdogSupabase) {
+          const success = window.underdogSupabase.saveConfig(url, key);
+          if (success && msg) {
+            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-emerald-950/80 border border-emerald-500 text-emerald-300 block';
+            msg.innerText = 'Connected successfully! Supabase Cloud & Realtime are now active. 🟢';
+            setTimeout(() => modal.remove(), 1200);
+          } else if (msg) {
+            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-rose-950/80 border border-rose-500 text-rose-300 block';
+            msg.innerText = 'Failed to initialize Supabase. Check URL and Key.';
+          }
+        }
+      });
+    }
+
+    showAuthModal() {
+      let modal = document.getElementById('esportsAuthModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'esportsAuthModal';
+        document.body.appendChild(modal);
+      }
+
+      const defaultAccounts = this.getDefaultAccounts();
+
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel max-w-4xl w-full p-6 sm:p-8 rounded-3xl border-2 border-cyan-500/50 bg-slate-950 shadow-2xl shadow-cyan-950/60 relative max-h-[92vh] overflow-y-auto space-y-6">
+          <!-- Close Button -->
+          <button id="closeAuthModalBtn" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-900 border border-slate-700 text-slate-400 hover:text-white flex items-center justify-center font-mono text-sm z-10 transition-colors">✕</button>
+
+          <!-- Top Header -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-xl font-heading font-black text-black shadow-[0_0_15px_rgba(0,240,255,0.4)]">
+                ⚡
+              </div>
+              <div>
+                <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Esports Player & Coach Identity Pass</span>
+                  <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono">Cloud Active 🟢</span>
+                </h3>
+                <p class="text-xs text-slate-400 font-sub">Access your custom HUDs, sensitivity numbers, and live squad whiteboard</p>
+              </div>
+            </div>
+            <a href="login.html" class="self-start sm:self-auto px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-cyan-500/40 text-cyan-300 text-xs font-sub font-bold uppercase rounded-xl flex items-center gap-1.5 transition-all">
+              <span>🌐</span> Fullscreen Login Page ➔
+            </a>
+          </div>
+
+          <!-- Split 2-Column Grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            <!-- Left Column: Holographic ID Card & 1-Click Pro Quick Access -->
+            <div class="lg:col-span-5 space-y-4">
+              <!-- Holographic ID Card Preview -->
+              <div class="p-4 rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-cyan-950/30 via-slate-900/80 to-amber-950/20 space-y-3 relative overflow-hidden shadow-lg shadow-cyan-950/20">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                  <div class="flex items-center gap-2.5">
+                    <span id="modalPreviewAvatar" class="text-2xl p-1.5 rounded-lg bg-slate-800 border border-slate-700">⚔️</span>
+                    <div>
+                      <div id="modalPreviewIgn" class="text-sm font-heading font-black text-white">[UDG] Anurag</div>
+                      <div id="modalPreviewUid" class="text-[10px] font-mono text-cyan-400">UID: 10849204</div>
+                    </div>
+                  </div>
+                  <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-bold">Tier-1</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                  <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+                    <div class="text-[9px] text-slate-400 uppercase font-sub">Role</div>
+                    <div id="modalPreviewRole" class="text-white font-bold truncate">IGL / Captain</div>
+                  </div>
+                  <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+                    <div class="text-[9px] text-slate-400 uppercase font-sub">Division</div>
+                    <div id="modalPreviewTag" class="text-amber-400 font-bold">UDG Squad</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 1-Click Quick Presets -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-[11px] font-sub font-bold uppercase text-amber-400">
+                  <span>⚡ 1-Click Pro Access:</span>
+                  <span class="text-[9px] font-mono text-slate-400">PIN: 1234</span>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2">
+                  ${defaultAccounts.map(acc => `
+                    <button class="modal-quick-preset-btn p-2.5 rounded-xl border border-slate-800 hover:border-cyan-500/50 bg-slate-900/80 hover:bg-slate-850 flex items-center justify-between text-left transition-all group"
+                            data-email="${acc.email}" data-pin="${acc.pin}" data-ign="${acc.ign}" data-tag="${acc.tag}" data-role="${acc.role}" data-avatar="${acc.avatar}">
+                      <div class="flex items-center gap-2.5">
+                        <span class="text-xl">${acc.avatar}</span>
+                        <div>
+                          <div class="text-xs font-heading font-bold text-white group-hover:text-cyan-300">
+                            [${acc.tag}] ${acc.ign}
+                            <span class="text-[10px] text-slate-400 font-normal ml-1">(${acc.role})</span>
+                          </div>
+                          <div class="text-[9px] font-mono text-slate-500">
+                            ${acc.email}
+                          </div>
+                        </div>
+                      </div>
+                      <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/30 text-[10px] font-sub uppercase font-bold group-hover:bg-cyan-500 group-hover:text-black transition-colors">
+                        Select →
+                      </span>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Authentication Form with Sign In / Register Tabs -->
+            <div class="lg:col-span-7 space-y-4">
+              <!-- Mode Tabs -->
+              <div class="flex items-center p-1 bg-slate-900/90 rounded-xl border border-slate-800 gap-1">
+                <button id="modalTabSignIn" class="flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow">
+                  ⚡ Sign In
+                </button>
+                <button id="modalTabRegister" class="flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white">
+                  🛡️ Create New Player ID
+                </button>
+              </div>
+
+              <!-- Form -->
+              <form id="customAuthForm" class="space-y-3 text-xs">
+                
+                <!-- Registration Fields -->
+                <div id="modalRegisterFields" class="hidden space-y-3 animate-fade-in">
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">In-Game Name (IGN) *</label>
+                      <input type="text" id="authIgnInput" placeholder="e.g. Anurag_Pro" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-heading outline-none focus:border-cyan-400"/>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Player UID *</label>
+                      <input type="text" id="authUidInput" placeholder="e.g. 10849204" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono outline-none focus:border-cyan-400"/>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Clan Tag</label>
+                      <input type="text" id="authTagInput" placeholder="e.g. UDG" maxlength="6" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-sub uppercase outline-none focus:border-cyan-400"/>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Role</label>
+                      <select id="authRoleInput" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-sub outline-none focus:border-cyan-400">
+                        <option value="IGL / Captain">⚔️ IGL / Captain</option>
+                        <option value="Rusher / Fragger">⚡ Rusher / Fragger</option>
+                        <option value="Sniper Specialist">🎯 Sniper Specialist</option>
+                        <option value="Support / Anchor">🛡️ Support / Anchor</option>
+                        <option value="Head Coach & Analyst">👑 Head Coach & Analyst</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Email & Password -->
+                <div>
+                  <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Esports Email / Login ID *</label>
+                  <input type="text" id="authEmailInput" required placeholder="player@underdog.gg" value="igl@underdog.gg" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono outline-none focus:border-cyan-400"/>
+                </div>
+
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="text-[10px] font-sub uppercase font-bold text-slate-300">Security PIN / Password *</label>
+                    <button type="button" id="modalTogglePasswordBtn" class="text-[10px] font-mono text-cyan-400 hover:text-cyan-300">👁️ Show</button>
+                  </div>
+                  <input type="password" id="authPinInput" required placeholder="****" value="1234" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono outline-none focus:border-cyan-400"/>
+                </div>
+
+                <div id="modalAuthAlert" class="hidden p-2.5 rounded-xl text-xs font-mono"></div>
+
+                <button type="submit" id="modalAuthSubmitBtn" class="w-full py-3 bg-gradient-to-r from-cyan-500 via-blue-600 to-amber-500 hover:from-cyan-400 hover:to-amber-400 text-black font-sub font-black text-xs uppercase tracking-wider rounded-xl transition-transform hover:scale-[1.01] shadow-lg shadow-cyan-950/60 mt-2 flex items-center justify-center gap-2">
+                  <span id="modalAuthBtnIcon">⚡</span>
+                  <span id="modalAuthBtnText">AUTHENTICATE & ENTER ACADEMY</span>
+                </button>
+
+                <div class="text-center pt-1">
+                  <button type="button" id="modalGuestBtn" class="text-xs text-slate-400 hover:text-cyan-300 font-sub uppercase tracking-wider transition-colors">
+                    Continue as Guest Recruit ➔
+                  </button>
+                </div>
+              </form>
+            </div>
+
+          </div>
+        </div>
+      `;
+
+      // Handlers for modal interactive state
+      let modalIsRegister = false;
+      const tabSignIn = document.getElementById('modalTabSignIn');
+      const tabRegister = document.getElementById('modalTabRegister');
+      const regFields = document.getElementById('modalRegisterFields');
+      const submitText = document.getElementById('modalAuthBtnText');
+      const submitIcon = document.getElementById('modalAuthBtnIcon');
+      const alertBox = document.getElementById('modalAuthAlert');
+
+      const ignInput = document.getElementById('authIgnInput');
+      const uidInput = document.getElementById('authUidInput');
+      const tagInput = document.getElementById('authTagInput');
+      const roleInput = document.getElementById('authRoleInput');
+      const emailInput = document.getElementById('authEmailInput');
+      const pinInput = document.getElementById('authPinInput');
+
+      const previewIgn = document.getElementById('modalPreviewIgn');
+      const previewUid = document.getElementById('modalPreviewUid');
+      const previewRole = document.getElementById('modalPreviewRole');
+      const previewTag = document.getElementById('modalPreviewTag');
+      const previewAvatar = document.getElementById('modalPreviewAvatar');
+
+      // Live typing card updates
+      ignInput?.addEventListener('input', (e) => {
+        const tag = tagInput.value.trim() ? '[' + tagInput.value.trim() + '] ' : '';
+        if (previewIgn) previewIgn.innerText = tag + (e.target.value.trim() || 'Player');
+      });
+      tagInput?.addEventListener('input', (e) => {
+        const tag = e.target.value.trim() ? '[' + e.target.value.trim() + '] ' : '';
+        if (previewIgn) previewIgn.innerText = tag + (ignInput.value.trim() || 'Player');
+        if (previewTag) previewTag.innerText = e.target.value.trim() ? e.target.value.trim() + ' Squad' : 'UDG Squad';
+      });
+      uidInput?.addEventListener('input', (e) => {
+        if (previewUid) previewUid.innerText = 'UID: ' + (e.target.value.trim() || '00000000');
+      });
+      roleInput?.addEventListener('change', (e) => {
+        if (previewRole) previewRole.innerText = e.target.value;
+        if (previewAvatar) {
+          if (e.target.value.includes('Coach')) previewAvatar.innerText = '👑';
+          else if (e.target.value.includes('Captain')) previewAvatar.innerText = '⚔️';
+          else if (e.target.value.includes('Sniper')) previewAvatar.innerText = '🎯';
+          else if (e.target.value.includes('Support')) previewAvatar.innerText = '🛡️';
+          else previewAvatar.innerText = '⚡';
+        }
+      });
+
+      // Tab Switching
+      tabSignIn?.addEventListener('click', () => {
+        modalIsRegister = false;
+        tabSignIn.className = 'flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow';
+        tabRegister.className = 'flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white';
+        regFields?.classList.add('hidden');
+        if (submitText) submitText.innerText = 'AUTHENTICATE & ENTER ACADEMY';
+        if (submitIcon) submitIcon.innerText = '⚡';
+      });
+
+      tabRegister?.addEventListener('click', () => {
+        modalIsRegister = true;
+        tabRegister.className = 'flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-amber-500 to-orange-600 text-black shadow';
+        tabSignIn.className = 'flex-1 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white';
+        regFields?.classList.remove('hidden');
+        if (submitText) submitText.innerText = 'REGISTER ESPORTS ID & ENTER';
+        if (submitIcon) submitIcon.innerText = '🛡️';
+      });
+
+      // Password toggle
+      document.getElementById('modalTogglePasswordBtn')?.addEventListener('click', () => {
+        const btn = document.getElementById('modalTogglePasswordBtn');
+        if (pinInput.type === 'password') {
+          pinInput.type = 'text';
+          if (btn) btn.innerText = '🔒 Hide';
+        } else {
+          pinInput.type = 'password';
+          if (btn) btn.innerText = '👁️ Show';
+        }
+      });
+
+      // Quick preset buttons
+      modal.querySelectorAll('.modal-quick-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (emailInput) emailInput.value = btn.dataset.email;
+          if (pinInput) pinInput.value = btn.dataset.pin;
+          if (previewIgn) previewIgn.innerText = '[' + btn.dataset.tag + '] ' + btn.dataset.ign;
+          if (previewRole) previewRole.innerText = btn.dataset.role;
+          if (previewTag) previewTag.innerText = btn.dataset.tag + ' Squad';
+          if (previewAvatar) previewAvatar.innerText = btn.dataset.avatar;
+          if (alertBox) {
+            alertBox.className = 'p-2.5 rounded-xl text-xs font-mono bg-cyan-950/80 border border-cyan-500 text-cyan-300 block';
+            alertBox.innerText = 'Loaded preset: ' + btn.dataset.ign + ' (' + btn.dataset.role + ')';
+          }
+        });
+      });
+
+      // Guest Login
+      document.getElementById('modalGuestBtn')?.addEventListener('click', () => {
+        const guestUser = {
+          id: 'guest_recruit',
+          email: 'guest@underdog.gg',
+          ign: 'Guest Recruit',
+          tag: 'UDG',
+          uid: '5544332',
+          role: 'Underdog Competitor',
+          tier: 'Recruit',
+          avatar: '👤'
+        };
+        this.saveActiveUserSession(guestUser);
+        modal.remove();
+        this.renderUserAuthHeader();
+      });
+
+      // Submit Form with Real Supabase Cloud Integration
+      document.getElementById('customAuthForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = emailInput?.value?.trim();
+        const pin = pinInput?.value?.trim();
+
+        if (!email || !pin) return;
+
+        // Check pre-configured logins
+        const preset = defaultAccounts.find(a => a.email.toLowerCase() === email.toLowerCase() && a.pin === pin);
+        if (preset) {
+          this.saveActiveUserSession(preset);
+          modal.remove();
+          this.renderUserAuthHeader();
+          return;
+        }
+
+        const ign = ignInput?.value?.trim() || email.split('@')[0];
+        const uid = uidInput?.value?.trim() || String(Math.floor(1000000 + Math.random() * 9000000));
+        const tag = tagInput?.value?.trim() || 'UDG';
+        const role = roleInput?.value || 'Rusher / Fragger';
+
+        // REAL SUPABASE AUTH CALL
+        const safePassword = pin.length < 6 ? pin + '__udgpass' : pin;
+        if (window.underdogSupabase && window.underdogSupabase.client) {
+          try {
+            const sb = window.underdogSupabase.client;
+            const { data: signInData, error: signInError } = await sb.auth.signInWithPassword({
+              email,
+              password: safePassword
+            });
+
+            if (signInError) {
+              // If user does not exist, create user in Supabase
+              await sb.auth.signUp({
+                email,
+                password: safePassword,
+                options: {
+                  data: { ign, role, tag, uid }
+                }
+              });
+            }
+
+            try {
+              await sb.from('profiles').upsert({
+                email,
+                ign,
+                player_uid: uid,
+                clan_tag: tag,
+                role
+              });
+            } catch (err) {}
+          } catch (err) {
+            console.warn('Supabase auth notice:', err);
+          }
+        }
+
+        const newUser = {
+          id: 'usr_' + Date.now(),
+          email,
+          pin,
+          ign,
+          uid,
+          tag,
+          role,
+          tier: 'Registered Competitor',
+          avatar: role.includes('Coach') ? '👑' : role.includes('Captain') ? '⚔️' : role.includes('Sniper') ? '🎯' : '⚡'
+        };
+
+        this.saveActiveUserSession(newUser);
+        modal.remove();
+        this.renderUserAuthHeader();
+      });
+    }
+
+
+
+    showProfileModal() {
+      if (!this.currentUser) return;
+
+      let modal = document.getElementById('playerProfileModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'playerProfileModal';
+        document.body.appendChild(modal);
+      }
+
+      const userDataKey = 'underdog_userdata_' + this.currentUser.id;
+      const customData = localStorage.getItem(userDataKey) || '{}';
+
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel max-w-md w-full p-6 rounded-2xl border-2 border-cyan-500/60 bg-slate-950 shadow-2xl shadow-cyan-950/60 space-y-4 relative">
+          <!-- Close Button -->
+          <button id="closeProfileModalBtn" class="absolute top-4 right-4 text-slate-400 hover:text-white font-mono text-sm">✕</button>
+
+          <!-- Holographic Player Card -->
+          <div class="p-5 rounded-xl border border-cyan-500/40 bg-gradient-to-br from-slate-900 via-[#0a1628] to-slate-900 space-y-3 relative overflow-hidden">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div class="flex items-center gap-2">
+                <span class="text-3xl">${this.currentUser.avatar || '👤'}</span>
+                <div>
+                  <h4 class="text-base font-heading font-black text-white">
+                    [${this.currentUser.tag}] ${this.currentUser.ign}
+                  </h4>
+                  <div class="text-[10px] font-mono text-cyan-400">UID: ${this.currentUser.uid}</div>
+                </div>
+              </div>
+              <span class="cyber-badge bg-cyan-950 border border-cyan-500/40 text-cyan-300 text-[10px]">
+                ${this.currentUser.tier}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div class="bg-slate-950/80 p-2.5 rounded border border-slate-800">
+                <div class="text-[9px] text-slate-400 uppercase font-sub">Assigned Role</div>
+                <div class="text-white font-bold mt-0.5">${this.currentUser.role}</div>
+              </div>
+              <div class="bg-slate-950/80 p-2.5 rounded border border-slate-800">
+                <div class="text-[9px] text-slate-400 uppercase font-sub">Account ID</div>
+                <div class="text-amber-300 font-bold mt-0.5">${this.currentUser.email}</div>
+              </div>
+            </div>
+
+            <div class="bg-slate-950/90 p-2.5 rounded border border-slate-800/80 text-[11px] text-slate-300 leading-relaxed">
+              📁 <strong>Persistent Phone Storage:</strong> Your custom tournament scrims, custom sensitivity setups, and whiteboard tactic plans are saved automatically in your local phone storage.
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="space-y-2 pt-2">
+            <button id="exportUserDataBtn" class="w-full py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-sub font-bold text-xs uppercase rounded-xl flex items-center justify-center gap-1.5 transition-colors">
+              <span>💾</span>
+              <span id="exportUserDataBtnText">Export My User Data (.JSON)</span>
+            </button>
+            <button id="logoutBtn" class="w-full py-2 bg-slate-900 hover:bg-red-950 border border-red-900/50 text-red-400 font-sub font-bold text-xs uppercase rounded-xl flex items-center justify-center gap-1.5 transition-colors">
+              <span>🚪</span>
+              <span>Switch Account / Logout</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('closeProfileModalBtn')?.addEventListener('click', () => {
+        modal.remove();
+      });
+
+      document.getElementById('exportUserDataBtn')?.addEventListener('click', () => {
+        const fullProfile = {
+          account: this.currentUser,
+          savedData: JSON.parse(customData),
+          exportedAt: new Date().toISOString()
+        };
+        const blob = new Blob([JSON.stringify(fullProfile, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${this.currentUser.ign}_Esports_Profile.json`;
+        a.click();
+        const textSpan = document.getElementById('exportUserDataBtnText');
+        if (textSpan) {
+          textSpan.innerText = 'DATA EXPORTED! ✅';
+          setTimeout(() => { textSpan.innerText = 'Export My User Data (.JSON)'; }, 2000);
+        }
+      });
+
+      document.getElementById('logoutBtn')?.addEventListener('click', () => {
+        this.saveActiveUserSession(null);
+        modal.remove();
+        this.showAuthModal();
+      });
+    }
+
+    // =========================================================================
+    // MOBILE APP NAVIGATION & PWA INSTALLATION ENGINE
+    // =========================================================================
+
+    initMobileNav() {
+      // 1. Synchronize Mobile Bottom Nav Buttons
+      document.querySelectorAll('.mobile-nav-btn[data-tab]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.getAttribute('data-tab');
+          if (tab) {
+            this.activeTab = tab;
+            this.syncTabButtons();
+            this.syncMobileNavButtons();
+            this.renderTabContent();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+      });
+
+      // 2. Mobile More Menu Button
+      document.getElementById('mobileMoreMenuBtn')?.addEventListener('click', () => {
+        this.showMobileMoreMenu();
+      });
+
+      this.syncMobileNavButtons();
+    }
+
+    syncMobileNavButtons() {
+      document.querySelectorAll('.mobile-nav-btn[data-tab]').forEach(btn => {
+        const tab = btn.getAttribute('data-tab');
+        if (tab === this.activeTab) {
+          btn.classList.add('text-cyan-400');
+          btn.classList.remove('text-slate-400');
+        } else {
+          btn.classList.remove('text-cyan-400');
+          btn.classList.add('text-slate-400');
+        }
+      });
+    }
+
+    showMobileMoreMenu() {
+      let modal = document.getElementById('mobileMoreMenuModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'mobileMoreMenuModal';
+        document.body.appendChild(modal);
+      }
+
+      modal.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel w-full sm:max-w-md p-5 rounded-t-3xl sm:rounded-2xl border-t sm:border border-slate-800 bg-slate-950 space-y-4 pb-8 sm:pb-5">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+              <span>📱</span> All Academy Modules
+            </h4>
+            <button id="closeMobileMoreBtn" class="text-slate-400 hover:text-white font-mono text-sm">✕ Close</button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <button class="more-nav-btn p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 text-left" data-tab="reflex">
+              <div class="text-lg mb-0.5">⚡</div>
+              <div class="font-heading font-bold text-white">Reaction Gym</div>
+              <div class="text-[10px] text-slate-400">Aim & Latency Test</div>
+            </button>
+            <button class="more-nav-btn p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 text-left" data-tab="atlas">
+              <div class="text-lg mb-0.5">🛰️</div>
+              <div class="font-heading font-bold text-white">Map Atlas</div>
+              <div class="text-[10px] text-slate-400">Drop POIs & Rotations</div>
+            </button>
+            <button class="more-nav-btn p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 text-left" data-tab="tournaments">
+              <div class="text-lg mb-0.5">🏆</div>
+              <div class="font-heading font-bold text-white">Tournaments</div>
+              <div class="text-[10px] text-slate-400">India & Nepal Calendars</div>
+            </button>
+            <button class="more-nav-btn p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 text-left" data-tab="playbook">
+              <div class="text-lg mb-0.5">📖</div>
+              <div class="font-heading font-bold text-white">Playbook</div>
+              <div class="text-[10px] text-slate-400">Comms & Drills</div>
+            </button>
+          </div>
+
+          <div class="border-t border-slate-800 pt-3 flex gap-2">
+            <button id="mobileInstallGuideBtn" class="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-sub font-bold text-xs uppercase rounded-xl text-center">
+              📲 Add App to Home Screen
+            </button>
+            <button id="mobileProfileModalBtn" class="px-4 py-2.5 bg-slate-900 border border-slate-700 text-cyan-400 font-sub font-bold text-xs uppercase rounded-xl">
+              👤 ID Card
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('closeMobileMoreBtn')?.addEventListener('click', () => modal.remove());
+
+      modal.querySelectorAll('.more-nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.getAttribute('data-tab');
+          if (tab) {
+            this.activeTab = tab;
+            this.syncTabButtons();
+            this.syncMobileNavButtons();
+            this.renderTabContent();
+            modal.remove();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+      });
+
+      document.getElementById('mobileInstallGuideBtn')?.addEventListener('click', () => {
+        modal.remove();
+        this.showInstallGuideModal();
+      });
+
+      document.getElementById('mobileProfileModalBtn')?.addEventListener('click', () => {
+        modal.remove();
+        if (this.currentUser) this.showProfileModal();
+        else this.showAuthModal();
+      });
+    }
+
+    initPwaInstall() {
+      // Listen for browser beforeinstallprompt
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        this.pwaDeferredPrompt = e;
+        const installBtn = document.getElementById('pwaInstallBtn');
+        const installBanner = document.getElementById('mobileInstallBanner');
+        if (installBtn) installBtn.classList.remove('hidden');
+        if (installBanner) installBanner.classList.remove('hidden');
+      });
+
+      document.getElementById('pwaInstallBtn')?.addEventListener('click', () => {
+        this.triggerInstall();
+      });
+
+      document.getElementById('bannerInstallAppBtn')?.addEventListener('click', () => {
+        this.triggerInstall();
+      });
+
+      document.getElementById('closeInstallBannerBtn')?.addEventListener('click', () => {
+        const banner = document.getElementById('mobileInstallBanner');
+        if (banner) banner.classList.add('hidden');
+      });
+    }
+
+    triggerInstall() {
+      if (this.pwaDeferredPrompt) {
+        this.pwaDeferredPrompt.prompt();
+        this.pwaDeferredPrompt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === 'accepted') {
+            console.log('User installed Underdog Esports App as PWA');
+          }
+          this.pwaDeferredPrompt = null;
+          const installBtn = document.getElementById('pwaInstallBtn');
+          const banner = document.getElementById('mobileInstallBanner');
+          if (installBtn) installBtn.classList.add('hidden');
+          if (banner) banner.classList.add('hidden');
+        });
+      } else {
+        this.showInstallGuideModal();
+      }
+    }
+
+    showInstallGuideModal() {
+      let modal = document.getElementById('installGuideModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'installGuideModal';
+        document.body.appendChild(modal);
+      }
+
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel max-w-md w-full p-6 rounded-2xl border-2 border-cyan-500/60 bg-slate-950 shadow-2xl shadow-cyan-950/60 space-y-4 relative">
+          <!-- Close Button -->
+          <button id="closeInstallGuideBtn" class="absolute top-4 right-4 text-slate-400 hover:text-white font-mono text-sm">✕</button>
+
+          <div class="text-center space-y-1">
+            <span class="text-3xl">📲</span>
+            <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
+              Open As Real Fullscreen App
+            </h3>
+            <p class="text-xs text-slate-400">
+              Install Underdog Esports Academy onto your phone home screen to remove browser address bars and launch full-screen!
+            </p>
+          </div>
+
+          <!-- Step by Step instructions -->
+          <div class="space-y-3 text-xs">
+            <!-- Android Guide -->
+            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+              <div class="font-heading font-bold text-cyan-400 flex items-center gap-1.5">
+                <span>🤖</span> Android (Google Chrome):
+              </div>
+              <ol class="list-decimal list-inside text-slate-300 space-y-1 leading-relaxed">
+                <li>Tap the <strong>three dots (⋮)</strong> in Chrome's top right corner.</li>
+                <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</li>
+                <li>Tap <strong>Install</strong>. The app icon will appear on your phone!</li>
+              </ol>
+            </div>
+
+            <!-- iPhone Guide -->
+            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+              <div class="font-heading font-bold text-amber-400 flex items-center gap-1.5">
+                <span>🍎</span> iPhone (Safari Browser):
+              </div>
+              <ol class="list-decimal list-inside text-slate-300 space-y-1 leading-relaxed">
+                <li>Tap the <strong>Share button</strong> (square with arrow up) at the bottom.</li>
+                <li>Scroll down and tap <strong>"Add to Home Screen"</strong>.</li>
+                <li>Tap <strong>Add</strong> in the top right. It opens full-screen!</li>
+              </ol>
+            </div>
+          </div>
+
+          <button id="gotItInstallBtn" class="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-sub font-bold text-xs uppercase rounded-xl">
+            Got It! 👍
+          </button>
+        </div>
+      `;
+
+      document.getElementById('closeInstallGuideBtn')?.addEventListener('click', () => modal.remove());
+      document.getElementById('gotItInstallBtn')?.addEventListener('click', () => modal.remove());
+    }
+  }
+
+  // Auto-init on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      window.app = new UnderdogApp();
+    });
+  } else {
+    window.app = new UnderdogApp();
+  }
+
+})();

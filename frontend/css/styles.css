@@ -1,0 +1,228 @@
+/* ==========================================================================
+   Underdog Esports Academy - High-Octane Cyber Theme & Animations
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,600;0,700;1,700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg-main: #0a0d14;
+  --bg-card: #111726;
+  --bg-card-hover: #162035;
+  --border-subtle: #1e293b;
+  --border-glow: #22d3ee;
+  
+  --primary: #00f0ff;
+  --primary-glow: rgba(0, 240, 255, 0.25);
+  
+  --accent-orange: #ff5500;
+  --accent-amber: #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-purple: #a855f7;
+  --accent-red: #ef4444;
+
+  --bgmi-accent: #f59e0b;
+  --ff-accent: #ef4444;
+  --hok-accent: #38bdf8;
+  
+  --font-heading: 'Chakra Petch', sans-serif;
+  --font-sub: 'Rajdhani', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: #e2e8f0;
+  font-family: var(--font-body);
+  overflow-x: hidden;
+  min-height: 100vh;
+  background-image: 
+    radial-gradient(circle at 15% 15%, rgba(0, 240, 255, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(255, 85, 0, 0.04) 0%, transparent 40%),
+    linear-gradient(to bottom, rgba(10, 13, 20, 0.95), rgba(10, 13, 20, 0.98));
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090c13;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Typography */
+h1, h2, h3, .font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: 0.5px;
+}
+
+.font-sub {
+  font-family: var(--font-sub);
+  letter-spacing: 1px;
+}
+
+/* Cyber Glows & Borders */
+.cyber-panel {
+  background: linear-gradient(135deg, rgba(17, 23, 38, 0.9) 0%, rgba(13, 18, 30, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  position: relative;
+}
+
+.cyber-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-top: 2px solid var(--primary);
+  border-left: 2px solid var(--primary);
+  pointer-events: none;
+}
+
+.cyber-panel::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  border-bottom: 2px solid var(--primary);
+  border-right: 2px solid var(--primary);
+  pointer-events: none;
+}
+
+.cyber-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  font-family: var(--font-sub);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 4px;
+}
+
+/* Glowing Neon Elements */
+.glow-primary {
+  box-shadow: 0 0 20px var(--primary-glow);
+}
+
+.glow-orange {
+  box-shadow: 0 0 20px rgba(255, 85, 0, 0.3);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+/* Tactical Map Canvas */
+#whiteboardCanvas {
+  touch-action: none;
+  cursor: crosshair;
+  background-color: #0b111c;
+}
+
+/* Target Area in Aim Trainer */
+.aim-arena {
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(circle at center, #131b2e 0%, #0a0d15 100%);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  cursor: crosshair;
+  user-select: none;
+}
+
+.aim-target {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform 0.05s ease;
+  box-shadow: 0 0 15px currentColor;
+  animation: targetPulse 0.8s infinite alternate;
+}
+
+@keyframes targetPulse {
+  0% { transform: translate(-50%, -50%) scale(0.95); }
+  100% { transform: translate(-50%, -50%) scale(1.05); }
+}
+
+/* Tactical Grid overlay */
+.tactical-grid {
+  background-size: 30px 30px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* Custom Claw Layout visualization */
+.claw-screen {
+  aspect-ratio: 16 / 9;
+  background: #0d1527;
+  border: 2px solid #334155;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.claw-button {
+  position: absolute;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-sub);
+  text-align: center;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 8px rgba(0,0,0,0.5);
+  user-select: none;
+  transition: transform 0.15s ease;
+}
+
+.claw-button:hover {
+  transform: scale(1.1);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Tab Active Highlights */
+.tab-btn.active {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.15) 0%, rgba(0, 240, 255, 0.05) 100%);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+}
+
+.game-btn.active {
+  border-color: currentColor;
+  box-shadow: 0 0 15px currentColor;
+  transform: translateY(-2px);
+}
