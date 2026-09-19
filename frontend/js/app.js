@@ -4895,11 +4895,7 @@ this.ffSelectedLoadout = {
         { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
         { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
       ];
-      this.ffScrimMatches = [
-        { id: 1, matchNum: 1, map: 'Bermuda', placement: 1, kills: 9, placementPts: 12, totalPts: 21, blunder: 'None (Clean Match)', rating: 'S-Tier Booyah' },
-        { id: 2, matchNum: 2, map: 'Purgatory', placement: 3, kills: 7, placementPts: 8, totalPts: 15, blunder: 'River Chokehold Fight', rating: 'A-Tier Podiums' },
-        { id: 3, matchNum: 3, map: 'Kalahari', placement: 5, kills: 4, placementPts: 6, totalPts: 10, blunder: 'Late Gantry Rotation', rating: 'B-Tier Placement' }
-      ];
+      this.ffScrimMatches = this.loadFFScrimMatches();
       this.ffActiveTargetSlot = 'active'; // 'active', 'p1', 'p2', 'p3', 'pet', 'loadout'
       this.ffCharacterFilter = 'all';
       this.ffCharacterSearch = '';
@@ -4957,17 +4953,21 @@ this.ffSelectedLoadout = {
       });
     }
 
+    switchTab(tab) {
+      if (tab) {
+        this.activeTab = tab;
+        this.syncTabButtons();
+        this.syncMobileNavButtons();
+        this.renderTabContent();
+      }
+    }
+
     bindTabSwitcher() {
       const tabBtns = document.querySelectorAll('.tab-btn');
       tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
           const tab = btn.getAttribute('data-tab');
-          if (tab) {
-            this.activeTab = tab;
-            this.syncTabButtons();
-            this.syncMobileNavButtons();
-            this.renderTabContent();
-          }
+          this.switchTab(tab);
         });
       });
     }
@@ -8977,6 +8977,439 @@ ${drillsText}`;
       return table[rank] !== undefined ? table[rank] : 0;
     }
 
+    getDefaultFFScrimMatches() {
+      return [
+        {
+          id: 1789851001,
+          matchNum: 1,
+          map: 'Bermuda',
+          placement: 1,
+          kills: 9,
+          placementPts: 12,
+          totalPts: 21,
+          mistakeId: 'clean',
+          fatalMistake: 'None (Clean Booyah / Flawless Fight)',
+          vodUrl: 'https://youtu.be/ffws-m1-booyah',
+          debriefNotes: 'Double vehicle rotation from Rim Nam. Anchored high ground on Peak and held 3-1 split for clean Booyah.'
+        },
+        {
+          id: 1789851002,
+          matchNum: 2,
+          map: 'Purgatory',
+          placement: 7,
+          kills: 4,
+          placementPts: 4,
+          totalPts: 8,
+          mistakeId: 'late_zone_rotation',
+          fatalMistake: 'Late Zone Rotation (Gatekept in Blue Zone)',
+          vodUrl: 'https://youtu.be/ffws-m2-river',
+          debriefNotes: 'Held river bank 45s too long waiting for loot; Team Falcons gatekept bridge with DMR chips. Took 120 blue zone damage.'
+        },
+        {
+          id: 1789851003,
+          matchNum: 3,
+          map: 'Kalahari',
+          placement: 8,
+          kills: 2,
+          placementPts: 3,
+          totalPts: 5,
+          mistakeId: 'trigger_discipline',
+          fatalMistake: 'Trigger Discipline Failure (Premature Firing)',
+          vodUrl: 'https://youtu.be/ffws-m3-council',
+          debriefNotes: 'Rusher opened fire on solo scout at Council Hall without team ready. Orangutan 3rd-partied from Refinery ridge and wiped us.'
+        },
+        {
+          id: 1789851004,
+          matchNum: 4,
+          map: 'NeXTerra',
+          placement: 3,
+          kills: 6,
+          placementPts: 8,
+          totalPts: 14,
+          mistakeId: 'split_anchor_no_refrag',
+          fatalMistake: 'Split from Anchor / No Re-Frag Available',
+          vodUrl: 'https://youtu.be/ffws-m4-grav',
+          debriefNotes: 'Grav Labs 2v2 final zone; anchor was caught on lower platform 50m back unable to re-frag Dimitri before Nairi shield broke.'
+        },
+        {
+          id: 1789851005,
+          matchNum: 5,
+          map: 'Solara',
+          placement: 6,
+          kills: 3,
+          placementPts: 5,
+          totalPts: 8,
+          mistakeId: 'late_zone_rotation',
+          fatalMistake: 'Late Zone Rotation (Gatekept in Blue Zone)',
+          vodUrl: '',
+          debriefNotes: 'Delayed exit from Solar Plant. Ran out of gloo walls in open blue zone field.'
+        }
+      ];
+    }
+
+    loadFFScrimMatches() {
+      try {
+        const saved = localStorage.getItem('underdog_ff_scrims_v2');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {
+        console.warn('Error loading FF scrim matches:', e);
+      }
+      return this.getDefaultFFScrimMatches();
+    }
+
+    saveFFScrimMatches() {
+      try {
+        localStorage.setItem('underdog_ff_scrims_v2', JSON.stringify(this.ffScrimMatches));
+        if (window.underdogSupabase && window.underdogSupabase.isConnected && window.underdogSupabase.currentUser) {
+          window.underdogSupabase.syncUserData('scrims', this.ffScrimMatches).catch(e => console.warn('Cloud scrim sync error:', e));
+        }
+      } catch (e) {
+        console.warn('Error saving FF scrim matches:', e);
+      }
+    }
+
+    getFFMistakeCategories() {
+      return [
+        {
+          id: 'clean',
+          name: 'None (Clean Booyah / Flawless Fight)',
+          icon: '🏆',
+          severity: 'clean',
+          tag: 'CLEAN',
+          color: 'emerald',
+          desc: 'Flawless execution, traded kills, solid zone timing, and superior high ground.'
+        },
+        {
+          id: 'trigger_discipline',
+          name: 'Trigger Discipline Failure (Premature Firing)',
+          icon: '🎯',
+          severity: 'critical',
+          tag: 'TRIGGER',
+          color: 'rose',
+          desc: 'Shot too early without knock guarantee; gave squad location away to 3rd parties.'
+        },
+        {
+          id: 'late_zone_rotation',
+          name: 'Late Zone Rotation (Gatekept in Blue Zone)',
+          icon: '⚡',
+          severity: 'critical',
+          tag: 'ROTATION',
+          color: 'amber',
+          desc: 'Delayed rotation past 1:00 on zone timer; pinned outside circle by compound team.'
+        },
+        {
+          id: 'open_ground_no_gloo',
+          name: 'Pushed Open Ground Without Gloo / Smoke',
+          icon: '🛡️',
+          severity: 'high',
+          tag: 'COVER',
+          color: 'rose',
+          desc: 'Ego sprinted across open terrain without 0.15s gloo reflex or smoke path.'
+        },
+        {
+          id: 'split_anchor_no_refrag',
+          name: 'Split from Anchor / No Re-Frag Available',
+          icon: '👥',
+          severity: 'high',
+          tag: 'ISOLATION',
+          color: 'purple',
+          desc: 'Rusher died 70m+ away from Dimitri/Nairi anchor; squad unable to trade the knock.'
+        },
+        {
+          id: 'third_party_blindspot',
+          name: 'Third-Party Blindspot (Tunnel Vision)',
+          icon: '👀',
+          severity: 'critical',
+          tag: 'AWARENESS',
+          color: 'orange',
+          desc: 'Squad hyper-focused on 1 squad in front; rear scout failed 360-degree perimeter check.'
+        },
+        {
+          id: 'drop_contest_starved',
+          name: 'Poor Drop Contest / Loot Starved',
+          icon: '📦',
+          severity: 'medium',
+          tag: 'EARLY_GAME',
+          color: 'yellow',
+          desc: 'Forced 50-50 4v4 drop contest with no weapon parity; early lobby exit (Rank 10-12).'
+        },
+        {
+          id: 'greedy_box_looting',
+          name: 'Greedy Death-Box Looting Under Fire',
+          icon: '💀',
+          severity: 'medium',
+          tag: 'GREED',
+          color: 'pink',
+          desc: 'Crouched looting open death boxes in Phase 4-6; picked off by sniper or grenade.'
+        },
+        {
+          id: 'utility_starved',
+          name: 'Utility Starved / Mistimed Frag Cooking',
+          icon: '💣',
+          severity: 'medium',
+          tag: 'UTILITY',
+          color: 'cyan',
+          desc: 'Ran out of gloo walls or self-damaged / failed grenade trajectory bounce.'
+        }
+      ];
+    }
+
+    getFFScrimAnalytics() {
+      const matches = this.ffScrimMatches || [];
+      const totalMatches = matches.length;
+      const categories = this.getFFMistakeCategories();
+
+      if (totalMatches === 0) {
+        return {
+          totalMatches: 0,
+          totalPoints: 0,
+          totalKills: 0,
+          totalPlacementPts: 0,
+          booyahCount: 0,
+          booyahRate: 0,
+          avgPts: '0.0',
+          avgKills: '0.0',
+          disciplineScore: 100,
+          topMistake: null,
+          blunderRate: 0,
+          totalWipesWithBlunder: 0,
+          mistakeCounts: {},
+          categories
+        };
+      }
+
+      const totalKills = matches.reduce((sum, m) => sum + (parseInt(m.kills, 10) || 0), 0);
+      const totalPlacementPts = matches.reduce((sum, m) => sum + (parseInt(m.placementPts, 10) || 0), 0);
+      const totalPoints = matches.reduce((sum, m) => sum + (parseInt(m.totalPts, 10) || 0), 0);
+      const booyahCount = matches.filter(m => m.placement === 1).length;
+      const booyahRate = Math.round((booyahCount / totalMatches) * 100);
+      const avgPts = (totalPoints / totalMatches).toFixed(1);
+      const avgKills = (totalKills / totalMatches).toFixed(1);
+
+      const mistakeCounts = {};
+      let totalWipesWithBlunder = 0;
+
+      matches.forEach(m => {
+        let mId = m.mistakeId;
+        if (!mId) {
+          if (m.fatalMistake && m.fatalMistake.includes('Clean')) mId = 'clean';
+          else if (m.fatalMistake && m.fatalMistake.includes('Late Zone')) mId = 'late_zone_rotation';
+          else if (m.fatalMistake && m.fatalMistake.includes('Trigger')) mId = 'trigger_discipline';
+          else if (m.fatalMistake && m.fatalMistake.includes('Split')) mId = 'split_anchor_no_refrag';
+          else mId = 'late_zone_rotation';
+        }
+        mistakeCounts[mId] = (mistakeCounts[mId] || 0) + 1;
+        if (mId !== 'clean') {
+          totalWipesWithBlunder++;
+        }
+      });
+
+      let topMistakeId = null;
+      let maxBlunderCount = 0;
+      Object.entries(mistakeCounts).forEach(([id, count]) => {
+        if (id !== 'clean' && count > maxBlunderCount) {
+          maxBlunderCount = count;
+          topMistakeId = id;
+        }
+      });
+
+      const topMistakeCategory = categories.find(c => c.id === topMistakeId) || null;
+      const topMistakePercent = totalWipesWithBlunder > 0 ? Math.round((maxBlunderCount / totalWipesWithBlunder) * 100) : 0;
+
+      let disciplineScore = 100;
+      matches.forEach(m => {
+        const id = m.mistakeId || (m.fatalMistake && m.fatalMistake.includes('Clean') ? 'clean' : 'late_zone_rotation');
+        if (id === 'trigger_discipline' || id === 'late_zone_rotation' || id === 'third_party_blindspot') {
+          disciplineScore -= 12;
+        } else if (id === 'open_ground_no_gloo' || id === 'split_anchor_no_refrag') {
+          disciplineScore -= 8;
+        } else if (id !== 'clean') {
+          disciplineScore -= 5;
+        }
+      });
+      disciplineScore = Math.max(15, Math.min(100, Math.round(disciplineScore)));
+      const blunderRate = totalMatches > 0 ? Math.round((totalWipesWithBlunder / totalMatches) * 100) : 0;
+
+      return {
+        totalMatches,
+        totalPoints,
+        totalKills,
+        totalPlacementPts,
+        booyahCount,
+        booyahRate,
+        avgPts,
+        avgKills,
+        disciplineScore,
+        blunderRate,
+        totalWipesWithBlunder,
+        topMistake: topMistakeCategory ? {
+          ...topMistakeCategory,
+          count: maxBlunderCount,
+          percent: topMistakePercent
+        } : null,
+        mistakeCounts,
+        categories
+      };
+    }
+
+    getCoachDukerAdvice(topMistakeId) {
+      const adviceMap = {
+        'late_zone_rotation': {
+          title: "The 1:15 Early Vehicle Lock Protocol",
+          quote: "If your squad is walking on foot when the zone starts moving, you have already donated 12 points to the compound teams waiting for you.",
+          verdict: "Late zone rotations account for the majority of your lost scrim points. Underdog teams hesitate because they want to loot every single house. In Tier-1 lobbies (FFWS/BGIS), the team that rotates 40 seconds earlier gets free kills on every straggler behind them.",
+          rule: "THE 1:15 ROTATION RULE: Anchor calls rotation route when the white timer reaches 1:15. Commits to 2x vehicle split (Pickup + Jeep) through low-elevation terrain depressions rather than running ridge tops.",
+          drill: "20-Min Purgatory River Crossing Drill: In a custom room, practice taking low ground across Brasilia river under simulated sniper fire using double vehicles without losing a single player.",
+          priority: "HIGH PRIORITY (WIPING SQUAD CONSISTENCY)"
+        },
+        'trigger_discipline': {
+          title: "The 3-Count Knock Confirmation Rule",
+          quote: "Shooting at an enemy without 100% knock confirmation is not aggression—it's an invitation for third parties to pinch your squad from behind.",
+          verdict: "Your fraggers are giving away squad positioning by firing single poke shots across 150m. In competitive lobbies, a premature gunshot alerts all neighboring teams to collapse on your location.",
+          rule: "THE 3-COUNT COMMITTED TARGET RULE: The IGL or Anchor calls 'TARGET SPOTTED - HOLD FIRE'. No player shoots until at least TWO team members have simultaneous crosshair alignment and an instant knock is guaranteed.",
+          drill: "Bermuda Silent Ambush Drill: Squad drops Peak triangle and tracks enemy rotations for 45 seconds strictly on ping callouts with ZERO gunshots until the target squad enters open crossfire.",
+          priority: "CRITICAL PRIORITY (SOLO EGO SHOOTING)"
+        },
+        'split_anchor_no_refrag': {
+          title: "The 15-Meter Re-Frag Tether",
+          quote: "A knock in competitive Free Fire is not a mistake—dying without an immediate re-frag within 2 seconds is the mistake.",
+          verdict: "Your rushers are over-extending 60m+ away from the Dimitri/Nairi anchor. When the point-man gets knocked, nobody is in position to trade the elimination, turning every 4v4 into an easy 3v4 wipe for the opponent.",
+          rule: "THE 15-METER TETHER: Rusher 1 and Rusher 2 must maintain maximum 12-15m spacing. Support anchor (Nairi) must never lose line-of-sight to the assault lead to deploy defensive gloos.",
+          drill: "Buddy System 2v2 Custom Scrim: Squad plays custom 2v2s. If any player dies and their partner does not knock the enemy within 2.5 seconds, the round is counted as an automatic forfeit.",
+          priority: "HIGH PRIORITY (TEAM TETHERING)"
+        },
+        'open_ground_no_gloo': {
+          title: "The Double-Gloo Triangle & 0.15s Reflex",
+          quote: "Crossing open grass without gloo cover is handing free DMR headshots to the lobby.",
+          verdict: "Squad members are getting caught sprinting across open fields without placing advance staging gloo walls. In modern Free Fire, 0.15s sit-down gloo wall deployment is a non-negotiable fundamental.",
+          rule: "THE ADVANCE GLOO TRIANGLE: Plant 1st gloo at 45 degrees, sprint 8m, plant 2nd gloo. Always carry minimum 4 gloo walls per player entering Phase 4 circles.",
+          drill: "50-Rep Gloo Speedrun in Training Grounds: 50 consecutive sit-down 360-degree gloo wall placements aiming for sub-180ms reaction time in the Reflex Gym.",
+          priority: "HIGH PRIORITY (MECHANICAL REFLEX)"
+        },
+        'third_party_blindspot': {
+          title: "The 3-1 Perimeter Overwatch Protocol",
+          quote: "When two dogs fight over a bone, the third dog walks away with the points.",
+          verdict: "Your squad suffers from tunnel vision. When you engage an enemy in front, all 4 players aim down sights at the same target, leaving your flanks completely unprotected.",
+          rule: "THE 3-1 REARGUARD LOCK: In any front-line teamfight, Player 4 (Anchor/Scout) DOES NOT fire at the front target. Player 4 turns 180 degrees, mounts high ground, and watches for third-party flankers.",
+          drill: "Rearguard Callout Drill: 15 minutes of custom rooms where Anchor must call out enemy positions 150m away while squad takes 3v3 compound fight.",
+          priority: "CRITICAL PRIORITY (MACRO VISION)"
+        },
+        'drop_contest_starved': {
+          title: "The 30-Second Loot Threshold & Bailout Route",
+          quote: "Dying at #12 in a 50-50 drop contest ruins an entire 6-match scrim set in 90 seconds.",
+          verdict: "Your squad is forcing 50-50 hot drops without weapon advantage. In Tier-1 tournaments, early contest without armor is a coin-toss that destroys tournament consistency.",
+          rule: "THE 30-SECOND BAILOUT RULE: If the opposing squad gets shotgun/SMG first or grabs the high-tier warehouse, immediately take the designated vehicle bailout route to secondary compound.",
+          drill: "Secondary Compound Drop Pathing: Practice landing Clock Tower outer split or Rim Nam secondary huts within 18 seconds of drop.",
+          priority: "MEDIUM PRIORITY (EARLY GAME SURVIVAL)"
+        },
+        'greedy_box_looting': {
+          title: "The 3-Second Box Rule & Smoke Looting",
+          quote: "The most expensive Medkit in the game is the one you died looting.",
+          verdict: "Players are crouch-looting open death boxes in Phase 5 circles. Sniper rifles (AWM/M82B) and Marksman rifles punish stationary looting instantaneously.",
+          rule: "THE 3-SECOND LOOT RULE: Never touch an open death box without a gloo wall or smoke grenade. Loot only ammo and gloos within 3 seconds while continuously wiggling joystick.",
+          drill: "Continuous Motion Looting: Train joystick wiggle + quick inventory swipe in training grounds.",
+          priority: "MEDIUM PRIORITY (UNFORCED ERROR)"
+        },
+        'utility_starved': {
+          title: "Utility Economy & Grenade Trajectory Cooking",
+          quote: "Gloo walls win fights; grenades end stalemates.",
+          verdict: "Squad runs dry of utility before the final zone or throws un-cooked grenades that enemies easily dodge with a quick gloo placement.",
+          rule: "THE 2.5-SECOND GRENADE COOK: Cook offensive grenades to 2.5s before release to guarantee detonation on enemy gloo wall impact with zero reaction window.",
+          drill: "Cooked Frag Accuracy Drill: Practice bouncing cooked grenades over gloo walls into compound windows in Training Grounds.",
+          priority: "MEDIUM PRIORITY (UTILITY DISCIPLINE)"
+        }
+      };
+
+      return adviceMap[topMistakeId] || {
+        title: "Championship Consistency Maintenance",
+        quote: "Winning one match is easy; staying in the top 3 across all 6 matches requires disciplined macro play.",
+        verdict: "Your squad is playing exceptionally clean with few unforced blunders. Focus on high-elevation endzone locking and maintaining 4+ gloo walls per player entering Phase 5.",
+        rule: "THE ENDZONE KING RULE: Secure the highest elevation within Phase 4 circle before 0:45 remaining on timer.",
+        drill: "High-Ground Defensive Hold: 20 minutes practicing 4-man crossfire setup from high elevation rocks.",
+        priority: "MAINTAIN DISCIPLINE (S-TIER FORM)"
+      };
+    }
+
+    getTuitionTimeLessons() {
+      return [
+        {
+          id: 'lesson_zone_shift',
+          title: 'Lesson 1: Zone 4 & 5 Hard Shift Predictions & Low-Ground Pathing',
+          subtitle: 'Why 90% of Underdog Teams Get Gatekept & How Tier-1 Teams Predict Safe Zones',
+          badge: 'ZONE MACRO',
+          badgeColor: 'amber',
+          duration: '14:20 Mins',
+          videoTimestamp: '02:15',
+          proTeams: ['Total Gaming', 'Buriram United', 'Team Falcons'],
+          summary: 'In Phase 4, the safe zone shifts hard away from dense compounds 70% of the time. Running late guarantees a 4-man wipe against gatekeeping DMR squads.',
+          keyRules: [
+            'Rule of Water: If the circle borders a river (e.g. Purgatory/Bermuda), cross BEFORE the timer hits 1:00.',
+            'Double Vehicle Scouting: Never rotate on foot across 200m+ open zone. Send Pickup truck 40m ahead of Jeep.',
+            'Depression Pathing: Use river beds and topological contour dips rather than high crests to block line of sight.'
+          ],
+          tuitionNotes: "Coach Duker Breakdown: Notice how Buriram United starts their rotation when the zone timer has 1 minute and 25 seconds left. They don't wait for the blue wall to touch their backs. By securing the low-ground trench under the bridge early, they picked up 7 easy kills on squads running out of the storm.",
+          drillAction: 'Execute 3 custom room matches focusing exclusively on vehicle-led rotations starting at 1:15 timer.'
+        },
+        {
+          id: 'lesson_gloo_reset',
+          title: 'Lesson 2: 0.15s Fast Gloo Wall Box Reset Under Crossfire',
+          subtitle: 'Surviving 3rd-Party Crossfire and Resetting Squad Health in 3 Seconds',
+          badge: 'MICRO DEFENSE',
+          badgeColor: 'rose',
+          duration: '11:45 Mins',
+          videoTimestamp: '01:30',
+          proTeams: ['Fluxo W7M', 'Orangutan', 'EVOS Esports'],
+          summary: 'When pinched between two squads, placing 1 single gloo wall gets you killed from the flank. Brazilian Tier-1 players deploy the 360-degree Box-In with Nairi.',
+          keyRules: [
+            'The 360 Box-In: Drop 3 gloo walls in a tight triangle around your knocked teammate within 0.3s.',
+            'Nairi + Dimitri Synergy: Nairi provides 150% gloo durability against enemy spam while Dimitri allows auto-revive.',
+            'Crouch-Plant Technique: Always crouch before tapping gloo button to eliminate body exposure gap beneath the wall.'
+          ],
+          tuitionNotes: "Coach Duker Breakdown: Watch Fluxo's defense when pinched at Grav Labs. The moment the first bullet hits, the anchor drops a 3-wall box. Dimitri's active healing aura goes down immediately, and all 4 players are back at 200 HP before the enemy can close the 40m gap.",
+          drillAction: 'Practice 50 reps of crouch-plant 3-wall triangles in Training Grounds under 220ms.'
+        },
+        {
+          id: 'lesson_refrag_math',
+          title: 'Lesson 3: 3-1 Split vs 2-2 Anchor Formation (Re-Frag Math)',
+          subtitle: 'Eliminating Isolated Rusher Deaths and Perfecting the 2-Second Kill Trade',
+          badge: 'SQUAD TETHER',
+          badgeColor: 'purple',
+          duration: '16:10 Mins',
+          videoTimestamp: '03:20',
+          proTeams: ['Team Elite', 'RRQ Kazu', 'GodLike'],
+          summary: 'Why aggressive rusher squads lose to patient anchor teams. The math of competitive trades dictates that whoever isolates a 1v1 loses.',
+          keyRules: [
+            'The 15m Re-Frag Radius: Rusher 1 and Rusher 2 must NEVER exceed 15m distance during compound entry.',
+            'Line-of-Sight Anchor: Support anchor must hold high-angle line of sight onto the doorway the rusher breaches.',
+            'Immediate Commit: If Rusher 1 is knocked, Rusher 2 must swing within 1.5 seconds while enemy is reloading or chambering.'
+          ],
+          tuitionNotes: "Coach Duker Breakdown: Team Elite's masterclass on 2-2 split. Notice how Pahadi holds the high rock with Marksman rifle while Killer pushes the gloo wall. The second an enemy peeks to shoot Killer, Pahadi's headshot lands before the enemy can finish the knock.",
+          drillAction: 'Run 2v2 buddy drills in custom room where un-traded deaths count as automatic round loss.'
+        },
+        {
+          id: 'lesson_trigger_discipline',
+          title: 'Lesson 4: Trigger Discipline in 3rd-Party Sandwiches',
+          subtitle: 'Reading the Kill-Feed & Executing the 5-Second Clean-Up Ambush',
+          badge: 'AMBUSH MACRO',
+          badgeColor: 'emerald',
+          duration: '13:50 Mins',
+          videoTimestamp: '01:55',
+          proTeams: ['Team Falcons', 'S8UL', 'Blind Esports'],
+          summary: 'How championship teams turn a 1-kill fight into a 6-kill wipe by letting opponent squads knock each other first.',
+          keyRules: [
+            'Wait for the 2nd Knock: When two teams fight, DO NOT fire on the 1st knock. Wait for 2+ knocks in the kill feed.',
+            'Grenade Synchronized Launch: Launch cooked grenades over opponent gloo walls the exact second the fight peaks.',
+            'The 5-Second Clean-Up: Flood the remaining surviving players while their armor is broken and abilities are on cooldown.'
+          ],
+          tuitionNotes: "Coach Duker Breakdown: Falcons hold their fire for 38 seconds on the ridge outside Peak. Even though enemies were in plain view, they waited until Orangutan and Total Gaming knocked 2 players each. The moment the kill feed lit up, Falcons wiped both wounded teams in 8 seconds.",
+          drillAction: 'Play 3 scrim matches where the squad is forbidden from shooting until IGL confirms 2 knocks in the kill feed.'
+        }
+      ];
+    }
+
     renderScrimsTab(container) {
       if (this.activeGame === 'freefire') {
         this.renderFFScrimsTab(container);
@@ -9567,14 +10000,10 @@ ${drillsText}`;
       const top2 = sortedTeams[1] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
       const top3 = sortedTeams[2] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
 
-      // My Squad Aggregates
-      const totalMatches = this.ffScrimMatches.length;
-      const totalKills = this.ffScrimMatches.reduce((sum, m) => sum + m.kills, 0);
-      const totalPlacementPts = this.ffScrimMatches.reduce((sum, m) => sum + m.placementPts, 0);
-      const totalPoints = this.ffScrimMatches.reduce((sum, m) => sum + m.totalPts, 0);
-      const booyahCount = this.ffScrimMatches.filter(m => m.placement === 1).length;
-      const avgPts = totalMatches > 0 ? (totalPoints / totalMatches).toFixed(1) : "0.0";
-      const killToPlacementRatio = totalPoints > 0 ? Math.round((totalKills / totalPoints) * 100) : 0;
+      // Analytics & Diagnostic Models
+      const analytics = this.getFFScrimAnalytics();
+      const coachAdvice = this.getCoachDukerAdvice(analytics.topMistake ? analytics.topMistake.id : 'clean');
+      const tuitionLessons = this.getTuitionTimeLessons();
 
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
@@ -9591,17 +10020,20 @@ ${drillsText}`;
                 </span>
               </div>
               <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Calculate official Free Fire World Series points, rank 12 teams with auto tie-breakers, and generate high-resolution broadcast points table graphics to post on WhatsApp, Instagram, and Discord!
+                Official FFWS 12-team scoring, real-time squad blunder diagnostics, #1 fatal weakness analytics, and Coach Duker's Tuition Time VOD review masterclass.
               </p>
             </div>
 
             <!-- Mode Switcher -->
-            <div class="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
-              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'lobby' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="lobby">
-                📊 12-Team Lobby Leaderboard
+            <div class="flex flex-wrap items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'lobby' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="lobby">
+                📊 12-Team Lobby
               </button>
-              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'my_squad' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="my_squad">
-                🎯 My Squad Tracker
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'my_squad' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="my_squad">
+                🎯 Squad Mistake Tracker
+              </button>
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'tuition_time' ? 'active bg-amber-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="tuition_time">
+                🎓 Coach Duker Tuition Time
               </button>
             </div>
           </div>
@@ -9611,7 +10043,6 @@ ${drillsText}`;
           <!-- ============================================================ -->
           ${this.ffScrimMode === 'lobby' ? `
             <div class="space-y-6">
-              
               <!-- Action Toolbar & Metadata Controls -->
               <div class="cyber-panel p-4 rounded-2xl border border-amber-500/30 bg-slate-950/80 space-y-4">
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
@@ -9629,255 +10060,371 @@ ${drillsText}`;
                     <button id="toggleGraphicPreviewBtn" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-slate-700">
                       👁️ Graphic Preview
                     </button>
-                    <button id="resetLobbyScoresBtn" class="px-3.5 py-2 bg-slate-900 hover:bg-red-950 text-red-400 hover:text-red-300 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-red-900/50">
+                    <button id="fillProLobbyBtn" class="px-3 py-2 bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-indigo-500/40">
+                      ⚡ Fill Pro Teams
+                    </button>
+                    <button id="resetLobbyScoresBtn" class="px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-rose-500/30">
                       🔄 Reset Scores
                     </button>
-                    <button id="fillProLobbyBtn" class="px-3.5 py-2 bg-slate-900 hover:bg-amber-950 text-amber-400 hover:text-amber-300 font-sub font-bold uppercase rounded-xl text-xs tracking-wider border border-amber-900/50">
-                      👑 Fill Pro Teams
-                    </button>
                   </div>
                 </div>
 
-                <!-- Editable Tournament Metadata -->
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <!-- Tournament Metadata Inputs -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                   <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Tournament Title</label>
-                    <input type="text" id="tourneyTitleInput" value="${this.ffTourneyMeta.title}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-heading font-bold outline-none focus:border-amber-500" placeholder="e.g. FREE FIRE TIER-1 SCRIMS"/>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Tournament / Scrim Title</label>
+                    <input type="text" id="tourneyTitleInput" value="${this.ffTourneyMeta.title}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-amber-400 font-heading tracking-wider" placeholder="e.g. FREE FIRE MAX TIER-1 SCRIMS"/>
                   </div>
                   <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Stage / Day</label>
-                    <input type="text" id="tourneyStageInput" value="${this.ffTourneyMeta.stage}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-sub outline-none focus:border-amber-500" placeholder="e.g. GRAND FINALS • 6 MATCHES"/>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Tournament Stage / Day</label>
+                    <input type="text" id="tourneyStageInput" value="${this.ffTourneyMeta.stage}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-amber-400 font-heading tracking-wider" placeholder="e.g. GRAND FINALS DAY 1"/>
                   </div>
                   <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Organizer Branding</label>
-                    <input type="text" id="tourneyOrganizerInput" value="${this.ffTourneyMeta.organizer}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-sub outline-none focus:border-amber-500" placeholder="e.g. UNDERDOG ESPORTS"/>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Organized By</label>
+                    <input type="text" id="tourneyOrganizerInput" value="${this.ffTourneyMeta.organizer}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-amber-300 outline-none focus:border-amber-400 font-heading tracking-wider" placeholder="e.g. UNDERDOG ESPORTS"/>
                   </div>
                 </div>
               </div>
 
-              <!-- Top 3 Podium Cards -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <!-- 1st Gold -->
-                <div class="cyber-panel p-4 rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-950/40 via-slate-950 to-slate-950 shadow-xl shadow-amber-950/40 text-center relative overflow-hidden">
-                  <div class="text-xs font-heading font-black text-amber-300 uppercase tracking-widest flex items-center justify-center gap-1">
-                    <span>👑</span>
-                    <span>1st Place Champion</span>
-                  </div>
-                  <h4 class="text-lg font-heading font-black text-white mt-1">${top1.name}</h4>
-                  <div class="text-3xl font-heading font-black text-amber-300 my-1">${top1.totalPts} <span class="text-xs font-mono font-normal text-amber-400">PTS</span></div>
-                  <div class="text-xs text-slate-300 font-mono flex items-center justify-center gap-3">
-                    <span>${top1.booyahs} 🏆 Booyahs</span>
-                    <span>&bull;</span>
-                    <span>${top1.kills} ⚔️ Kills</span>
-                  </div>
-                </div>
-
-                <!-- 2nd Silver -->
-                <div class="cyber-panel p-4 rounded-2xl border-2 border-slate-300/60 bg-gradient-to-b from-slate-800/30 via-slate-950 to-slate-950 text-center">
-                  <div class="text-xs font-heading font-bold text-slate-300 uppercase tracking-wider flex items-center justify-center gap-1">
-                    <span>🥈</span>
-                    <span>2nd Place Runner Up</span>
-                  </div>
-                  <h4 class="text-base font-heading font-bold text-white mt-1">${top2.name}</h4>
-                  <div class="text-2xl font-heading font-black text-slate-200 my-1">${top2.totalPts} <span class="text-xs font-mono font-normal text-slate-400">PTS</span></div>
-                  <div class="text-xs text-slate-400 font-mono flex items-center justify-center gap-3">
-                    <span>${top2.booyahs} 🏆 Booyahs</span>
-                    <span>&bull;</span>
-                    <span>${top2.kills} ⚔️ Kills</span>
-                  </div>
-                </div>
-
-                <!-- 3rd Bronze -->
-                <div class="cyber-panel p-4 rounded-2xl border-2 border-amber-600/60 bg-gradient-to-b from-amber-900/20 via-slate-950 to-slate-950 text-center">
-                  <div class="text-xs font-heading font-bold text-amber-500 uppercase tracking-wider flex items-center justify-center gap-1">
-                    <span>🥉</span>
-                    <span>3rd Place</span>
-                  </div>
-                  <h4 class="text-base font-heading font-bold text-white mt-1">${top3.name}</h4>
-                  <div class="text-2xl font-heading font-black text-amber-400 my-1">${top3.totalPts} <span class="text-xs font-mono font-normal text-amber-500">PTS</span></div>
-                  <div class="text-xs text-slate-400 font-mono flex items-center justify-center gap-3">
-                    <span>${top3.booyahs} 🏆 Booyahs</span>
-                    <span>&bull;</span>
-                    <span>${top3.kills} ⚔️ Kills</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Collapsible Live Graphic Preview Box -->
-              <div id="leaderboardGraphicPreviewContainer" class="hidden cyber-panel p-4 rounded-2xl border border-cyan-500/40 bg-slate-950 text-center space-y-3">
+              <!-- Graphic Preview Modal (Inline) -->
+              <div id="leaderboardGraphicPreviewContainer" class="hidden cyber-panel p-4 rounded-2xl border border-rose-500/50 bg-slate-950 space-y-3">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span class="text-xs font-heading font-bold uppercase text-cyan-400">Live Broadcast PNG Preview</span>
-                  <button id="closeGraphicPreviewBtn" class="text-xs text-slate-400 hover:text-white font-mono">✕ Close Preview</button>
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                    <h4 class="text-xs font-heading font-bold uppercase text-white tracking-wider">Live Broadcast Graphic Canvas Preview</h4>
+                  </div>
+                  <button id="closeGraphicPreviewBtn" class="text-slate-400 hover:text-white text-xs font-mono">✕ Close Preview</button>
                 </div>
-                <div class="flex justify-center">
-                  <img id="leaderboardPreviewImg" src="" alt="Leaderboard Preview" class="max-w-md w-full rounded-xl border border-slate-800 shadow-2xl"/>
+                <div class="flex justify-center bg-slate-900/60 p-4 rounded-xl overflow-auto max-h-[500px]">
+                  <img id="leaderboardPreviewImg" src="" alt="Leaderboard Preview" class="max-w-full md:max-w-md h-auto rounded-lg shadow-2xl border border-slate-800"/>
+                </div>
+              </div>
+
+              <!-- Top 3 Podium Highlights -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="cyber-panel p-3.5 rounded-xl border border-amber-500/40 bg-gradient-to-b from-amber-950/20 to-slate-950 flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center text-lg font-black text-amber-400">#1</div>
+                    <div>
+                      <div class="text-[10px] font-sub uppercase font-bold text-amber-400">Lobby Leader</div>
+                      <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top1.name}</div>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-xl font-heading font-black text-amber-400">${top1.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+                    <div class="text-[10px] text-slate-400">${top1.booyahs} 🏆 • ${top1.kills} ⚔️</div>
+                  </div>
+                </div>
+
+                <div class="cyber-panel p-3.5 rounded-xl border border-slate-400/30 bg-gradient-to-b from-slate-900/40 to-slate-950 flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-slate-700/30 border border-slate-400/50 flex items-center justify-center text-lg font-black text-slate-300">#2</div>
+                    <div>
+                      <div class="text-[10px] font-sub uppercase font-bold text-slate-300">2nd Position</div>
+                      <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top2.name}</div>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-xl font-heading font-black text-slate-200">${top2.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+                    <div class="text-[10px] text-slate-400">${top2.booyahs} 🏆 • ${top2.kills} ⚔️</div>
+                  </div>
+                </div>
+
+                <div class="cyber-panel p-3.5 rounded-xl border border-amber-700/30 bg-gradient-to-b from-amber-950/10 to-slate-950 flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-amber-900/20 border border-amber-700/40 flex items-center justify-center text-lg font-black text-amber-600">#3</div>
+                    <div>
+                      <div class="text-[10px] font-sub uppercase font-bold text-amber-600">3rd Position</div>
+                      <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top3.name}</div>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-xl font-heading font-black text-amber-500">${top3.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+                    <div class="text-[10px] text-slate-400">${top3.booyahs} 🏆 • ${top3.kills} ⚔️</div>
+                  </div>
                 </div>
               </div>
 
               <!-- Full 12-Team Interactive Scrim Table -->
-              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div class="cyber-panel p-4 rounded-2xl border border-slate-800">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
                   <div>
-                    <h4 class="text-base font-heading font-bold uppercase text-white tracking-wider">
-                      Official 12-Team Standings Table
+                    <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
+                      Official FFWS 12-Team Standings & Match Scorer
                     </h4>
-                    <p class="text-xs text-slate-400">
-                      Auto-sorted by: 1st Total Points &rarr; 2nd Booyahs 🏆 &rarr; 3rd Kill Points. Use quick <strong class="text-white">+1 / -1</strong> buttons to adjust scores live!
+                    <p class="text-[11px] text-slate-400">
+                      Points Auto-Calculate: 1st=12, 2nd=9, 3rd=8, 4th=7, 5th=6, 6th=5, 7th=4, 8th=3, 9th=2, 10th=1, 11-12th=0 + 1 Pt / Kill.
                     </p>
                   </div>
-                  <div class="text-xs font-mono text-slate-400">
-                    Teams in Lobby: <strong class="text-white">12 / 12</strong>
-                  </div>
+                  <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-[10px] font-mono">
+                    12 TEAMS LOADED
+                  </span>
                 </div>
 
                 <div class="overflow-x-auto">
                   <table class="w-full text-left text-xs">
-                    <thead>
-                      <tr class="border-b border-slate-800 text-slate-400 font-sub font-bold uppercase text-[11px]">
-                        <th class="py-3 px-3">Rank</th>
-                        <th class="py-3 px-3">Team Name & Tag</th>
-                        <th class="py-3 px-3 text-center">Matches</th>
-                        <th class="py-3 px-3 text-center">Booyahs 🏆</th>
-                        <th class="py-3 px-3 text-center">Place Pts</th>
-                        <th class="py-3 px-3 text-center">Kills ⚔️</th>
-                        <th class="py-3 px-3 text-center text-amber-300">Total Pts</th>
-                        <th class="py-3 px-3 text-center">Quick Adjust</th>
+                    <thead class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/40">
+                      <tr>
+                        <th class="py-2.5 px-3">#</th>
+                        <th class="py-2.5 px-3">Team Name & Tag</th>
+                        <th class="py-2.5 px-3 text-center">Matches</th>
+                        <th class="py-2.5 px-3 text-center">Booyahs</th>
+                        <th class="py-2.5 px-3 text-center">Place Pts</th>
+                        <th class="py-2.5 px-3 text-center">Kills</th>
+                        <th class="py-2.5 px-3 text-center font-bold text-rose-400">Total Pts</th>
+                        <th class="py-2.5 px-3 text-right">Quick Score Actions</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-800/60 font-mono">
-                      ${sortedTeams.map(t => {
-                        return `
-                          <tr class="hover:bg-slate-900/60 transition-colors ${
-                            t.rank === 1 ? 'bg-amber-950/20' : (t.rank === 2 ? 'bg-slate-800/20' : (t.rank === 3 ? 'bg-amber-900/10' : ''))
-                          }">
-                            <!-- Rank -->
-                            <td class="py-3 px-3">
-                              ${t.rank === 1 ? '<span class="cyber-badge bg-amber-500 text-black font-black text-xs">#1 👑</span>' : 
-                                (t.rank === 2 ? '<span class="cyber-badge bg-slate-300 text-black font-black text-xs">#2 🥈</span>' : 
-                                (t.rank === 3 ? '<span class="cyber-badge bg-amber-700 text-white font-black text-xs">#3 🥉</span>' : 
-                                `<span class="text-slate-400 font-bold">#${t.rank}</span>`))}
-                            </td>
-
-                            <!-- Team Name -->
-                            <td class="py-3 px-3 font-heading font-bold text-white text-sm">
-                              <div class="flex items-center gap-2">
-                                <span>${t.name}</span>
-                                <span class="cyber-badge bg-slate-800 text-slate-400 text-[9px] py-0 font-normal">[${t.tag}]</span>
-                              </div>
-                            </td>
-
-                            <!-- Matches -->
-                            <td class="py-3 px-3 text-center text-slate-300">
-                              ${t.matches}
-                            </td>
-
-                            <!-- Booyahs -->
-                            <td class="py-3 px-3 text-center ${t.booyahs > 0 ? 'text-amber-300 font-bold text-sm' : 'text-slate-500'}">
-                              ${t.booyahs > 0 ? `${t.booyahs} 🏆` : '0'}
-                            </td>
-
-                            <!-- Placement Points -->
-                            <td class="py-3 px-3 text-center text-slate-300">
-                              ${t.placementPts}
-                            </td>
-
-                            <!-- Kills -->
-                            <td class="py-3 px-3 text-center text-red-400 font-bold">
-                              ${t.kills}
-                            </td>
-
-                            <!-- Total Points -->
-                            <td class="py-3 px-3 text-center text-base font-black ${t.rank === 1 ? 'text-amber-300' : (t.rank <= 3 ? 'text-white' : 'text-cyan-300')}">
-                              ${t.totalPts}
-                            </td>
-
-                            <!-- Quick Adjust Buttons -->
-                            <td class="py-3 px-3 text-center">
-                              <div class="flex items-center justify-center gap-1">
-                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold" data-team-id="${t.id}" data-action="add_kill" title="Add 1 Kill">
-                                  +1 ⚔️
-                                </button>
-                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold" data-team-id="${t.id}" data-action="sub_kill" title="Subtract 1 Kill">
-                                  -1 ⚔️
-                                </button>
-                                <button class="lobby-adjust-btn px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600/50 text-amber-300 text-[10px] font-bold" data-team-id="${t.id}" data-action="add_booyah" title="Add 1 Booyah (+12 pts)">
-                                  +1 🏆
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        `;
-                      }).join('')}
+                      ${sortedTeams.map(t => `
+                        <tr class="hover:bg-slate-800/40 transition-colors ${t.rank <= 3 ? 'bg-amber-950/10' : ''}">
+                          <td class="py-2.5 px-3 font-bold ${t.rank === 1 ? 'text-amber-400 font-black' : t.rank === 2 ? 'text-slate-300' : t.rank === 3 ? 'text-amber-600' : 'text-slate-500'}">
+                            #${t.rank}
+                          </td>
+                          <td class="py-2.5 px-3 font-semibold text-white font-sans">
+                            <div class="flex items-center gap-2">
+                              <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0.5">${t.tag}</span>
+                              <span>${t.name}</span>
+                            </div>
+                          </td>
+                          <td class="py-2.5 px-3 text-center text-slate-300">${t.matches}</td>
+                          <td class="py-2.5 px-3 text-center font-bold text-amber-400">${t.booyahs} 🏆</td>
+                          <td class="py-2.5 px-3 text-center text-slate-300">${t.placementPts}</td>
+                          <td class="py-2.5 px-3 text-center font-bold text-cyan-400">${t.kills}</td>
+                          <td class="py-2.5 px-3 text-center text-sm font-black text-rose-400">${t.totalPts}</td>
+                          <td class="py-2.5 px-3 text-right">
+                            <div class="flex items-center justify-end gap-1 font-sans">
+                              <button class="lobby-adjust-btn px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-bold rounded" data-team-id="${t.id}" data-action="add_kill" title="Add 1 Kill (+1 Pt)">+1 ⚔️</button>
+                              <button class="lobby-adjust-btn px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-[10px] font-bold rounded" data-team-id="${t.id}" data-action="sub_kill" title="Sub 1 Kill (-1 Pt)">-1</button>
+                              <button class="lobby-adjust-btn px-2 py-1 bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 text-[10px] font-bold rounded border border-amber-500/30" data-team-id="${t.id}" data-action="add_booyah" title="Add 1 Booyah (+12 Pts)">+🏆 Booyah</button>
+                            </div>
+                          </td>
+                        </tr>
+                      `).join('')}
                     </tbody>
                   </table>
                 </div>
               </div>
-
             </div>
           ` : ''}
 
           <!-- ============================================================ -->
-          <!-- MODE 2: MY SQUAD PERFORMANCE TRACKER & AVERAGE PACING         -->
+          <!-- MODE 2: SQUAD SCRIM TRACKER & ROOT-CAUSE WEAKNESS ANALYTICS   -->
           <!-- ============================================================ -->
           ${this.ffScrimMode === 'my_squad' ? `
             <div class="space-y-6 animate-fade-in">
-              <!-- Daily Overview KPI Scorecard -->
+              <!-- KPI Scorecards -->
               <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div class="cyber-panel p-4 rounded-xl border border-slate-800 text-center">
                   <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Matches Logged</div>
-                  <div class="text-2xl font-heading font-black text-white mt-1">${totalMatches} <span class="text-xs text-slate-500 font-mono">/ 6</span></div>
+                  <div class="text-2xl font-heading font-black text-white mt-1">${analytics.totalMatches} <span class="text-xs text-slate-500 font-mono">/ 6</span></div>
                   <div class="text-[10px] text-slate-400 mt-0.5">Daily Scrim Set</div>
                 </div>
 
                 <div class="cyber-panel p-4 rounded-xl border border-rose-500/40 bg-rose-950/20 text-center shadow-lg shadow-rose-950/30">
                   <div class="text-[10px] font-sub uppercase font-bold text-rose-400">Total Points</div>
-                  <div class="text-2xl font-heading font-black text-rose-300 mt-1">${totalPoints} <span class="text-xs text-rose-400/80 font-mono">pts</span></div>
-                  <div class="text-[10px] text-rose-400/80 mt-0.5">${totalPlacementPts} Place + ${totalKills} Kills</div>
+                  <div class="text-2xl font-heading font-black text-rose-300 mt-1">${analytics.totalPoints} <span class="text-xs text-rose-400/80 font-mono">pts</span></div>
+                  <div class="text-[10px] text-rose-400/80 mt-0.5">${analytics.totalPlacementPts} Place + ${analytics.totalKills} Kills</div>
                 </div>
 
                 <div class="cyber-panel p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 text-center shadow-lg shadow-amber-950/30">
                   <div class="text-[10px] font-sub uppercase font-bold text-amber-400">Booyahs (1st)</div>
-                  <div class="text-2xl font-heading font-black text-amber-300 mt-1">${booyahCount} 🏆</div>
-                  <div class="text-[10px] text-amber-400/80 mt-0.5">${totalMatches > 0 ? Math.round((booyahCount / totalMatches) * 100) : 0}% Win Rate</div>
+                  <div class="text-2xl font-heading font-black text-amber-300 mt-1">${analytics.booyahCount} 🏆</div>
+                  <div class="text-[10px] text-amber-400/80 mt-0.5">${analytics.booyahRate}% Win Rate</div>
                 </div>
 
                 <div class="cyber-panel p-4 rounded-xl border border-cyan-500/40 bg-cyan-950/20 text-center shadow-lg shadow-cyan-950/30">
                   <div class="text-[10px] font-sub uppercase font-bold text-cyan-400">Squad Kills</div>
-                  <div class="text-2xl font-heading font-black text-cyan-300 mt-1">${totalKills} ⚔️</div>
-                  <div class="text-[10px] text-cyan-400/80 mt-0.5">${totalMatches > 0 ? (totalKills / totalMatches).toFixed(1) : "0"} Kills / Match</div>
+                  <div class="text-2xl font-heading font-black text-cyan-300 mt-1">${analytics.totalKills} ⚔️</div>
+                  <div class="text-[10px] text-cyan-400/80 mt-0.5">${analytics.avgKills} Kills / Match</div>
                 </div>
 
                 <div class="cyber-panel p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center shadow-lg shadow-emerald-950/30 col-span-2 md:col-span-1">
-                  <div class="text-[10px] font-sub uppercase font-bold text-emerald-400">Avg Pts / Match</div>
-                  <div class="text-2xl font-heading font-black text-emerald-300 mt-1">${avgPts}</div>
-                  <div class="text-[10px] text-emerald-400/80 mt-0.5">Target: 12.0+</div>
+                  <div class="text-[10px] font-sub uppercase font-bold text-emerald-400">Discipline Score</div>
+                  <div class="text-2xl font-heading font-black text-emerald-300 mt-1">${analytics.disciplineScore}%</div>
+                  <div class="text-[10px] text-emerald-400/80 mt-0.5">${analytics.disciplineScore >= 85 ? 'S-Tier Macro' : analytics.disciplineScore >= 70 ? 'Competitive' : 'Wipe Prone'}</div>
                 </div>
               </div>
 
-              <!-- Match Input Logger Form -->
+              <!-- ============================================================ -->
+              <!-- SQUAD FATAL WEAKNESS & DIAGNOSTIC DASHBOARD                   -->
+              <!-- ============================================================ -->
+              <div class="cyber-panel p-5 rounded-2xl border border-rose-500/30 bg-slate-950/90 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                      <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
+                        Squad Root-Cause Mistake Diagnostic & Weakness Analytics
+                      </h4>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">
+                      Telemetry analysis of your squad's fatal wipes across competitive scrims. Pinpoints exactly why your squad threw points.
+                    </p>
+                  </div>
+                  <button id="openTuitionTimeFromAnalyticsBtn" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all">
+                    <span>🎓</span> Coach Duker VOD Masterclass
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <!-- Left: #1 Fatal Weakness Banner & Distribution Bars -->
+                  <div class="lg:col-span-7 space-y-4">
+                    <!-- #1 Fatal Weakness Hero Card -->
+                    ${analytics.topMistake ? `
+                      <div class="p-4 rounded-xl border border-rose-500/60 bg-gradient-to-r from-rose-950/40 via-slate-900/80 to-slate-950 relative overflow-hidden shadow-xl shadow-rose-950/40">
+                        <div class="flex items-start justify-between gap-3">
+                          <div>
+                            <div class="flex items-center gap-2">
+                              <span class="cyber-badge bg-rose-900 text-rose-200 border border-rose-500/50 text-[10px] font-black uppercase">
+                                🚨 #1 FATAL SQUAD WEAKNESS
+                              </span>
+                              <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] font-bold font-mono">
+                                ${analytics.topMistake.tag}
+                              </span>
+                            </div>
+                            <h5 class="text-base font-heading font-black text-white mt-1.5 flex items-center gap-2">
+                              <span>${analytics.topMistake.icon}</span>
+                              <span>${analytics.topMistake.name}</span>
+                            </h5>
+                            <p class="text-xs text-rose-200/90 mt-1 leading-relaxed">
+                              ${analytics.topMistake.desc}
+                            </p>
+                          </div>
+                          <div class="text-right shrink-0">
+                            <div class="text-3xl font-heading font-black text-rose-400">${analytics.topMistake.percent}%</div>
+                            <div class="text-[10px] text-rose-300 font-mono">OF TOTAL WIPES</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">(${analytics.topMistake.count} of ${analytics.totalWipesWithBlunder} blunders)</div>
+                          </div>
+                        </div>
+                      </div>
+                    ` : `
+                      <div class="p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center">
+                        <span class="text-2xl">🏆</span>
+                        <h5 class="text-sm font-heading font-bold text-emerald-300 mt-1 uppercase">Flawless Scrim Consistency</h5>
+                        <p class="text-xs text-slate-300 mt-0.5">Zero unforced wipe blunders recorded in the current match set!</p>
+                      </div>
+                    `}
+
+                    <!-- Blunder Frequency Distribution Bars -->
+                    <div class="space-y-2 pt-1">
+                      <div class="flex items-center justify-between text-[11px] font-sub uppercase font-bold text-slate-400">
+                        <span>Competitive Mistake Breakdown</span>
+                        <span>Wipe Frequency</span>
+                      </div>
+
+                      <div class="space-y-2.5 font-mono text-xs">
+                        ${analytics.categories.filter(c => c.id !== 'clean').map(c => {
+                          const count = analytics.mistakeCounts[c.id] || 0;
+                          const pct = analytics.totalWipesWithBlunder > 0 ? Math.round((count / analytics.totalWipesWithBlunder) * 100) : 0;
+                          const barColor = c.color === 'rose' ? 'bg-rose-500' : c.color === 'amber' ? 'bg-amber-500' : c.color === 'purple' ? 'bg-purple-500' : c.color === 'orange' ? 'bg-orange-500' : 'bg-cyan-500';
+
+                          return `
+                            <div class="space-y-1">
+                              <div class="flex items-center justify-between text-[11px]">
+                                <div class="flex items-center gap-1.5">
+                                  <span>${c.icon}</span>
+                                  <span class="font-sans font-bold text-slate-200">${c.name}</span>
+                                  <span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400">${c.tag}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                  <span class="text-slate-400 text-[10px]">${count} match${count === 1 ? '' : 'es'}</span>
+                                  <span class="font-bold text-white">${pct}%</span>
+                                </div>
+                              </div>
+                              <div class="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                                <div class="h-full ${barColor} rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+                              </div>
+                            </div>
+                          `;
+                        }).join('')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Right: Coach Duker AI Diagnostic Verdict & Drill -->
+                  <div class="lg:col-span-5 flex flex-col justify-between p-4 rounded-xl border border-amber-500/40 bg-gradient-to-b from-amber-950/20 via-slate-900/60 to-slate-950 space-y-3">
+                    <div>
+                      <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                        <div class="flex items-center gap-2">
+                          <div class="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/60 flex items-center justify-center font-black text-amber-300 text-xs">
+                            CD
+                          </div>
+                          <div>
+                            <div class="text-xs font-heading font-bold text-white uppercase tracking-wider">[TITAN] Coach Duker</div>
+                            <div class="text-[10px] text-amber-400 font-mono">TUITION TIME MACRO ANALYST</div>
+                          </div>
+                        </div>
+                        <span class="cyber-badge bg-amber-950 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
+                          ${coachAdvice.priority}
+                        </span>
+                      </div>
+
+                      <div class="mt-3 space-y-2.5 text-xs">
+                        <div class="p-2.5 rounded-lg bg-amber-950/40 border-l-2 border-amber-400 text-amber-200 text-[11px] italic leading-relaxed font-serif">
+                          "${coachAdvice.quote}"
+                        </div>
+
+                        <div>
+                          <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Tactical Verdict:</span>
+                          <p class="text-slate-300 mt-0.5 leading-relaxed text-[11px]">
+                            ${coachAdvice.verdict}
+                          </p>
+                        </div>
+
+                        <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-700/80 space-y-1">
+                          <div class="flex items-center gap-1.5 text-amber-400 text-[10px] font-sub uppercase font-bold">
+                            <span>⚡</span> Duker's Golden Execution Rule:
+                          </div>
+                          <div class="text-white font-mono text-[11px] font-semibold">
+                            ${coachAdvice.rule}
+                          </div>
+                        </div>
+
+                        <div class="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/40 space-y-1">
+                          <div class="flex items-center gap-1.5 text-emerald-400 text-[10px] font-sub uppercase font-bold">
+                            <span>🏋️</span> Prescribed 20-Min Counter-Drill:
+                          </div>
+                          <div class="text-emerald-200 text-[11px] leading-relaxed">
+                            ${coachAdvice.drill}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button id="goToTuitionTimeBtn" class="w-full py-2 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all">
+                      <span>▶️</span> Study Lesson in Tuition Time Masterclass
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ============================================================ -->
+              <!-- MATCH SCRIM SCORE CALCULATOR & ROOT-CAUSE LOGGER FORM        -->
+              <!-- ============================================================ -->
               <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div>
                     <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
-                      ⚡ Match Scrim Score Calculator
+                      ⚡ Log Scrim Match & Diagnose Wipe Cause
                     </h4>
-                    <p class="text-[11px] text-slate-400">Input your placement and kills to compute official match points.</p>
+                    <p class="text-[11px] text-slate-400">Input your placement, kills, and select the root-cause wipe reason to calibrate team analytics.</p>
                   </div>
                   <span class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-[10px]">
-                    Match ${Math.min(totalMatches + 1, 6)} of 6
+                    Match ${Math.min(analytics.totalMatches + 1, 6)} of 6
                   </span>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div>
                     <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Match Number</label>
                     <select id="ffMatchNumInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none focus:border-rose-500">
-                      <option value="1" ${totalMatches + 1 === 1 ? 'selected' : ''}>Match 1</option>
-                      <option value="2" ${totalMatches + 1 === 2 ? 'selected' : ''}>Match 2</option>
-                      <option value="3" ${totalMatches + 1 === 3 ? 'selected' : ''}>Match 3</option>
-                      <option value="4" ${totalMatches + 1 === 4 ? 'selected' : ''}>Match 4</option>
-                      <option value="5" ${totalMatches + 1 === 5 ? 'selected' : ''}>Match 5</option>
-                      <option value="6" ${totalMatches + 1 === 6 ? 'selected' : ''}>Match 6 (Finals)</option>
+                      <option value="1" ${analytics.totalMatches + 1 === 1 ? 'selected' : ''}>Match 1</option>
+                      <option value="2" ${analytics.totalMatches + 1 === 2 ? 'selected' : ''}>Match 2</option>
+                      <option value="3" ${analytics.totalMatches + 1 === 3 ? 'selected' : ''}>Match 3</option>
+                      <option value="4" ${analytics.totalMatches + 1 === 4 ? 'selected' : ''}>Match 4</option>
+                      <option value="5" ${analytics.totalMatches + 1 === 5 ? 'selected' : ''}>Match 5</option>
+                      <option value="6" ${analytics.totalMatches + 1 === 6 ? 'selected' : ''}>Match 6 (Finals)</option>
                     </select>
                   </div>
 
@@ -9917,37 +10464,257 @@ ${drillsText}`;
                   </div>
                 </div>
 
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-rose-400 mb-1">
+                      🚨 Root Cause of Elimination / Throw Mistake
+                    </label>
+                    <select id="ffMistakeInput" class="w-full bg-slate-900 border border-rose-900/80 rounded-lg p-2.5 text-xs text-rose-200 outline-none focus:border-rose-500">
+                      <optgroup label="🏆 Flawless Execution">
+                        <option value="clean">🏆 None (Clean Booyah / Flawless Fight)</option>
+                      </optgroup>
+                      <optgroup label="🚨 Critical Tactical Blunders">
+                        <option value="trigger_discipline">🎯 Trigger Discipline Failure (Premature Firing)</option>
+                        <option value="late_zone_rotation">⚡ Late Zone Rotation (Gatekept in Blue Zone)</option>
+                        <option value="third_party_blindspot">👀 Third-Party Blindspot (Tunnel Vision)</option>
+                      </optgroup>
+                      <optgroup label="🛡️ Positioning & Movement Blunders">
+                        <option value="open_ground_no_gloo">🛡️ Pushed Open Ground Without Gloo / Smoke</option>
+                        <option value="split_anchor_no_refrag">👥 Split from Anchor / No Re-Frag Available</option>
+                      </optgroup>
+                      <optgroup label="📦 Early Game & Utility Blunders">
+                        <option value="drop_contest_starved">📦 Poor Drop Contest / Loot Starved</option>
+                        <option value="greedy_box_looting">💀 Greedy Death-Box Looting Under Fire</option>
+                        <option value="utility_starved">💣 Utility Starved / Mistimed Frag Cooking</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">
+                      📹 VOD Review Clip URL / Timestamp Notes (Optional)
+                    </label>
+                    <input type="text" id="ffVodInput" placeholder="e.g. https://youtu.be/xyz or Discord stream clip" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none focus:border-cyan-500 font-mono"/>
+                  </div>
+
+                  <div class="md:col-span-2">
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">
+                      📝 IGL / Coach Debrief Action Plan
+                    </label>
+                    <input type="text" id="ffNotesInput" placeholder="e.g. Rotated 30s late across river; gatekept by Orangutan. Need early vehicle split next match." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 outline-none focus:border-rose-500"/>
+                  </div>
+                </div>
+
                 <div class="pt-2">
-                  <button id="addFFScrimMatchBtn" class="w-full py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-rose-950/50">
-                    + Log Match Score to Scrim Set
+                  <button id="addFFScrimMatchBtn" class="w-full py-3 bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2">
+                    <span>⚡</span> Log Match & Recalculate Weakness Diagnostics
                   </button>
                 </div>
               </div>
 
-              <!-- Match History Table -->
+              <!-- ============================================================ -->
+              <!-- DAILY MATCH SET HISTORY                                      -->
+              <!-- ============================================================ -->
               <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-3">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <h4 class="text-sm font-heading font-bold uppercase text-white">Daily Match Set History</h4>
-                  <span class="text-xs text-slate-400 font-mono">${this.ffScrimMatches.length} Matches Recorded</span>
+                  <div>
+                    <h4 class="text-sm font-heading font-bold uppercase text-white">Daily Match Set History & VOD Log</h4>
+                    <span class="text-xs text-slate-400 font-mono">${this.ffScrimMatches.length} Matches Recorded</span>
+                  </div>
+                  <button id="resetFFScrimHistoryBtn" class="text-slate-500 hover:text-rose-400 text-xs font-mono transition-colors">
+                    🗑️ Reset Match History
+                  </button>
                 </div>
-                <div class="divide-y divide-slate-800/60 font-mono text-xs">
-                  ${this.ffScrimMatches.map(m => `
-                    <div class="py-2.5 flex items-center justify-between gap-2">
-                      <div class="flex items-center gap-2">
-                        <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px]">M${m.matchNum}</span>
-                        <strong class="text-white">${m.map}</strong>
-                        <span class="text-slate-400 text-[11px]">&bull; Place: #${m.placement} (${m.placementPts} pts) &bull; Kills: ${m.kills}</span>
+
+                <div class="space-y-2.5 font-mono text-xs">
+                  ${this.ffScrimMatches.map(m => {
+                    const cat = analytics.categories.find(c => c.id === m.mistakeId) || { icon: '⚠️', name: m.fatalMistake || 'Positioning Error', color: 'rose' };
+                    const isClean = m.mistakeId === 'clean' || (m.fatalMistake && m.fatalMistake.includes('Clean'));
+
+                    return `
+                      <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-slate-700 transition-colors">
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                          <div class="flex items-center gap-2">
+                            <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px]">M${m.matchNum}</span>
+                            <strong class="text-white font-sans">${m.map}</strong>
+                            <span class="${m.placement === 1 ? 'text-amber-400 font-black' : 'text-primary font-bold'}">#${m.placement} ${m.placement === 1 ? '🏆' : ''}</span>
+                            <span class="text-slate-400 text-[11px]">(${m.placementPts} place + ${m.kills} kills)</span>
+                          </div>
+
+                          <!-- Mistake Pill -->
+                          <div class="flex items-center gap-1.5">
+                            <span class="cyber-badge ${isClean ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40' : 'bg-rose-950/60 text-rose-300 border border-rose-500/40'} text-[10px] font-sans flex items-center gap-1">
+                              <span>${cat.icon}</span>
+                              <span>${cat.name}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <!-- Debrief & Action Area -->
+                        <div class="flex items-center justify-between md:justify-end gap-3 font-sans">
+                          ${m.debriefNotes ? `
+                            <span class="text-slate-400 text-[11px] truncate max-w-[220px]" title="${m.debriefNotes}">"${m.debriefNotes}"</span>
+                          ` : ''}
+
+                          ${m.vodUrl ? `
+                            <button class="watch-vod-btn px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 rounded text-[10px] font-bold font-mono flex items-center gap-1" data-vod="${m.vodUrl}" data-title="Match ${m.matchNum} VOD Review (${m.map})" data-notes="${m.debriefNotes || ''}">
+                              ▶️ Watch VOD
+                            </button>
+                          ` : ''}
+
+                          <div class="text-sm font-black text-rose-400 font-mono shrink-0">
+                            ${m.totalPts} pts
+                          </div>
+
+                          <button class="delete-ff-match-btn text-slate-500 hover:text-rose-400 font-mono text-xs ml-1" data-id="${m.id}" title="Delete Scrim Log">
+                            ✕
+                          </button>
+                        </div>
                       </div>
-                      <div class="text-sm font-black text-rose-400">
-                        ${m.totalPts} pts
-                      </div>
-                    </div>
-                  `).join('')}
+                    `;
+                  }).join('')}
                 </div>
               </div>
-
             </div>
           ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 3: COACH DUKER TUITION TIME PRO VOD MASTERCLASS          -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'tuition_time' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- Tuition Time Banner -->
+              <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-950/30 via-slate-950 to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center font-black text-amber-300 text-lg">
+                    🎓
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="cyber-badge bg-amber-950 border border-amber-500/60 text-amber-300 text-[10px] font-bold">
+                        TITAN / TEAM ELITE OFFICIAL COACH
+                      </span>
+                      <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] font-mono">
+                        TUITION TIME VOD SUITE
+                      </span>
+                    </div>
+                    <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider mt-1">
+                      Coach Duker's Tuition Time Pro VOD Masterclass
+                    </h3>
+                    <p class="text-xs text-slate-300 mt-0.5 max-w-2xl leading-relaxed">
+                      Comprehensive macro blueprints, Zone 4/5 hard shift physics, 0.15s gloo box resets under crossfire, and 3-1 split re-frag mathematics analyzed from championship teams.
+                    </p>
+                  </div>
+                </div>
+
+                <button class="ff-scrim-mode-btn px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-sub font-bold uppercase tracking-wider shrink-0" data-mode="my_squad">
+                  ← Back to Squad Tracker
+                </button>
+              </div>
+
+              <!-- 4 Interactive Tuition Time Lessons -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${tuitionLessons.map(lesson => `
+                  <div class="cyber-panel p-5 rounded-2xl border border-slate-800 hover:border-amber-500/50 transition-all flex flex-col justify-between space-y-4">
+                    <div class="space-y-3">
+                      <!-- Lesson Header -->
+                      <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
+                        <div>
+                          <span class="cyber-badge ${lesson.badgeColor === 'amber' ? 'bg-amber-950/60 text-amber-300 border border-amber-500/40' : lesson.badgeColor === 'rose' ? 'bg-rose-950/60 text-rose-300 border border-rose-500/40' : lesson.badgeColor === 'purple' ? 'bg-purple-950/60 text-purple-300 border border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'} text-[10px] font-bold">
+                            ${lesson.badge}
+                          </span>
+                          <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider mt-1.5 leading-snug">
+                            ${lesson.title}
+                          </h4>
+                          <p class="text-[11px] text-amber-400 font-sub font-semibold mt-0.5">
+                            ${lesson.subtitle}
+                          </p>
+                        </div>
+                        <span class="text-slate-400 font-mono text-[10px] shrink-0 bg-slate-900 px-2 py-1 rounded border border-slate-800">
+                          ⏱️ ${lesson.duration}
+                        </span>
+                      </div>
+
+                      <!-- Pro Teams Analyzed -->
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Pro Teams Studied:</span>
+                        ${lesson.proTeams.map(team => `
+                          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-cyan-300 border border-slate-700/60">${team}</span>
+                        `).join('')}
+                      </div>
+
+                      <!-- Summary -->
+                      <p class="text-xs text-slate-300 leading-relaxed">
+                        ${lesson.summary}
+                      </p>
+
+                      <!-- Golden Execution Rules -->
+                      <div class="space-y-1.5 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                        <div class="text-[10px] font-sub uppercase font-bold text-amber-400 flex items-center gap-1">
+                          <span>⚡</span> 3 Core Golden Execution Rules:
+                        </div>
+                        <ul class="space-y-1 text-[11px] text-slate-300 font-mono">
+                          ${lesson.keyRules.map(rule => `
+                            <li class="flex items-start gap-1.5">
+                              <span class="text-amber-400">▸</span>
+                              <span>${rule}</span>
+                            </li>
+                          `).join('')}
+                        </ul>
+                      </div>
+
+                      <!-- Coach Duker Breakdown Box -->
+                      <div class="p-3 rounded-xl bg-amber-950/20 border-l-2 border-amber-500 text-xs text-amber-200/90 leading-relaxed italic">
+                        ${lesson.tuitionNotes}
+                      </div>
+
+                      <!-- Squad Drill Prescription -->
+                      <div class="p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+                        <span class="text-base">🏋️</span>
+                        <div class="text-[11px]">
+                          <strong>Squad Drill:</strong> ${lesson.drillAction}
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Watch Breakdown Button -->
+                    <button class="open-lesson-modal-btn w-full py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all" data-lesson-id="${lesson.id}">
+                      <span>▶️</span> Watch Tuition Breakdown & Telemetry
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- VOD & TUITION TIME INTERACTIVE MODAL OVERLAY                  -->
+          <!-- ============================================================ -->
+          <div id="vodReviewModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+            <div class="cyber-panel w-full max-w-2xl rounded-2xl border border-amber-500/50 bg-slate-950 shadow-2xl p-5 space-y-4 animate-fade-in">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+                  <h4 id="vodModalTitle" class="text-sm font-heading font-bold uppercase text-white tracking-wider">
+                    VOD Review Telemetry Player
+                  </h4>
+                </div>
+                <button id="closeVodModalBtn" class="text-slate-400 hover:text-white text-xs font-mono px-2 py-1 rounded bg-slate-900 border border-slate-800">
+                  ✕ Close
+                </button>
+              </div>
+
+              <!-- Video / Chalkboard Container -->
+              <div id="vodPlayerContainer" class="w-full aspect-video bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-center relative overflow-hidden">
+                <!-- Injected iframe or interactive chalkboard -->
+              </div>
+
+              <!-- Debrief / Notes Field in Modal -->
+              <div id="vodModalNotesContainer" class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
+                <!-- Injected Notes -->
+              </div>
+            </div>
+          </div>
 
         </div>
       `;
@@ -9956,7 +10723,7 @@ ${drillsText}`;
     }
 
     bindFFScrimEvents() {
-      // 1. Mode Switcher (Lobby Leaderboard vs My Squad)
+      // 1. Mode Switcher (Lobby Leaderboard vs My Squad vs Tuition Time)
       document.querySelectorAll('.ff-scrim-mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const mode = btn.getAttribute('data-mode');
@@ -9966,6 +10733,22 @@ ${drillsText}`;
           }
         });
       });
+
+      // Quick switch buttons from Analytics to Tuition Time
+      const openTuitionBtn = document.getElementById('openTuitionTimeFromAnalyticsBtn');
+      if (openTuitionBtn) {
+        openTuitionBtn.addEventListener('click', () => {
+          this.ffScrimMode = 'tuition_time';
+          this.renderTabContent();
+        });
+      }
+      const goToTuitionBtn = document.getElementById('goToTuitionTimeBtn');
+      if (goToTuitionBtn) {
+        goToTuitionBtn.addEventListener('click', () => {
+          this.ffScrimMode = 'tuition_time';
+          this.renderTabContent();
+        });
+      }
 
       // 2. Tournament Metadata Inputs
       const titleInput = document.getElementById('tourneyTitleInput');
@@ -10019,7 +10802,7 @@ ${drillsText}`;
         });
       }
 
-      // 5. Quick Adjust Score Buttons (+1 Kill, -1 Kill, +1 Booyah)
+      // 5. Quick Adjust Score Buttons
       document.querySelectorAll('.lobby-adjust-btn').forEach(adjBtn => {
         adjBtn.addEventListener('click', () => {
           const teamId = adjBtn.getAttribute('data-team-id');
@@ -10037,7 +10820,7 @@ ${drillsText}`;
               }
             } else if (action === 'add_booyah') {
               team.booyahs += 1;
-              team.placementPts += 12; // 12 pts for Booyah
+              team.placementPts += 12;
               team.totalPts += 12;
             }
             this.renderTabContent();
@@ -10084,7 +10867,7 @@ ${drillsText}`;
         });
       }
 
-      // 8. Add Match Score in My Squad Mode
+      // 8. Add Match Score & Mistake in My Squad Mode
       const addMatchBtn = document.getElementById('addFFScrimMatchBtn');
       if (addMatchBtn) {
         addMatchBtn.addEventListener('click', () => {
@@ -10092,11 +10875,18 @@ ${drillsText}`;
           const map = document.getElementById('ffMapInput')?.value || "Bermuda";
           const placement = parseInt(document.getElementById('ffPlacementInput')?.value || "1", 10);
           const kills = parseInt(document.getElementById('ffKillsInput')?.value || "0", 10);
+          const mistakeId = document.getElementById('ffMistakeInput')?.value || "clean";
+          const vodUrl = (document.getElementById('ffVodInput')?.value || "").trim();
+          const debriefNotes = (document.getElementById('ffNotesInput')?.value || "").trim();
 
           const placementPts = this.getFFPlacementPoints(placement);
           const totalPts = placementPts + kills;
 
-          this.ffScrimMatches.push({
+          const categories = this.getFFMistakeCategories();
+          const chosenCategory = categories.find(c => c.id === mistakeId);
+          const fatalMistake = chosenCategory ? chosenCategory.name : 'None (Clean Booyah)';
+
+          const newMatch = {
             id: Date.now(),
             matchNum,
             map,
@@ -10104,13 +10894,198 @@ ${drillsText}`;
             kills,
             placementPts,
             totalPts,
-            blunder: placement > 5 ? 'Positioning Error' : 'None (Solid Match)',
-            rating: placement === 1 ? 'S-Tier Booyah' : 'Match Logged'
-          });
+            mistakeId,
+            fatalMistake,
+            vodUrl,
+            debriefNotes: debriefNotes || (placement === 1 ? 'Solid coordination and clean zone timing.' : 'Post-match tactical review needed.')
+          };
 
+          this.ffScrimMatches.unshift(newMatch);
+          this.saveFFScrimMatches();
           this.renderTabContent();
         });
       }
+
+      // 9. Reset Scrim History Button
+      const resetHistoryBtn = document.getElementById('resetFFScrimHistoryBtn');
+      if (resetHistoryBtn) {
+        resetHistoryBtn.addEventListener('click', () => {
+          if (confirm('Clear all recorded scrim matches and reset weakness diagnostics?')) {
+            this.ffScrimMatches = [];
+            this.saveFFScrimMatches();
+            this.renderTabContent();
+          }
+        });
+      }
+
+      // 10. Delete Individual Match
+      document.querySelectorAll('.delete-ff-match-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = parseInt(btn.getAttribute('data-id'), 10);
+          if (id) {
+            this.ffScrimMatches = this.ffScrimMatches.filter(m => m.id !== id);
+            this.saveFFScrimMatches();
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 11. Watch VOD Modal Events
+      document.querySelectorAll('.watch-vod-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const url = btn.getAttribute('data-vod');
+          const title = btn.getAttribute('data-title');
+          const notes = btn.getAttribute('data-notes');
+          this.showVodModal(url, title, notes);
+        });
+      });
+
+      // 12. Open Tuition Time Lesson Modal
+      document.querySelectorAll('.open-lesson-modal-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const lessonId = btn.getAttribute('data-lesson-id');
+          const lesson = this.getTuitionTimeLessons().find(l => l.id === lessonId);
+          if (lesson) {
+            this.showTuitionLessonModal(lesson);
+          }
+        });
+      });
+
+      // 13. Close VOD Modal
+      const closeVodBtn = document.getElementById('closeVodModalBtn');
+      const vodModal = document.getElementById('vodReviewModal');
+      if (closeVodBtn && vodModal) {
+        closeVodBtn.addEventListener('click', () => {
+          vodModal.classList.add('hidden');
+          const container = document.getElementById('vodPlayerContainer');
+          if (container) container.innerHTML = '';
+        });
+      }
+    }
+
+    showVodModal(vodUrl, title, notes) {
+      const modal = document.getElementById('vodReviewModal');
+      const modalTitle = document.getElementById('vodModalTitle');
+      const playerContainer = document.getElementById('vodPlayerContainer');
+      const notesContainer = document.getElementById('vodModalNotesContainer');
+
+      if (!modal || !playerContainer) return;
+
+      modalTitle.innerText = title || 'Scrim Match VOD Review';
+      notesContainer.innerHTML = `
+        <div class="flex items-center gap-1.5 font-bold text-amber-400 uppercase text-[10px] mb-1">
+          <span>📋</span> Coach / IGL Debrief Notes:
+        </div>
+        <p class="text-slate-200">${notes || 'No debrief notes recorded for this scrim match.'}</p>
+        ${vodUrl ? `<div class="mt-2 text-[10px] text-slate-400 font-mono">Original Source: <a href="${vodUrl}" target="_blank" class="text-cyan-400 hover:underline">${vodUrl}</a></div>` : ''}
+      `;
+
+      // Embed YouTube if valid link
+      let ytId = null;
+      if (vodUrl) {
+        const match = vodUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+        if (match && match[1]) ytId = match[1];
+      }
+
+      if (ytId) {
+        playerContainer.innerHTML = `
+          <iframe class="w-full h-full" src="https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1" title="VOD Review Player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        `;
+      } else {
+        playerContainer.innerHTML = `
+          <div class="text-center p-6 space-y-3">
+            <span class="text-4xl">🎬</span>
+            <h5 class="text-sm font-heading font-bold text-white uppercase">VOD Clip Telemetry Ready</h5>
+            <p class="text-xs text-slate-400 max-w-sm mx-auto">
+              Clip saved at: <strong class="text-cyan-300 font-mono">${vodUrl || 'Simulated Match Replay'}</strong>
+            </p>
+            ${vodUrl ? `
+              <a href="${vodUrl}" target="_blank" class="inline-block px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider">
+                Open External Stream / Clip ↗
+              </a>
+            ` : `
+              <div class="text-[11px] text-amber-400 font-mono">
+                Tip: Enter a YouTube, Medal, or Google Drive link when logging scrims for 1-click video playback.
+              </div>
+            `}
+          </div>
+        `;
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    showTuitionLessonModal(lesson) {
+      const modal = document.getElementById('vodReviewModal');
+      const modalTitle = document.getElementById('vodModalTitle');
+      const playerContainer = document.getElementById('vodPlayerContainer');
+      const notesContainer = document.getElementById('vodModalNotesContainer');
+
+      if (!modal || !playerContainer) return;
+
+      modalTitle.innerText = `[Tuition Time] ${lesson.title}`;
+      notesContainer.innerHTML = `
+        <div class="space-y-2 text-xs">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <span class="text-amber-400 font-bold uppercase text-[10px]">Coach Duker Masterclass Notes</span>
+            <span class="text-slate-400 font-mono text-[10px]">Timestamp Marker: ${lesson.videoTimestamp}</span>
+          </div>
+          <p class="text-amber-200/90 italic font-serif leading-relaxed">"${lesson.tuitionNotes}"</p>
+          <div class="p-2 rounded bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-[11px]">
+            <strong>Recommended Squad Counter-Drill:</strong> ${lesson.drillAction}
+          </div>
+        </div>
+      `;
+
+      playerContainer.innerHTML = `
+        <div class="p-6 text-center space-y-3 bg-gradient-to-b from-slate-900 to-slate-950 w-full h-full flex flex-col items-center justify-center">
+          <div class="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center text-2xl font-black text-amber-400 mb-1">
+            🎓
+          </div>
+          <h5 class="text-sm font-heading font-black text-white uppercase tracking-wider">${lesson.title}</h5>
+          <p class="text-xs text-slate-300 max-w-md mx-auto">${lesson.summary}</p>
+          <div class="flex items-center gap-2 pt-2">
+            <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-[10px]">STUDYING: ${lesson.proTeams.join(', ')}</span>
+            <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px]">TIMESTAMP ${lesson.videoTimestamp}</span>
+          </div>
+        </div>
+      `;
+
+      modal.classList.remove('hidden');
+    }
+
+    // --- BGMI / MULTI-GAME DEFAULT SCRIM TRACKER TAB ---
+    renderDefaultScrimsTab(container) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-fade-in">
+          <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#1b1509] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">🎯</span>
+                <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                  Competitive Scrim Performance & Mistake Diagnostic Suite
+                </h3>
+                <span class="cyber-badge bg-amber-950 border border-amber-500/50 text-amber-300 text-[10px] font-bold">
+                  BGIS / ESPORTS TIER-1
+                </span>
+              </div>
+              <p class="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                Log match placements, track team frags, and diagnose root-cause wipe mistakes to optimize rotations across Erangel, Miramar, and Sanhok.
+              </p>
+            </div>
+            <span class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono">
+              BGIS 10-PT SYSTEM
+            </span>
+          </div>
+
+          <div class="cyber-panel p-5 rounded-xl border border-slate-800">
+            <h4 class="text-sm font-heading font-bold text-white uppercase mb-2">Multi-Game Scrim Engine Active</h4>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Switch to <strong>Free Fire</strong> in the top header to access the complete FFWS 12-Team PointCalc Suite, #1 Squad Weakness Analytics, and Coach Duker's Tuition Time Pro VOD Masterclass.
+            </p>
+          </div>
+        </div>
+      `;
     }
 
     // --- REFLEX TAB ---
