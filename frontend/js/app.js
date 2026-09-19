@@ -1153,17 +1153,16 @@
         phase: 1, // 1 to 5
         cx: 0.5, // 0..1 normalized center X
         cy: 0.5, // 0..1 normalized center Y
-        r: 0.38, // normalized radius relative to min(width, height)
+        r: 0.32, // normalized radius relative to min(width, height)
         blueCx: 0.5,
         blueCy: 0.5,
-        blueR: 0.48, // outer radiation blue zone
+        blueR: 0.44, // outer radiation blue zone
         isDragging: false,
         isResizing: false,
         dragMode: null // 'move' | 'resize'
       };
       this.isSimulatingShrink = false;
       this.shrinkAnimId = null;
-
 
       this.proOverlays = null;
       this.mapImages = {};
@@ -1196,13 +1195,42 @@
       }
     }
 
-    initCanvasSize() {
+    initCanvasSize(aspectMode = this.aspectMode || 'square') {
+      this.aspectMode = aspectMode;
       const container = this.canvas.parentElement;
-      const availableWidth = container && container.clientWidth > 120 ? container.clientWidth - 16 : 800;
-      const width = Math.min(availableWidth, 920);
-      const height = Math.min(width * 0.62, 540);
-      this.canvas.width = Math.max(width, 360);
-      this.canvas.height = Math.max(height, 300);
+      const availableWidth = container && container.clientWidth > 120 
+        ? container.clientWidth 
+        : (window.innerWidth ? Math.min(window.innerWidth - 48, 1200) : 1000);
+
+      const vh = window.innerHeight || 900;
+      let width, height;
+
+      if (aspectMode === 'fill') {
+        // Panoramic Wide View
+        width = Math.max(availableWidth, 360);
+        const targetHeight = Math.min(width, Math.max(vh - 200, 780));
+        height = Math.max(Math.min(targetHeight, 880), 580);
+      } else {
+        // Pro 1:1 Tactical Square (Tournament Standard - Undistorted, uses remaining vertical/horizontal space)
+        const targetDim = Math.min(availableWidth, Math.max(vh - 180, 800), 920);
+        width = Math.max(Math.round(targetDim), 360);
+        height = width;
+      }
+
+      this.canvas.width = width;
+      this.canvas.height = height;
+      this.canvas.style.width = width + 'px';
+      this.canvas.style.height = height + 'px';
+    }
+
+    toggleAspectMode() {
+      this.aspectMode = this.aspectMode === 'square' ? 'fill' : 'square';
+      this.initCanvasSize(this.aspectMode);
+      this.redrawAll();
+      const btnLabel = document.getElementById('wbAspectLabel');
+      if (btnLabel) {
+        btnLabel.textContent = this.aspectMode === 'square' ? 'Aspect: 🔲 1:1 Square' : 'Aspect: ↔️ Wide Fill';
+      }
     }
 
     setMap(mapName) {
@@ -1226,37 +1254,6 @@
       this.activePreset = preset;
       this.currentMap = preset.map;
 
-      // Update map selector dropdown in UI if present
-      // SQUAD LIVE SYNC ROOM CONTROLS
-      document.getElementById('createTacticalRoomBtn')?.addEventListener('click', () => {
-        const randomCode = 'UDG' + Math.floor(100 + Math.random() * 900);
-        const input = document.getElementById('tacticalRoomCodeInput');
-        if (input) input.value = randomCode;
-      });
-
-      document.getElementById('joinTacticalRoomBtn')?.addEventListener('click', () => {
-        const roomCode = document.getElementById('tacticalRoomCodeInput')?.value?.trim();
-        if (!roomCode) {
-          alert('Please enter or generate a Room Code first!');
-          return;
-        }
-        if (!window.underdogSupabase || !window.underdogSupabase.isConnected) {
-          alert('Please configure your Supabase Project URL & Anon Key first! (Click "Local Mode 🟡" in the top bar)');
-          this.showSupabaseSetupModal();
-          return;
-        }
-        window.underdogSupabase.joinTacticalRoom(roomCode, (payload) => {
-          this.whiteboard.applyRemoteAction(payload);
-        });
-        const label = document.getElementById('activeTacticalRoomLabel');
-        const dot = document.getElementById('tacticalRoomLiveDot');
-        if (label) {
-          label.innerText = 'Connected: Room [' + roomCode.toUpperCase() + '] 🟢';
-          label.className = 'text-[10px] font-mono text-emerald-400 font-bold';
-        }
-        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
-      });
-
       const mapSelect = document.getElementById('mapSelect');
       if (mapSelect) mapSelect.value = preset.map;
 
@@ -1270,50 +1267,11 @@
       this.tokens = [];
       this.redrawAll();
       this.saveState();
-      this.renderPresetCard(preset);
+      // Preset strategy card deleted from map section as requested
     }
 
     renderPresetCard(preset) {
-      const cardContainer = document.getElementById('proRotationCardContainer');
-      if (!cardContainer) return;
-
-      cardContainer.innerHTML = `
-        <div class="cyber-panel p-5 rounded-xl border border-amber-500/40 animate-fade-in mt-4">
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-4">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">${preset.team}</span>
-                <span class="text-xs text-slate-400 font-mono">${preset.phase}</span>
-              </div>
-              <h4 class="text-lg font-heading font-bold text-white mt-1">${preset.title}</h4>
-              <div class="text-xs text-primary font-sub">Pro Players: <strong>${preset.proPlayers}</strong></div>
-            </div>
-            <div class="cyber-badge bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 text-xs px-3 py-1">
-              Active Strategy Overlay
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div class="bg-slate-900/80 p-3.5 rounded-lg border border-slate-800 space-y-2">
-              <div class="font-sub font-bold text-emerald-400 uppercase text-xs">Phase-by-Phase Pro Execution:</div>
-              <ul class="space-y-1.5 text-slate-300 list-disc list-inside leading-relaxed">
-                ${preset.breakdown.proExecution.map(step => `<li>${step}</li>`).join('')}
-              </ul>
-            </div>
-
-            <div class="bg-slate-900/80 p-3.5 rounded-lg border border-slate-800 space-y-3">
-              <div>
-                <div class="font-sub font-bold text-rose-400 uppercase text-xs mb-1">Why Underdogs Throw Here:</div>
-                <p class="text-slate-300 leading-relaxed">${preset.breakdown.whyUnderdogsFail}</p>
-              </div>
-              <div class="bg-slate-950 p-2.5 rounded border border-amber-500/30">
-                <div class="font-sub font-bold text-amber-400 uppercase text-[11px] mb-0.5">IGL Voice Comms Script:</div>
-                <p class="text-slate-300 font-mono text-[11px] italic leading-normal">"${preset.breakdown.voiceComms}"</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
+      // Bottom card removed from map section as requested by user
     }
 
     // --- SAFE ZONE SIMULATOR CONTROLS (FEATURE 2) ---
@@ -1322,20 +1280,20 @@
       const minDim = Math.min(this.canvas.width, this.canvas.height);
 
       if (phase === 1) {
-        this.safeZone.r = 0.38;
-        this.safeZone.blueR = 0.48;
+        this.safeZone.r = 0.32;
+        this.safeZone.blueR = 0.44;
       } else if (phase === 2) {
-        this.safeZone.r = 0.28;
-        this.safeZone.blueR = 0.38;
+        this.safeZone.r = 0.24;
+        this.safeZone.blueR = 0.34;
       } else if (phase === 3) {
-        this.safeZone.r = 0.19;
-        this.safeZone.blueR = 0.28;
+        this.safeZone.r = 0.17;
+        this.safeZone.blueR = 0.24;
       } else if (phase === 4) {
-        this.safeZone.r = 0.12;
-        this.safeZone.blueR = 0.19;
+        this.safeZone.r = 0.11;
+        this.safeZone.blueR = 0.17;
       } else if (phase === 5) {
         this.safeZone.r = 0.06;
-        this.safeZone.blueR = 0.12;
+        this.safeZone.blueR = 0.11;
       }
 
       // Update UI active buttons
@@ -1355,15 +1313,22 @@
     }
 
     applyHardShift(dir) {
-      const step = this.safeZone.blueR * 0.52;
+      const minDim = Math.min(this.canvas.width, this.canvas.height);
+      const safeRad = this.safeZone.r * minDim;
+      const minAllowedCy = (safeRad + 28) / this.canvas.height;
+      const maxAllowedCy = (this.canvas.height - safeRad - 16) / this.canvas.height;
+      const minAllowedCx = (safeRad + 16) / this.canvas.width;
+      const maxAllowedCx = (this.canvas.width - safeRad - 16) / this.canvas.width;
+
+      const step = Math.min(this.safeZone.blueR * 0.44, 0.20);
       if (dir === 'N') {
-        this.safeZone.cy = Math.max(0.18, this.safeZone.blueCy - step);
+        this.safeZone.cy = Math.max(minAllowedCy, this.safeZone.blueCy - step);
       } else if (dir === 'S') {
-        this.safeZone.cy = Math.min(0.82, this.safeZone.blueCy + step);
+        this.safeZone.cy = Math.min(maxAllowedCy, this.safeZone.blueCy + step);
       } else if (dir === 'W') {
-        this.safeZone.cx = Math.max(0.18, this.safeZone.blueCx - step);
+        this.safeZone.cx = Math.max(minAllowedCx, this.safeZone.blueCx - step);
       } else if (dir === 'E') {
-        this.safeZone.cx = Math.min(0.82, this.safeZone.blueCx + step);
+        this.safeZone.cx = Math.min(maxAllowedCx, this.safeZone.blueCx + step);
       } else if (dir === 'CENTER') {
         this.safeZone.cx = 0.5;
         this.safeZone.cy = 0.5;
@@ -1441,13 +1406,16 @@
       const h = this.canvas.height;
       const minDim = Math.min(w, h);
 
-      const bluePx = this.safeZone.blueCx * w;
-      const bluePy = this.safeZone.blueCy * h;
-      const blueRad = Math.max(10, this.safeZone.blueR * minDim);
+      // Safe zone radius
+      const safeRad = Math.max(8, Math.min(this.safeZone.r, 0.44) * minDim);
+      // Clamp safePx, safePy so circle + top badge never clips outside canvas
+      const safePx = Math.max(safeRad + 12, Math.min(w - safeRad - 12, this.safeZone.cx * w));
+      const safePy = Math.max(safeRad + 26, Math.min(h - safeRad - 14, this.safeZone.cy * h));
 
-      const safePx = this.safeZone.cx * w;
-      const safePy = this.safeZone.cy * h;
-      const safeRad = Math.max(8, this.safeZone.r * minDim);
+      // Blue radiation zone radius
+      const blueRad = Math.max(10, Math.min(this.safeZone.blueR, 0.48) * minDim);
+      const bluePx = Math.max(blueRad + 10, Math.min(w - blueRad - 10, this.safeZone.blueCx * w));
+      const bluePy = Math.max(blueRad + 18, Math.min(h - blueRad - 12, this.safeZone.blueCy * h));
 
       this.ctx.save();
 
@@ -1460,20 +1428,22 @@
       this.ctx.arc(bluePx, bluePy, blueRad, 0, Math.PI * 2);
       this.ctx.stroke();
 
-      // Subtle Outer Radiation Hazard Layer
+      // Outer Radiation Hazard Layer
       this.ctx.save();
-      this.ctx.fillStyle = 'rgba(30, 58, 138, 0.22)';
+      this.ctx.fillStyle = 'rgba(30, 58, 138, 0.20)';
       this.ctx.beginPath();
       this.ctx.rect(0, 0, w, h);
       this.ctx.arc(bluePx, bluePy, blueRad, 0, Math.PI * 2, true);
       this.ctx.fill();
       this.ctx.restore();
 
-      // Blue Zone Label
+      // Blue Zone Label (placed safely inside or above without clipping)
+      let blueLabelY = bluePy - blueRad - 6;
+      if (blueLabelY < 14) blueLabelY = bluePy - blueRad + 15;
       this.ctx.fillStyle = '#93c5fd';
       this.ctx.font = 'bold 9px "Chakra Petch", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('⚡ BLUE ZONE RADIATION PERIMETER', bluePx, Math.max(14, bluePy - blueRad - 6));
+      this.ctx.fillText('⚡ BLUE ZONE RADIATION PERIMETER', bluePx, blueLabelY);
 
       // 2. Safe Zone (White Neon Circle)
       this.ctx.strokeStyle = '#ffffff';
@@ -1508,21 +1478,23 @@
       this.ctx.fill();
       this.ctx.stroke();
 
-      // Safe Zone Badge Label
-      this.ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      // Safe Zone Badge Label (dynamically positioned so it NEVER clips off top canvas edge)
+      this.ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
       this.ctx.strokeStyle = '#ffffff';
       this.ctx.lineWidth = 1;
       const badgeText = `⚪ SAFE ZONE PHASE ${this.safeZone.phase}`;
       this.ctx.font = '900 10px "Chakra Petch", sans-serif';
       const bWidth = this.ctx.measureText(badgeText).width + 16;
+      let badgeY = safePy - safeRad - 22;
+      if (badgeY < 6) badgeY = safePy - safeRad + 8;
       this.ctx.beginPath();
-      this.ctx.roundRect(safePx - bWidth / 2, Math.max(4, safePy - safeRad - 22), bWidth, 18, 4);
+      this.ctx.roundRect(safePx - bWidth / 2, badgeY, bWidth, 18, 4);
       this.ctx.fill();
       this.ctx.stroke();
 
       this.ctx.fillStyle = '#ffffff';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(badgeText, safePx, Math.max(16, safePy - safeRad - 10));
+      this.ctx.fillText(badgeText, safePx, badgeY + 12);
 
       // Shift Direction Vector Arrow (if safe zone has shifted from blue zone center)
       const dist = Math.hypot(safePx - bluePx, safePy - bluePy);
@@ -1732,8 +1704,14 @@
         // Handle Safe Zone Dragging
         if (this.safeZone.isDragging) {
           e.preventDefault();
-          this.safeZone.cx = Math.max(0.08, Math.min(0.92, (pos.x - this.safeZone.dragOffsetX) / w));
-          this.safeZone.cy = Math.max(0.08, Math.min(0.92, (pos.y - this.safeZone.dragOffsetY) / h));
+          const safeRad = this.safeZone.r * minDim;
+          const minAllowedCy = (safeRad + 28) / h;
+          const maxAllowedCy = (h - safeRad - 16) / h;
+          const minAllowedCx = (safeRad + 16) / w;
+          const maxAllowedCx = (w - safeRad - 16) / w;
+
+          this.safeZone.cx = Math.max(minAllowedCx, Math.min(maxAllowedCx, (pos.x - this.safeZone.dragOffsetX) / w));
+          this.safeZone.cy = Math.max(minAllowedCy, Math.min(maxAllowedCy, (pos.y - this.safeZone.dragOffsetY) / h));
           this.redrawAll();
           return;
         }
@@ -7162,6 +7140,11 @@ this.ffSelectedLoadout = {
                 <span>🛰️</span> Satellite Map
               </button>
 
+              <button id="wbAspectToggleBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-cyan-500/50 rounded text-xs text-cyan-300 font-sub flex items-center gap-1" title="Toggle between 1:1 Tactical Square and Wide Fill">
+                <span>📐</span>
+                <span id="wbAspectLabel">Aspect: 🔲 1:1 Square</span>
+              </button>
+
               <div class="flex flex-wrap items-center gap-1 ml-1">
                 <button class="wb-tool-btn active px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="freedraw">Brush</button>
                 <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="arrow">Arrow</button>
@@ -7214,13 +7197,10 @@ this.ffSelectedLoadout = {
             </div>
           </div>
 
-          <!-- Canvas -->
-          <div class="cyber-panel p-2 rounded-xl border border-slate-800 flex justify-center items-center overflow-hidden">
-            <canvas id="whiteboardCanvas" class="rounded-lg shadow-2xl"></canvas>
+          <!-- Canvas (Generous Full Space, 1:1 Undistorted Display) -->
+          <div class="cyber-panel p-2.5 sm:p-3 rounded-2xl border border-cyan-500/40 w-full overflow-hidden shadow-2xl bg-slate-950 flex justify-center items-center">
+            <canvas id="whiteboardCanvas" class="block rounded-xl shadow-2xl cursor-crosshair"></canvas>
           </div>
-
-          <!-- Tactical Breakdown Card Container -->
-          <div id="proRotationCardContainer"></div>
         </div>
       `;
 
@@ -7342,6 +7322,40 @@ this.ffSelectedLoadout = {
         const isSat = this.whiteboard.mapStyle === 'satellite';
         e.currentTarget.innerHTML = isSat ? '<span>🛰️</span> Satellite Map' : '<span>📐</span> Vector Grid';
         this.whiteboard.redrawAll();
+      });
+
+      document.getElementById('wbAspectToggleBtn')?.addEventListener('click', () => {
+        if (this.whiteboard) {
+          this.whiteboard.toggleAspectMode();
+        }
+      });
+
+      // Squad Live Sync Realtime Room Bindings
+      document.getElementById('createTacticalRoomBtn')?.addEventListener('click', () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        const input = document.getElementById('tacticalRoomCodeInput');
+        if (input) input.value = code;
+        if (this.supabase && this.whiteboard) {
+          this.supabase.joinTacticalRoom(code, (action) => this.whiteboard.applyRemoteAction?.(action));
+          const lbl = document.getElementById('activeTacticalRoomLabel');
+          if (lbl) lbl.textContent = `Room: ${code} (Hosting)`;
+          const dot = document.getElementById('tacticalRoomLiveDot');
+          if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        }
+      });
+
+      document.getElementById('joinTacticalRoomBtn')?.addEventListener('click', () => {
+        const input = document.getElementById('tacticalRoomCodeInput');
+        const code = input ? input.value.trim().toUpperCase() : '';
+        if (code && this.supabase && this.whiteboard) {
+          this.supabase.joinTacticalRoom(code, (action) => this.whiteboard.applyRemoteAction?.(action));
+          const lbl = document.getElementById('activeTacticalRoomLabel');
+          if (lbl) lbl.textContent = `Room: ${code} (Connected)`;
+          const dot = document.getElementById('tacticalRoomLiveDot');
+          if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        }
       });
     }
 
