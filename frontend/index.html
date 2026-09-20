@@ -3151,166 +3151,961 @@ h1, h2, h3, .font-heading {
   // ---------------------------------------------------------------------------
   // AIM & REFLEX TRAINER CONTROLLER
   // ---------------------------------------------------------------------------
-  class ReflexTrainer {
-    constructor(arenaId, statsId) {
-      this.arena = document.getElementById(arenaId);
-      this.statsEl = document.getElementById(statsId);
-      this.round = 0;
-      this.maxRounds = 5;
-      this.reactionTimes = [];
-      this.spawnTime = 0;
-      this.activeTarget = null;
-      this.timeoutId = null;
-      this.isRunning = false;
+  // ===========================================================================
+// UPGRADED AIM & REFLEX SPEED GYM SUITE
+// 5 Reaction Modes, Personal Records KPI HUD, Latency Ladder & Hardware Tuning
+// ===========================================================================
 
-      this.bindEvents();
+class ReflexTrainer {
+  constructor(arenaId, statsId) {
+    this.arena = document.getElementById(arenaId);
+    this.statsEl = document.getElementById(statsId);
+    this.mode = 'visual'; // 'visual' | 'gloo' | 'targets' | 'audio' | 'blitz'
+    this.round = 0;
+    this.maxRounds = 5;
+    this.reactionTimes = [];
+    this.spawnTime = 0;
+    this.activeTargets = [];
+    this.timeoutId = null;
+    this.isRunning = false;
+    this.waitingForTrigger = false;
+    this.triggerActive = false;
+
+    // Target flicking / Blitz stats
+    this.hits = 0;
+    this.misses = 0;
+    this.blitzTimeLeft = 30;
+    this.blitzInterval = null;
+
+    // Web Audio Context for synthesized sound feedback
+    this.audioCtx = null;
+
+    // Personal Records from localStorage
+    this.records = this.loadRecords();
+
+    this.bindEvents();
+    this.updateRecordHUD();
+  }
+
+  // --- AUDIO SYNTHESIS (Zero External File Dependencies) ---
+  initAudio() {
+    if (!this.audioCtx) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        this.audioCtx = new AudioContext();
+      }
+    }
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+  }
+
+  playTone(freq = 600, duration = 0.08, type = 'sine', vol = 0.15) {
+    try {
+      this.initAudio();
+      if (!this.audioCtx) return;
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, this.audioCtx.currentTime);
+      gain.gain.setValueAtTime(vol, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start();
+      osc.stop(this.audioCtx.currentTime + duration);
+    } catch (e) {}
+  }
+
+  playSuccessChime() {
+    this.playTone(880, 0.1, 'sine', 0.2);
+    setTimeout(() => this.playTone(1320, 0.15, 'sine', 0.2), 60);
+  }
+
+  playFailBuzz() {
+    this.playTone(180, 0.18, 'sawtooth', 0.25);
+  }
+
+  playSniperShot() {
+    try {
+      this.initAudio();
+      if (!this.audioCtx) return;
+      // Gunshot noise burst
+      const bufferSize = this.audioCtx.sampleRate * 0.12;
+      const buffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+      }
+      const noise = this.audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const gain = this.audioCtx.createGain();
+      gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime);
+      noise.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      noise.start();
+      this.playTone(120, 0.15, 'square', 0.25);
+    } catch (e) {}
+  }
+
+  playGlooBlock() {
+    this.playTone(400, 0.08, 'triangle', 0.3);
+    setTimeout(() => this.playTone(800, 0.14, 'sine', 0.25), 40);
+  }
+
+  playTargetPop() {
+    this.playTone(950, 0.06, 'triangle', 0.2);
+  }
+
+  // --- LOCAL STORAGE PERSONAL RECORDS ---
+  loadRecords() {
+    try {
+      const saved = localStorage.getItem('underdog_reflex_records');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      bestVisual: null,
+      bestGloo: null,
+      bestAccuracy: null,
+      bestAudio: null,
+      bestBlitz: null,
+      tier: 'Unranked'
+    };
+  }
+
+  saveRecords() {
+    try {
+      localStorage.setItem('underdog_reflex_records', JSON.stringify(this.records));
+      this.updateRecordHUD();
+    } catch (e) {}
+  }
+
+  resetRecords() {
+    this.records = {
+      bestVisual: null,
+      bestGloo: null,
+      bestAccuracy: null,
+      bestAudio: null,
+      bestBlitz: null,
+      tier: 'Unranked'
+    };
+    try {
+      localStorage.removeItem('underdog_reflex_records');
+    } catch (e) {}
+    this.updateRecordHUD();
+  }
+
+  updateRecordHUD() {
+    const vEl = document.getElementById('kpiBestVisual');
+    const gEl = document.getElementById('kpiBestGloo');
+    const aEl = document.getElementById('kpiBestAccuracy');
+    const tEl = document.getElementById('kpiReflexTier');
+
+    if (vEl) vEl.textContent = this.records.bestVisual ? `${this.records.bestVisual} ms` : '---';
+    if (gEl) gEl.textContent = this.records.bestGloo ? `${this.records.bestGloo} ms` : '---';
+    if (aEl) aEl.textContent = this.records.bestAccuracy ? `${this.records.bestAccuracy}%` : '---';
+    if (tEl) {
+      tEl.textContent = this.records.tier || 'Unranked';
+      if (this.records.tier.includes('God')) tEl.className = 'text-xs font-heading font-bold text-amber-400 uppercase tracking-wider';
+      else if (this.records.tier.includes('Pro') || this.records.tier.includes('Ready')) tEl.className = 'text-xs font-heading font-bold text-emerald-400 uppercase tracking-wider';
+      else tEl.className = 'text-xs font-heading font-bold text-primary uppercase tracking-wider';
+    }
+  }
+
+  // --- EVENT BINDING ---
+  bindEvents() {
+    if (!this.arena) return;
+
+    // Arena click handler
+    this.arena.addEventListener('click', (e) => {
+      this.handleArenaClick(e);
+    });
+
+    // Spacebar listener for Gloo Wall / Quick Tap
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && this.isRunning && (this.mode === 'gloo' || this.mode === 'visual' || this.mode === 'audio')) {
+        e.preventDefault();
+        this.handleArenaClick({ target: this.arena, keyTrigger: true });
+      }
+    });
+  }
+
+  setMode(newMode) {
+    this.stopTest();
+    this.mode = newMode;
+
+    // Update active button state
+    document.querySelectorAll('.reflex-mode-btn').forEach(b => {
+      if (b.getAttribute('data-mode') === newMode) {
+        b.classList.add('bg-cyan-500/20', 'text-cyan-300', 'border-cyan-400', 'shadow-[0_0_15px_rgba(0,240,255,0.2)]');
+        b.classList.remove('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      } else {
+        b.classList.remove('bg-cyan-500/20', 'text-cyan-300', 'border-cyan-400', 'shadow-[0_0_15px_rgba(0,240,255,0.2)]');
+        b.classList.add('bg-slate-900', 'text-slate-400', 'border-slate-800');
+      }
+    });
+
+    this.renderModeArena();
+  }
+
+  renderModeArena() {
+    if (!this.arena) return;
+    this.arena.innerHTML = '';
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden select-none border border-slate-800';
+
+    if (this.mode === 'visual') {
+      this.arena.innerHTML = `
+        <div class="text-center p-6 pointer-events-none animate-fade-in">
+          <div class="w-16 h-16 rounded-full bg-cyan-500/10 border border-cyan-400/40 flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(0,240,255,0.2)]">
+            <span class="text-3xl">⚡</span>
+          </div>
+          <h4 class="text-lg font-heading font-black text-white uppercase tracking-wider">Human Benchmark: Pure Neural Reflex</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            Measures raw synaptic eye-to-finger transmission latency. Click <strong>"Start Test"</strong>, wait for the red screen to turn vibrant green, then tap as fast as humanly possible!
+          </p>
+          <div class="flex items-center justify-center gap-3 mt-4 text-[11px] font-mono text-slate-500">
+            <span>5 Rounds</span>
+            <span>&bull;</span>
+            <span>False Start Detection</span>
+            <span>&bull;</span>
+            <span>Spacebar or Tap</span>
+          </div>
+        </div>
+      `;
+    } else if (this.mode === 'gloo') {
+      this.arena.innerHTML = `
+        <div class="text-center p-6 pointer-events-none animate-fade-in">
+          <div class="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-400/40 flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+            <span class="text-3xl">🛡️</span>
+          </div>
+          <h4 class="text-lg font-heading font-black text-amber-300 uppercase tracking-wider">0.15s Fast Gloo Wall Reflex Simulator</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            Simulates a high-stakes 1v1 in Bermuda Peak. An enemy sniper is locked onto your head. The moment their muzzle flashes and you hear the shot, deploy your Gloo Wall within 200ms to block the fatal headshot!
+          </p>
+          <div class="flex items-center justify-center gap-3 mt-4 text-[11px] font-mono text-amber-400/80">
+            <span>Sub-200ms Required</span>
+            <span>&bull;</span>
+            <span>Block / Knock Simulation</span>
+            <span>&bull;</span>
+            <span>Spacebar or Tap</span>
+          </div>
+        </div>
+      `;
+    } else if (this.mode === 'targets') {
+      this.arena.innerHTML = `
+        <div class="text-center p-6 pointer-events-none animate-fade-in">
+          <div class="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-400/40 flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(244,63,94,0.2)]">
+            <span class="text-3xl">🎯</span>
+          </div>
+          <h4 class="text-lg font-heading font-black text-white uppercase tracking-wider">Precision Headshot Flick Arena</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            10 dynamic targets of varying size (Headshots 26px vs Upper Torso 44px) will spawn across the arena. Flick your crosshair and tap them instantly to measure your Accuracy % and Time-to-Damage (TTD).
+          </p>
+          <div class="flex items-center justify-center gap-3 mt-4 text-[11px] font-mono text-rose-400/80">
+            <span>10 High-Speed Targets</span>
+            <span>&bull;</span>
+            <span>Accuracy & Miss Tracking</span>
+            <span>&bull;</span>
+            <span>Mouse / Touch Crosshair</span>
+          </div>
+        </div>
+      `;
+    } else if (this.mode === 'audio') {
+      this.arena.innerHTML = `
+        <div class="text-center p-6 pointer-events-none animate-fade-in">
+          <div class="w-16 h-16 rounded-full bg-purple-500/10 border border-purple-400/40 flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(168,85,247,0.2)]">
+            <span class="text-3xl">🔊</span>
+          </div>
+          <h4 class="text-lg font-heading font-black text-purple-300 uppercase tracking-wider">Blind Auditory Reaction Drill</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            Auditory neural signals reach the brainstem in 8-10ms (30-50ms faster than visual processing). Focus purely on your ears. Tap instantly when you hear the gunshot sound!
+          </p>
+          <div class="flex items-center justify-center gap-3 mt-4 text-[11px] font-mono text-purple-400/80">
+            <span>Pure Sound Cue</span>
+            <span>&bull;</span>
+            <span>Headphones Recommended</span>
+            <span>&bull;</span>
+            <span>Spacebar or Tap</span>
+          </div>
+        </div>
+      `;
+    } else if (this.mode === 'blitz') {
+      this.arena.innerHTML = `
+        <div class="text-center p-6 pointer-events-none animate-fade-in">
+          <div class="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-400/40 flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+            <span class="text-3xl">⏱️</span>
+          </div>
+          <h4 class="text-lg font-heading font-black text-emerald-300 uppercase tracking-wider">30-Second Rapid Blitz Challenge</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            High-intensity tournament pressure test! 3 targets are continuously active on screen. Eliminate as many targets as you can within 30 seconds to calculate your KPS (Kills Per Second).
+          </p>
+          <div class="flex items-center justify-center gap-3 mt-4 text-[11px] font-mono text-emerald-400/80">
+            <span>30s Countdown</span>
+            <span>&bull;</span>
+            <span>Continuous Spawns</span>
+            <span>&bull;</span>
+            <span>Endurance & Focus</span>
+          </div>
+        </div>
+      `;
     }
 
-    bindEvents() {
-      if (!this.arena) return;
+    if (this.statsEl) {
+      this.statsEl.innerHTML = `
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400 font-mono">
+          <span>Active Mode: <strong class="text-white uppercase">${this.getModeName()}</strong></span>
+          <span>Click <strong>"Start Test"</strong> to begin session</span>
+        </div>
+      `;
+    }
+  }
 
-      this.arena.addEventListener('click', (e) => {
-        if (!this.isRunning) return;
+  getModeName() {
+    switch(this.mode) {
+      case 'visual': return '⚡ Pure Neural Reflex';
+      case 'gloo': return '🛡️ 0.15s Gloo Wall Reflex';
+      case 'targets': return '🎯 Precision Headshots';
+      case 'audio': return '🔊 Auditory Reaction';
+      case 'blitz': return '⏱️ 30s Rapid Blitz';
+      default: return 'Reaction Test';
+    }
+  }
 
-        if (e.target.classList.contains('aim-target')) {
-          const reactionTime = Math.round(performance.now() - this.spawnTime);
-          this.reactionTimes.push(reactionTime);
-          this.removeTarget();
-          this.updateStats();
+  // --- TEST LIFECYCLE ---
+  startTest() {
+    this.initAudio();
+    this.isRunning = true;
+    this.round = 0;
+    this.reactionTimes = [];
+    this.hits = 0;
+    this.misses = 0;
+    this.clearAllTimeouts();
 
+    if (this.mode === 'visual') {
+      this.maxRounds = 5;
+      this.startVisualRound();
+    } else if (this.mode === 'gloo') {
+      this.maxRounds = 5;
+      this.startGlooRound();
+    } else if (this.mode === 'targets') {
+      this.maxRounds = 10;
+      this.startTargetsRound();
+    } else if (this.mode === 'audio') {
+      this.maxRounds = 5;
+      this.startAudioRound();
+    } else if (this.mode === 'blitz') {
+      this.startBlitzChallenge();
+    }
+  }
+
+  stopTest() {
+    this.isRunning = false;
+    this.waitingForTrigger = false;
+    this.triggerActive = false;
+    this.clearAllTimeouts();
+  }
+
+  clearAllTimeouts() {
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+    if (this.blitzInterval) {
+      clearInterval(this.blitzInterval);
+      this.blitzInterval = null;
+    }
+    this.activeTargets.forEach(t => t.remove());
+    this.activeTargets = [];
+  }
+
+  // --- MODE 1: VISUAL (RED TO GREEN) ---
+  startVisualRound() {
+    this.round++;
+    this.waitingForTrigger = true;
+    this.triggerActive = false;
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-rose-950/60 border-2 border-rose-600/70 shadow-[inset_0_0_50px_rgba(225,29,72,0.25)] transition-colors duration-150';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none animate-pulse">
+        <div class="w-20 h-20 rounded-full bg-rose-600/20 border-2 border-rose-500 flex items-center justify-center mx-auto mb-3 shadow-[0_0_25px_rgba(244,63,94,0.4)]">
+          <span class="text-4xl">🛑</span>
+        </div>
+        <h3 class="text-2xl sm:text-3xl font-heading font-black text-rose-300 uppercase tracking-wider">WAIT FOR GREEN...</h3>
+        <p class="text-xs text-rose-200 mt-2 font-sub uppercase tracking-wider">Do NOT tap yet! Premature clicks count as false starts.</p>
+        <div class="mt-4 inline-block px-3 py-1 rounded-full bg-rose-900/60 border border-rose-500/40 text-[11px] font-mono text-rose-200">
+          Round ${this.round} of ${this.maxRounds}
+        </div>
+      </div>
+    `;
+
+    if (this.statsEl) {
+      this.statsEl.innerHTML = `
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-rose-400">⚡ Round ${this.round}/${this.maxRounds}: Waiting for trigger...</span>
+          <span class="text-slate-400">Keep finger hovering</span>
+        </div>
+      `;
+    }
+
+    const randomDelay = 1400 + Math.random() * 2600; // 1.4s - 4.0s
+    this.timeoutId = setTimeout(() => {
+      if (!this.isRunning || !this.waitingForTrigger) return;
+      this.triggerVisualGreen();
+    }, randomDelay);
+  }
+
+  triggerVisualGreen() {
+    this.waitingForTrigger = false;
+    this.triggerActive = true;
+    this.spawnTime = performance.now();
+    this.playTone(1050, 0.08, 'sine', 0.25);
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-emerald-600 border-2 border-emerald-300 shadow-[0_0_60px_rgba(16,185,129,0.7)] transition-colors duration-75';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none animate-bounce">
+        <div class="w-20 h-20 rounded-full bg-white flex items-center justify-center mx-auto mb-3 shadow-[0_0_30px_#ffffff]">
+          <span class="text-4xl">⚡</span>
+        </div>
+        <h3 class="text-3xl sm:text-4xl font-heading font-black text-slate-950 uppercase tracking-wider">CLICK / TAP NOW!</h3>
+        <p class="text-xs text-slate-950 font-heading font-black mt-2 uppercase tracking-wider">TAP ANYWHERE OR HIT SPACEBAR!</p>
+      </div>
+    `;
+  }
+
+  // --- MODE 2: GLOO WALL REFLEX ---
+  startGlooRound() {
+    this.round++;
+    this.waitingForTrigger = true;
+    this.triggerActive = false;
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-slate-950 border-2 border-amber-500/40 tactical-grid transition-colors';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none">
+        <div class="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-400 flex items-center justify-center mx-auto mb-3 animate-pulse">
+          <span class="text-3xl">⚠️</span>
+        </div>
+        <h3 class="text-xl sm:text-2xl font-heading font-black text-amber-300 uppercase tracking-wider">ENEMY SNIPER AIMING AT YOU...</h3>
+        <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">Watch for tracer & muzzle flash! Ready your gloo wall trigger.</p>
+        <div class="mt-4 px-4 py-2 rounded-xl bg-slate-900 border border-amber-500/30 text-xs font-mono text-amber-300 inline-block">
+          Round ${this.round} of ${this.maxRounds} &bull; Target: Sub-200ms
+        </div>
+      </div>
+      <div class="absolute bottom-6 left-1/2 -translate-x-1/2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-heading font-black text-sm uppercase tracking-wider shadow-lg shadow-amber-500/30 pointer-events-none">
+        🛡️ TAP HERE / SPACEBAR TO DEPLOY GLOO
+      </div>
+    `;
+
+    const randomDelay = 1600 + Math.random() * 2800;
+    this.timeoutId = setTimeout(() => {
+      if (!this.isRunning || !this.waitingForTrigger) return;
+      this.triggerGlooAlert();
+    }, randomDelay);
+  }
+
+  triggerGlooAlert() {
+    this.waitingForTrigger = false;
+    this.triggerActive = true;
+    this.spawnTime = performance.now();
+    this.playSniperShot();
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-red-600 border-4 border-white shadow-[0_0_80px_rgba(239,68,68,0.9)]';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none animate-ping">
+        <div class="text-5xl mb-2">💥</div>
+        <h2 class="text-3xl sm:text-5xl font-heading font-black text-white uppercase tracking-wider">SNIPER SHOT FIRED!</h2>
+        <p class="text-base font-heading font-black text-yellow-300 mt-2 uppercase">DROP GLOO WALL NOW!</p>
+      </div>
+    `;
+  }
+
+  // --- MODE 3: PRECISION TARGET FLICKING ---
+  startTargetsRound() {
+    this.round++;
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative cursor-crosshair select-none bg-slate-950 border border-cyan-500/40 tactical-grid overflow-hidden';
+    this.arena.innerHTML = '';
+
+    this.spawnFlickTarget();
+
+    if (this.statsEl) {
+      this.statsEl.innerHTML = `
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-cyan-400">🎯 Target ${this.round}/${this.maxRounds}</span>
+          <span class="text-slate-400">Hits: <strong class="text-emerald-400">${this.hits}</strong> | Misses: <strong class="text-rose-400">${this.misses}</strong></span>
+        </div>
+      `;
+    }
+  }
+
+  spawnFlickTarget() {
+    const rect = this.arena.getBoundingClientRect();
+    const isHeadshot = Math.random() > 0.45; // 55% headshots
+    const targetSize = isHeadshot ? 28 : 46;
+
+    const minX = targetSize + 15;
+    const maxX = Math.max(rect.width - targetSize - 15, targetSize + 30);
+    const minY = targetSize + 15;
+    const maxY = Math.max(rect.height - targetSize - 15, targetSize + 30);
+
+    const x = Math.floor(minX + Math.random() * (maxX - minX));
+    const y = Math.floor(minY + Math.random() * (maxY - minY));
+
+    const target = document.createElement('div');
+    target.className = 'aim-target absolute rounded-full flex items-center justify-center cursor-crosshair transition-transform active:scale-90 shadow-2xl';
+    target.style.width = `${targetSize}px`;
+    target.style.height = `${targetSize}px`;
+    target.style.left = `${x}px`;
+    target.style.top = `${y}px`;
+    target.style.transform = 'translate(-50%, -50%)';
+
+    if (isHeadshot) {
+      target.style.background = 'radial-gradient(circle, #ef4444 40%, #991b1b 90%)';
+      target.style.border = '2px solid #ffffff';
+      target.style.boxShadow = '0 0 20px rgba(239,68,68,0.7)';
+      target.innerHTML = '<span class="text-[10px] font-black text-white pointer-events-none">HD</span>';
+      target.setAttribute('data-target-type', 'headshot');
+    } else {
+      target.style.background = 'radial-gradient(circle, #00f0ff 30%, #2563eb 90%)';
+      target.style.border = '2px solid #ffffff';
+      target.style.boxShadow = '0 0 20px rgba(0,240,255,0.6)';
+      target.innerHTML = '<span class="text-[9px] font-black text-black pointer-events-none">CR</span>';
+      target.setAttribute('data-target-type', 'torso');
+    }
+
+    this.arena.appendChild(target);
+    this.activeTargets = [target];
+    this.spawnTime = performance.now();
+    this.playTargetPop();
+  }
+
+  // --- MODE 4: AUDITORY REACTION ---
+  startAudioRound() {
+    this.round++;
+    this.waitingForTrigger = true;
+    this.triggerActive = false;
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-slate-950 border border-purple-500/40 transition-colors';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none">
+        <div class="w-20 h-20 rounded-full bg-purple-500/10 border-2 border-purple-500 flex items-center justify-center mx-auto mb-3 animate-pulse shadow-[0_0_30px_rgba(168,85,247,0.3)]">
+          <span class="text-4xl">🎧</span>
+        </div>
+        <h3 class="text-2xl font-heading font-black text-purple-300 uppercase tracking-wider">CLOSE EYES / LISTEN FOR SHOT</h3>
+        <p class="text-xs text-slate-400 mt-2 max-w-sm mx-auto">Pure auditory stimulus. Tap screen or press Spacebar the microsecond you hear the gunshot sound!</p>
+        <div class="mt-4 px-3 py-1 rounded-full bg-purple-950/60 border border-purple-500/40 text-[11px] font-mono text-purple-300 inline-block">
+          Round ${this.round} of ${this.maxRounds}
+        </div>
+      </div>
+    `;
+
+    const randomDelay = 1800 + Math.random() * 2600;
+    this.timeoutId = setTimeout(() => {
+      if (!this.isRunning || !this.waitingForTrigger) return;
+      this.triggerAudioCue();
+    }, randomDelay);
+  }
+
+  triggerAudioCue() {
+    this.waitingForTrigger = false;
+    this.triggerActive = true;
+    this.spawnTime = performance.now();
+    this.playSniperShot();
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-purple-600 border-4 border-white shadow-[0_0_80px_rgba(168,85,247,0.9)]';
+    this.arena.innerHTML = `
+      <div class="text-center p-6 pointer-events-none animate-ping">
+        <span class="text-6xl">🔊</span>
+        <h2 class="text-4xl font-heading font-black text-white uppercase tracking-wider mt-2">SOUND TRIGGERED!</h2>
+        <p class="text-sm font-heading font-black text-purple-200 uppercase">TAP NOW!</p>
+      </div>
+    `;
+  }
+
+  // --- MODE 5: 30S RAPID BLITZ ---
+  startBlitzChallenge() {
+    this.blitzTimeLeft = 30;
+    this.hits = 0;
+    this.misses = 0;
+    this.reactionTimes = [];
+    this.activeTargets.forEach(t => t.remove());
+    this.activeTargets = [];
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative cursor-crosshair select-none bg-slate-950 border border-emerald-500/40 tactical-grid overflow-hidden';
+    this.arena.innerHTML = '';
+
+    // Spawn 3 initial targets
+    for (let i = 0; i < 3; i++) {
+      this.spawnBlitzTarget();
+    }
+
+    this.blitzInterval = setInterval(() => {
+      this.blitzTimeLeft--;
+      this.updateBlitzStats();
+      if (this.blitzTimeLeft <= 0) {
+        clearInterval(this.blitzInterval);
+        this.blitzInterval = null;
+        this.endBlitzSession();
+      }
+    }, 1000);
+
+    this.updateBlitzStats();
+  }
+
+  spawnBlitzTarget() {
+    if (!this.arena) return;
+    const rect = this.arena.getBoundingClientRect();
+    const isHeadshot = Math.random() > 0.6;
+    const size = isHeadshot ? 30 : 48;
+
+    const minX = size + 20;
+    const maxX = Math.max(rect.width - size - 20, size + 40);
+    const minY = size + 20;
+    const maxY = Math.max(rect.height - size - 20, size + 40);
+
+    const x = Math.floor(minX + Math.random() * (maxX - minX));
+    const y = Math.floor(minY + Math.random() * (maxY - minY));
+
+    const target = document.createElement('div');
+    target.className = 'aim-target absolute rounded-full flex items-center justify-center cursor-crosshair active:scale-90 shadow-xl';
+    target.style.width = `${size}px`;
+    target.style.height = `${size}px`;
+    target.style.left = `${x}px`;
+    target.style.top = `${y}px`;
+    target.style.transform = 'translate(-50%, -50%)';
+    target.setAttribute('data-spawn-time', performance.now().toString());
+
+    if (isHeadshot) {
+      target.style.background = 'radial-gradient(circle, #ef4444 30%, #7f1d1d 90%)';
+      target.style.border = '2px solid #ffffff';
+      target.innerHTML = '<span class="text-[10px] font-black text-white pointer-events-none">HD</span>';
+    } else {
+      target.style.background = 'radial-gradient(circle, #10b981 30%, #065f46 90%)';
+      target.style.border = '2px solid #ffffff';
+      target.innerHTML = '<span class="text-[10px] font-black text-white pointer-events-none">HIT</span>';
+    }
+
+    this.arena.appendChild(target);
+    this.activeTargets.push(target);
+  }
+
+  updateBlitzStats() {
+    if (!this.statsEl) return;
+    const kps = (this.hits / Math.max(1, 30 - this.blitzTimeLeft)).toFixed(1);
+    this.statsEl.innerHTML = `
+      <div class="flex items-center justify-between text-xs font-mono">
+        <span class="text-emerald-400 font-bold">⏱️ Time Remaining: <span class="text-white text-sm">${this.blitzTimeLeft}s</span></span>
+        <span class="text-slate-300">Hits: <strong class="text-emerald-400 text-sm">${this.hits}</strong> | Speed: <strong class="text-cyan-400">${kps} targets/s</strong></span>
+      </div>
+    `;
+  }
+
+  // --- ARENA CLICK & MISCLICK DISPATCHER ---
+  handleArenaClick(e) {
+    if (!this.isRunning) return;
+
+    // 1. Visual or Audio Mode Click Handler
+    if (this.mode === 'visual' || this.mode === 'audio') {
+      if (this.waitingForTrigger) {
+        // False start! Clicked while Red
+        this.playFailBuzz();
+        this.waitingForTrigger = false;
+        if (this.timeoutId) clearTimeout(this.timeoutId);
+
+        this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-slate-900 border-2 border-rose-500';
+        this.arena.innerHTML = `
+          <div class="text-center p-6 animate-shake">
+            <div class="text-5xl mb-2">❌</div>
+            <h3 class="text-2xl font-heading font-black text-rose-400 uppercase tracking-wider">TOO EARLY! FALSE START!</h3>
+            <p class="text-xs text-slate-300 mt-1 font-mono">You anticipated before the trigger signal. Relax your fingers.</p>
+            <button class="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-heading font-black text-xs uppercase rounded-lg">
+              Restart Round ${this.round}
+            </button>
+          </div>
+        `;
+        setTimeout(() => {
+          if (this.isRunning) {
+            if (this.mode === 'visual') this.startVisualRound();
+            else this.startAudioRound();
+          }
+        }, 1400);
+        return;
+      }
+
+      if (this.triggerActive) {
+        // Valid reaction click!
+        const rt = Math.round(performance.now() - this.spawnTime);
+        this.triggerActive = false;
+        this.reactionTimes.push(rt);
+        this.playSuccessChime();
+
+        this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-slate-950 border border-emerald-500/60 shadow-[inset_0_0_30px_rgba(16,185,129,0.2)]';
+        this.arena.innerHTML = `
+          <div class="text-center p-6 animate-fade-in">
+            <div class="text-4xl mb-1">⚡</div>
+            <div class="text-4xl sm:text-5xl font-heading font-black text-emerald-400 tracking-tight">${rt} <span class="text-sm font-normal text-slate-400">ms</span></div>
+            <p class="text-xs font-heading font-bold text-slate-300 mt-2 uppercase tracking-wider">${this.getSpeedRating(rt)}</p>
+            <div class="mt-4 inline-block px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-[11px] font-mono text-slate-400">
+              Round ${this.round}/${this.maxRounds} Complete
+            </div>
+          </div>
+        `;
+
+        setTimeout(() => {
           if (this.round >= this.maxRounds) {
             this.endSession();
           } else {
-            this.scheduleNextTarget();
+            if (this.mode === 'visual') this.startVisualRound();
+            else this.startAudioRound();
           }
-        }
-      });
-    }
-
-    startTest() {
-      this.isRunning = true;
-      this.round = 0;
-      this.reactionTimes = [];
-      this.removeTarget();
-      this.statsEl.innerHTML = `
-        <div class="text-primary font-sub uppercase tracking-wider text-sm">Round 0 of ${this.maxRounds}</div>
-        <div class="text-xs text-slate-400 mt-1">Keep eyes focused. Targets spawn randomly. Tap as soon as target appears!</div>
-      `;
-      this.scheduleNextTarget();
-    }
-
-    scheduleNextTarget() {
-      this.round++;
-      const delay = 900 + Math.random() * 1800;
-
-      this.statsEl.innerHTML = `
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-sub uppercase text-amber-400">Target ${this.round} / ${this.maxRounds} incoming...</span>
-          <span class="text-xs text-slate-500">Wait for trigger...</span>
-        </div>
-      `;
-
-      this.timeoutId = setTimeout(() => {
-        if (!this.isRunning) return;
-        this.spawnTarget();
-      }, delay);
-    }
-
-    spawnTarget() {
-      const arenaRect = this.arena.getBoundingClientRect();
-      const targetSize = 48;
-
-      const minX = targetSize;
-      const maxX = Math.max(arenaRect.width - targetSize, targetSize + 20);
-      const minY = targetSize;
-      const maxY = Math.max(arenaRect.height - targetSize, targetSize + 20);
-
-      const x = Math.floor(minX + Math.random() * (maxX - minX));
-      const y = Math.floor(minY + Math.random() * (maxY - minY));
-
-      const target = document.createElement('div');
-      target.className = 'aim-target';
-      target.style.width = `${targetSize}px`;
-      target.style.height = `${targetSize}px`;
-      target.style.left = `${x}px`;
-      target.style.top = `${y}px`;
-      target.style.background = 'radial-gradient(circle, #00f0ff 30%, #ef4444 90%)';
-      target.style.border = '2px solid #ffffff';
-      target.style.cursor = 'crosshair';
-
-      this.arena.appendChild(target);
-      this.activeTarget = target;
-      this.spawnTime = performance.now();
-    }
-
-    removeTarget() {
-      if (this.activeTarget && this.activeTarget.parentElement) {
-        this.activeTarget.parentElement.removeChild(this.activeTarget);
-        this.activeTarget = null;
+        }, 1100);
       }
-      if (this.timeoutId) {
-        clearTimeout(this.timeoutId);
-        this.timeoutId = null;
-      }
+      return;
     }
 
-    updateStats() {
-      const last = this.reactionTimes[this.reactionTimes.length - 1];
-      const avg = Math.round(this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length);
+    // 2. Gloo Wall Reflex Mode Click Handler
+    if (this.mode === 'gloo') {
+      if (this.waitingForTrigger) {
+        this.playFailBuzz();
+        this.waitingForTrigger = false;
+        if (this.timeoutId) clearTimeout(this.timeoutId);
 
-      this.statsEl.innerHTML = `
-        <div class="flex items-center justify-between text-sm">
-          <span class="text-slate-300">Round ${this.round}/${this.maxRounds}: <strong class="text-primary">${last} ms</strong></span>
-          <span class="text-slate-400">Current Average: <strong class="text-amber-400">${avg} ms</strong></span>
-        </div>
-      `;
-    }
-
-    endSession() {
-      this.isRunning = false;
-      this.removeTarget();
-      const avg = Math.round(this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length);
-      const best = Math.min(...this.reactionTimes);
-
-      let rank = "";
-      let badgeColor = "";
-      let advice = "";
-
-      if (avg < 190) {
-        rank = "Tier-1 Pro Phenom (God Reflexes)";
-        badgeColor = "text-emerald-400 border-emerald-400 bg-emerald-950/40";
-        advice = "Your motor reaction speed is in the top 1% of competitive esports athletes. Focus 80% of training on macro and IGL positioning.";
-      } else if (avg <= 230) {
-        rank = "Scrim Demon (Tournament Ready)";
-        badgeColor = "text-primary border-primary bg-cyan-950/40";
-        advice = "Excellent reaction speed suitable for Tier-2 & Tier-1 LAN tournaments. Perfect for Entry Fraggers and Fast Gloo Wall rushers.";
-      } else if (avg <= 280) {
-        rank = "Contender (Solid Grassroots)";
-        badgeColor = "text-amber-400 border-amber-400 bg-amber-950/40";
-        advice = "Standard competitive speed. Implement 15 minutes of daily crosshair drills to shave off 30-40 milliseconds.";
-      } else {
-        rank = "Underdog Rookie (Pre-Warmup State)";
-        badgeColor = "text-rose-400 border-rose-400 bg-rose-950/40";
-        advice = "Nerve endings are cold or device touch response is lagging. Perform wrist stretches, hydrate, and run the 15-minute warmup routine.";
-      }
-
-      this.statsEl.innerHTML = `
-        <div class="cyber-panel p-4 border border-cyan-500/30 rounded-lg animate-fade-in mt-2">
-          <div class="flex items-center justify-between mb-2">
-            <span class="cyber-badge ${badgeColor} border px-2 py-0.5">${rank}</span>
-            <span class="text-xs text-slate-400 font-mono">Best: <span class="text-emerald-400 font-bold">${best} ms</span></span>
+        this.arena.innerHTML = `
+          <div class="text-center p-6 animate-shake">
+            <div class="text-5xl mb-2">❌</div>
+            <h3 class="text-2xl font-heading font-black text-rose-400 uppercase tracking-wider">PREMATURE GLOO WALL!</h3>
+            <p class="text-xs text-slate-300 mt-1 font-mono">You wasted a gloo wall before the enemy even fired! Wait for the shot.</p>
           </div>
-          <div class="text-2xl font-heading text-white font-bold my-1">${avg} <span class="text-xs font-normal text-slate-400">ms avg</span></div>
-          <p class="text-xs text-slate-300 leading-relaxed">${advice}</p>
-          <button id="retryReflexBtn" class="mt-3 w-full py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-sub font-bold uppercase rounded tracking-wider text-xs hover:opacity-90">
-            Run Test Again (5 Rounds)
-          </button>
-        </div>
-      `;
+        `;
+        setTimeout(() => {
+          if (this.isRunning) this.startGlooRound();
+        }, 1400);
+        return;
+      }
 
-      document.getElementById('retryReflexBtn')?.addEventListener('click', () => this.startTest());
+      if (this.triggerActive) {
+        const rt = Math.round(performance.now() - this.spawnTime);
+        this.triggerActive = false;
+        this.reactionTimes.push(rt);
+
+        if (rt <= 210) {
+          this.playGlooBlock();
+          this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-emerald-950/80 border-2 border-emerald-400 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
+          this.arena.innerHTML = `
+            <div class="text-center p-6 animate-fade-in">
+              <div class="text-5xl mb-2">🛡️</div>
+              <div class="text-3xl sm:text-4xl font-heading font-black text-emerald-300 uppercase tracking-wider">SNIPER BULLET BLOCKED!</div>
+              <div class="text-2xl font-mono font-bold text-white mt-2">${rt} ms</div>
+              <p class="text-xs text-emerald-200 mt-1 max-w-sm mx-auto font-sub font-bold uppercase">Flawless 0.15s Gloo Wall reflex! You took 0 damage and saved your life.</p>
+            </div>
+          `;
+        } else {
+          this.playFailBuzz();
+          this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none bg-rose-950/80 border-2 border-rose-500 shadow-[0_0_50px_rgba(244,63,94,0.4)]';
+          this.arena.innerHTML = `
+            <div class="text-center p-6 animate-shake">
+              <div class="text-5xl mb-2">💥</div>
+              <div class="text-3xl sm:text-4xl font-heading font-black text-rose-400 uppercase tracking-wider">HEADSHOT TAKEN (-180 HP)!</div>
+              <div class="text-2xl font-mono font-bold text-white mt-2">${rt} ms</div>
+              <p class="text-xs text-rose-200 mt-1 max-w-sm mx-auto font-sub font-bold uppercase">Too slow! Fast gloo walls require sub-210ms reflex to survive Tier-1 snipers.</p>
+            </div>
+          `;
+        }
+
+        setTimeout(() => {
+          if (this.round >= this.maxRounds) {
+            this.endSession();
+          } else {
+            this.startGlooRound();
+          }
+        }, 1300);
+      }
+      return;
+    }
+
+    // 3. Targets Flicking Click Handler
+    if (this.mode === 'targets') {
+      const targetEl = e.target.closest('.aim-target');
+      if (targetEl) {
+        const rt = Math.round(performance.now() - this.spawnTime);
+        this.reactionTimes.push(rt);
+        this.hits++;
+        this.playSuccessChime();
+        targetEl.remove();
+        this.activeTargets = [];
+
+        if (this.round >= this.maxRounds) {
+          this.endSession();
+        } else {
+          this.startTargetsRound();
+        }
+      } else {
+        // Clicked background arena (Miss)
+        this.misses++;
+        this.playFailBuzz();
+        if (this.statsEl) {
+          this.statsEl.innerHTML = `
+            <div class="flex items-center justify-between text-xs font-mono">
+              <span class="text-cyan-400">🎯 Target ${this.round}/${this.maxRounds}</span>
+              <span class="text-slate-400">Hits: <strong class="text-emerald-400">${this.hits}</strong> | Misses: <strong class="text-rose-400">${this.misses}</strong></span>
+            </div>
+          `;
+        }
+      }
+      return;
+    }
+
+    // 4. Blitz Click Handler
+    if (this.mode === 'blitz') {
+      const targetEl = e.target.closest('.aim-target');
+      if (targetEl) {
+        const spawnT = parseFloat(targetEl.getAttribute('data-spawn-time') || performance.now().toString());
+        this.reactionTimes.push(Math.round(performance.now() - spawnT));
+        this.hits++;
+        this.playSuccessChime();
+        targetEl.remove();
+        this.activeTargets = this.activeTargets.filter(t => t !== targetEl);
+        this.spawnBlitzTarget();
+        this.updateBlitzStats();
+      } else {
+        this.misses++;
+        this.playFailBuzz();
+        this.updateBlitzStats();
+      }
     }
   }
+
+  getSpeedRating(ms) {
+    if (ms < 180) return '⚡ Tier-1 Pro Phenom (God Reflexes)';
+    if (ms <= 215) return '🛡️ Scrim Demon (Tournament Ready)';
+    if (ms <= 255) return '🎯 Contender (Solid Grassroots)';
+    return '⏱️ Underdog Rookie (Warmup Needed)';
+  }
+
+  // --- SESSION COMPLETION ---
+  endSession() {
+    this.isRunning = false;
+    this.clearAllTimeouts();
+
+    const avg = this.reactionTimes.length ? Math.round(this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length) : 250;
+    const best = this.reactionTimes.length ? Math.min(...this.reactionTimes) : avg;
+
+    // Update Personal Records
+    if (this.mode === 'visual' || this.mode === 'audio') {
+      if (!this.records.bestVisual || best < this.records.bestVisual) {
+        this.records.bestVisual = best;
+      }
+    } else if (this.mode === 'gloo') {
+      if (!this.records.bestGloo || best < this.records.bestGloo) {
+        this.records.bestGloo = best;
+      }
+    } else if (this.mode === 'targets') {
+      const totalTaps = this.hits + this.misses;
+      const acc = totalTaps > 0 ? Math.round((this.hits / totalTaps) * 100) : 100;
+      if (!this.records.bestAccuracy || acc > this.records.bestAccuracy) {
+        this.records.bestAccuracy = acc;
+      }
+    }
+
+    // Calculate Overall Reflex Athlete Tier
+    const currentBest = this.records.bestVisual || avg;
+    if (currentBest < 185) this.records.tier = 'Tier-1 God Reflexes 👑';
+    else if (currentBest <= 220) this.records.tier = 'Tournament LAN Ready ⚡';
+    else if (currentBest <= 260) this.records.tier = 'Competitive Scrim Pro 🎯';
+    else this.records.tier = 'Grassroots Contender 🛡️';
+
+    this.saveRecords();
+
+    // Render Victory / Diagnostic Card inside Arena
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center p-6 bg-slate-950 border border-cyan-500/50 shadow-2xl';
+    this.arena.innerHTML = `
+      <div class="text-center max-w-lg mx-auto animate-fade-in">
+        <div class="inline-block px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-400 text-cyan-300 text-xs font-sub font-bold uppercase tracking-wider mb-2">
+          ${this.getModeName()} &bull; Session Results
+        </div>
+        <div class="text-4xl sm:text-5xl font-heading font-black text-white my-1">
+          ${avg} <span class="text-sm font-normal text-slate-400 font-mono">ms avg</span>
+        </div>
+        <div class="text-sm font-heading font-bold text-amber-400 mb-3">${this.getSpeedRating(avg)}</div>
+
+        <!-- Round-by-round pills -->
+        <div class="flex items-center justify-center gap-1.5 mb-4 flex-wrap">
+          ${this.reactionTimes.map((t, idx) => `
+            <div class="px-2.5 py-1 rounded-lg ${t < 200 ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' : t < 240 ? 'bg-cyan-950/80 border-cyan-500/50 text-cyan-300' : 'bg-slate-900 border-slate-700 text-slate-300'} border text-[11px] font-mono">
+              R${idx + 1}: <strong>${t}ms</strong>
+            </div>
+          `).join('')}
+        </div>
+
+        <p class="text-xs text-slate-300 leading-relaxed max-w-md mx-auto mb-4">
+          ${this.getProAdvice(avg)}
+        </p>
+
+        <div class="flex items-center justify-center gap-3">
+          <button id="retryActiveTestBtn" class="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-black font-sub font-bold text-xs uppercase rounded-xl tracking-wider shadow-lg">
+            ⚡ Run Test Again
+          </button>
+          <button id="nextModeTestBtn" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs uppercase rounded-xl">
+            Switch Mode
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('retryActiveTestBtn')?.addEventListener('click', () => this.startTest());
+    document.getElementById('nextModeTestBtn')?.addEventListener('click', () => {
+      const modes = ['visual', 'gloo', 'targets', 'audio', 'blitz'];
+      const nextIdx = (modes.indexOf(this.mode) + 1) % modes.length;
+      this.setMode(modes[nextIdx]);
+    });
+  }
+
+  endBlitzSession() {
+    this.isRunning = false;
+    this.clearAllTimeouts();
+
+    const totalTaps = this.hits + this.misses;
+    const acc = totalTaps > 0 ? Math.round((this.hits / totalTaps) * 100) : 100;
+    const kps = (this.hits / 30).toFixed(1);
+
+    if (!this.records.bestBlitz || this.hits > this.records.bestBlitz) {
+      this.records.bestBlitz = this.hits;
+    }
+    this.saveRecords();
+
+    this.arena.className = 'aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center p-6 bg-slate-950 border border-emerald-500/50 shadow-2xl';
+    this.arena.innerHTML = `
+      <div class="text-center max-w-lg mx-auto animate-fade-in">
+        <div class="inline-block px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-400 text-emerald-300 text-xs font-sub font-bold uppercase tracking-wider mb-2">
+          ⏱️ 30s Rapid Blitz Results
+        </div>
+        <div class="text-5xl font-heading font-black text-white my-1">
+          ${this.hits} <span class="text-sm font-normal text-slate-400 font-mono">Targets Hit</span>
+        </div>
+        <div class="flex items-center justify-center gap-4 text-xs font-mono text-slate-300 my-2">
+          <span>Speed: <strong class="text-emerald-400 text-sm">${kps} kills/sec</strong></span>
+          <span>&bull;</span>
+          <span>Accuracy: <strong class="text-cyan-400 text-sm">${acc}%</strong></span>
+          <span>&bull;</span>
+          <span>Misses: <strong class="text-rose-400 text-sm">${this.misses}</strong></span>
+        </div>
+        <p class="text-xs text-slate-300 mt-2 max-w-md mx-auto leading-relaxed">
+          ${this.hits >= 35 ? '🔥 Godlike flick speed! You are performing at Tier-1 FFWS/BGIS tournament fragging pace.' : 'Solid endurance! Practice keeping your eyes fixed on crosshair center to shave down transition time.'}
+        </p>
+        <button id="retryActiveTestBtn" class="mt-4 px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 text-black font-sub font-bold text-xs uppercase rounded-xl tracking-wider shadow-lg">
+          ⚡ Retry Blitz Challenge
+        </button>
+      </div>
+    `;
+
+    document.getElementById('retryActiveTestBtn')?.addEventListener('click', () => this.startTest());
+  }
+
+  getProAdvice(avg) {
+    if (avg < 185) return 'Your neurological motor reaction speed is in the top 1% of global competitive athletes. Focus 80% of your training on macro IGL calls and positioning.';
+    if (avg <= 220) return 'Tournament-ready reaction speed! Ideal for Entry Fraggers and 0.15s Fast Gloo Wall rushers. Maintain with 5-minute pre-scrim hand warmups.';
+    if (avg <= 260) return 'Solid grassroots competitive speed. Shave off 25-35 milliseconds by turning on 120Hz touch sampling rate and using thumb sleeves.';
+    return 'Your nervous system or device touch polling is cold. Wash hands in warm water, perform finger extensor glides, and verify phone touch boost settings.';
+  }
+}
 
   // ---------------------------------------------------------------------------
   // FREE FIRE ROSTER ARSENAL (39 TOURNAMENT CHARACTERS)
@@ -11572,47 +12367,319 @@ ${drillsText}`;
       `;
     }
 
-    // --- REFLEX TAB ---
+    // --- AIM & REACTION SPEED GYM TAB ---
     renderReflexTab(container) {
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
-          <div class="cyber-panel p-5 rounded-xl border border-cyan-500/30">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+
+          <!-- Main Gym Header -->
+          <div class="cyber-panel p-5 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-[#0a1829] to-slate-950 shadow-xl">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <div class="flex items-center gap-2">
-                  <span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
-                  <h3 class="text-base font-heading font-bold text-white uppercase tracking-wider">Aim & Reaction Speed Gym</h3>
+                  <span class="w-3 h-3 rounded-full bg-cyan-400 animate-ping"></span>
+                  <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
+                    Aim & Reaction Speed Gym &bull; Pro Neural Lab
+                  </h3>
+                  <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px]">
+                    v3.2 Esports
+                  </span>
                 </div>
-                <p class="text-xs text-slate-400 mt-0.5">Measures your motor reaction latency in milliseconds (ms). Fast gloo walls require sub-220ms.</p>
+                <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                  Millisecond-precision motor latency testing. Master raw neural reaction, the <strong>0.15s Fast Gloo Wall Reflex</strong>, precision headshot flicking, and auditory stimulus to dominate Tier-1 LAN tournaments.
+                </p>
               </div>
-              <button id="startReflexBtn" class="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider">
-                Start Reaction Test (5 Rounds)
+
+              <!-- Quick Audio Indicator -->
+              <div class="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono">
+                <span>🔊 Web Audio:</span>
+                <span class="text-emerald-400 font-bold">Active (Synthesized)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Personal Records KPI HUD -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="cyber-panel p-3.5 rounded-xl border border-cyan-500/30 bg-slate-950/80">
+              <div class="text-[10px] font-sub uppercase tracking-wider text-slate-400">⚡ Best Pure Reflex</div>
+              <div id="kpiBestVisual" class="text-2xl font-heading font-bold text-cyan-400 my-0.5">---</div>
+              <div class="text-[10px] text-slate-500">Human Benchmark (Red/Green)</div>
+            </div>
+
+            <div class="cyber-panel p-3.5 rounded-xl border border-amber-500/30 bg-slate-950/80">
+              <div class="text-[10px] font-sub uppercase tracking-wider text-slate-400">🛡️ Fastest Gloo Wall</div>
+              <div id="kpiBestGloo" class="text-2xl font-heading font-bold text-amber-400 my-0.5">---</div>
+              <div class="text-[10px] text-slate-500">Sub-200ms Sniper Block</div>
+            </div>
+
+            <div class="cyber-panel p-3.5 rounded-xl border border-rose-500/30 bg-slate-950/80">
+              <div class="text-[10px] font-sub uppercase tracking-wider text-slate-400">🎯 Flick Accuracy</div>
+              <div id="kpiBestAccuracy" class="text-2xl font-heading font-bold text-rose-400 my-0.5">---</div>
+              <div class="text-[10px] text-slate-500">Headshot Arena Consistency</div>
+            </div>
+
+            <div class="cyber-panel p-3.5 rounded-xl border border-emerald-500/30 bg-slate-950/80 flex flex-col justify-between">
+              <div>
+                <div class="text-[10px] font-sub uppercase tracking-wider text-slate-400">👑 Reflex Athlete Tier</div>
+                <div id="kpiReflexTier" class="text-xs font-heading font-bold text-emerald-400 my-1 uppercase tracking-wider">Unranked</div>
+              </div>
+              <button id="resetReflexRecordsBtn" class="text-[9px] font-mono text-slate-500 hover:text-rose-400 text-left underline">
+                Reset Records
+              </button>
+            </div>
+          </div>
+
+          <!-- Mode Selector Toolbar -->
+          <div class="cyber-panel p-2.5 rounded-xl border border-slate-800 bg-slate-950/90 flex flex-wrap items-center justify-between gap-2.5">
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto">
+              <button class="reflex-mode-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all bg-cyan-500/20 text-cyan-300 border-cyan-400 shadow-[0_0_15px_rgba(0,240,255,0.2)] whitespace-nowrap" data-mode="visual">
+                ⚡ 1. Pure Neural (Red/Green)
+              </button>
+              <button class="reflex-mode-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600 whitespace-nowrap" data-mode="gloo">
+                🛡️ 2. 0.15s Fast Gloo Wall
+              </button>
+              <button class="reflex-mode-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600 whitespace-nowrap" data-mode="targets">
+                🎯 3. Precision Headshots
+              </button>
+              <button class="reflex-mode-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600 whitespace-nowrap" data-mode="audio">
+                🔊 4. Auditory Reaction
+              </button>
+              <button class="reflex-mode-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider border transition-all bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600 whitespace-nowrap" data-mode="blitz">
+                ⏱️ 5. 30s Rapid Blitz
               </button>
             </div>
 
-            <div id="aimArenaBox" class="aim-arena w-full h-80 rounded-xl relative flex items-center justify-center">
-              <div id="arenaPlaceholder" class="text-center pointer-events-none p-4">
-                <div class="text-sm font-sub uppercase text-slate-500 tracking-wider">Target Area Ready</div>
-                <div class="text-xs text-slate-600 mt-1">Click "Start Reaction Test" above, then tap glowing targets immediately!</div>
-              </div>
+            <!-- Start / Control Button -->
+            <button id="startReflexBtn" class="w-full sm:w-auto px-6 py-2 bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-black uppercase rounded-lg text-xs tracking-wider shadow-lg shadow-cyan-950/40">
+              ⚡ Start Test (5 Rounds)
+            </button>
+          </div>
+
+          <!-- Interactive Reaction Arena Box -->
+          <div class="cyber-panel p-3 rounded-2xl border border-cyan-500/30 bg-slate-950 relative shadow-2xl">
+            <div id="aimArenaBox" class="aim-arena w-full min-h-[360px] rounded-2xl relative flex flex-col items-center justify-center cursor-pointer select-none border border-slate-800">
+              <!-- Rendered dynamically by ReflexTrainer -->
             </div>
 
-            <div id="reflexStatsBox" class="mt-4 p-3 bg-slate-900/90 rounded-lg border border-slate-800">
-              <div class="text-xs text-slate-400">Waiting for activation...</div>
+            <!-- Real-time Status / Telemetry Box -->
+            <div id="reflexStatsBox" class="mt-3 p-3 bg-slate-900/90 rounded-xl border border-slate-800">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400">
+                <span>Status: Arena Ready &bull; Select a mode above and click <strong>"Start Test"</strong></span>
+                <span class="text-cyan-400">Spacebar / Tap Enabled</span>
+              </div>
             </div>
           </div>
+
+          <!-- TIER-1 ESPORTS LATENCY BENCHMARK LADDER -->
+          <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#16120b] to-slate-950">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+              <h4 class="text-base font-heading font-bold text-white uppercase tracking-wider">
+                Official Tier-1 Esports Latency Benchmark Ladder
+              </h4>
+            </div>
+            <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+              In competitive Free Fire and BGMI, millisecond reaction speed dictates who wins 50-50 entry duels and whether gloo walls deploy before high-caliber sniper bullets hit your head:
+            </p>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr class="border-b border-slate-800 text-[10px] font-sub uppercase text-slate-400 bg-slate-900/60">
+                    <th class="p-2.5">Latency Bracket</th>
+                    <th class="p-2.5">Competitive Tier</th>
+                    <th class="p-2.5">Reference Esports Athletes</th>
+                    <th class="p-2.5">Combat Advantage Unlocked</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-mono text-[11px]">
+                  <tr class="hover:bg-amber-500/5 transition-colors">
+                    <td class="p-2.5 text-amber-400 font-bold">⚡ Sub-180 ms</td>
+                    <td class="p-2.5"><span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">God-Tier Phenom</span></td>
+                    <td class="p-2.5 text-white">TheCruz (EVOS), Jonathan (GodLike), Spower</td>
+                    <td class="p-2.5 text-slate-300">0.15s double-gloo wall box, point-blank shotgun flick headshots, dodges M82B anti-material fire.</td>
+                  </tr>
+                  <tr class="hover:bg-emerald-500/5 transition-colors">
+                    <td class="p-2.5 text-emerald-400 font-bold">⚡ 180 - 215 ms</td>
+                    <td class="p-2.5"><span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">LAN Tournament Ready</span></td>
+                    <td class="p-2.5 text-white">Bops, Dewa, ClutchGod, Manya, FozyAjay</td>
+                    <td class="p-2.5 text-slate-300">Fast entry-fragger pacing, trades knocks in under 0.3s, 1.5s cooked grenade baiting.</td>
+                  </tr>
+                  <tr class="hover:bg-cyan-500/5 transition-colors">
+                    <td class="p-2.5 text-cyan-400 font-bold">⚡ 215 - 255 ms</td>
+                    <td class="p-2.5"><span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold">Competitive Scrim Tier</span></td>
+                    <td class="p-2.5 text-white">Tier-2 / Tier-3 Discord Scrim Grinders</td>
+                    <td class="p-2.5 text-slate-300">Solid DMR sniper holding, compound anchor, secondary re-fragging.</td>
+                  </tr>
+                  <tr class="hover:bg-slate-500/5 transition-colors">
+                    <td class="p-2.5 text-slate-400 font-bold">⚡ 255 - 295 ms</td>
+                    <td class="p-2.5"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">Grassroots Baseline</span></td>
+                    <td class="p-2.5 text-slate-400">Average Human Baseline</td>
+                    <td class="p-2.5 text-slate-400">Susceptible to being wiped by sub-200ms entry rushers. Requires hand warmup routine.</td>
+                  </tr>
+                  <tr class="hover:bg-rose-500/5 transition-colors">
+                    <td class="p-2.5 text-rose-400 font-bold">⚡ 295 ms+</td>
+                    <td class="p-2.5"><span class="px-2 py-0.5 rounded bg-rose-950/60 text-rose-300">Hardware Lag / Cold</span></td>
+                    <td class="p-2.5 text-slate-400">Pre-Warmup / 60Hz Input Bottleneck</td>
+                    <td class="p-2.5 text-rose-300">Check touchscreen sampling rate and wash hands in warm water immediately.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TOUCHSCREEN HARDWARE & INPUT LAG CALIBRATION LAB -->
+          <div class="cyber-panel p-5 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-[#0d1728] to-slate-950">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-xl">⚙️</span>
+              <h4 class="text-base font-heading font-bold text-white uppercase tracking-wider">
+                Touchscreen Hardware & Input Lag Calibration Lab
+              </h4>
+            </div>
+            <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+              Your true in-game reaction latency equals <strong>Neural Latency + Device Touch Input Lag</strong>. Shave off 30–60ms by tuning your hardware settings:
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <!-- Card 1 -->
+              <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div class="text-cyan-400 font-heading font-bold text-xs uppercase mb-1">1. Touch Sampling Rate</div>
+                <div class="text-xl font-heading font-black text-white my-1">240Hz+ <span class="text-xs font-normal text-slate-400">(4.1ms)</span></div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  60Hz touch sampling takes 16.6ms to register a tap. Enabling 240Hz/360Hz touch polling in Game Booster shaves off <strong>12.5ms</strong> instantly.
+                </p>
+              </div>
+
+              <!-- Card 2 -->
+              <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div class="text-amber-400 font-heading font-bold text-xs uppercase mb-1">2. Carbon Thumb Sleeves</div>
+                <div class="text-xl font-heading font-black text-white my-1">&mu; &le; 0.05 <span class="text-xs font-normal text-slate-400">Friction</span></div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Finger sweat increases static friction by 300%. Carbon fiber thumb sleeves eliminate drag resistance, ensuring smooth 0.15s gloo swipes.
+                </p>
+              </div>
+
+              <!-- Card 3 -->
+              <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div class="text-rose-400 font-heading font-bold text-xs uppercase mb-1">3. Screen Protector Glass</div>
+                <div class="text-xl font-heading font-black text-white my-1">0.2mm <span class="text-xs font-normal text-slate-400">High-Conduct</span></div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  Cheap thick tempered glass attenuates screen capacitance. Use 0.2mm ultra-thin high-conductance glass or matte hydrogel film.
+                </p>
+              </div>
+
+              <!-- Card 4 -->
+              <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div class="text-emerald-400 font-heading font-bold text-xs uppercase mb-1">4. Phone OS Tuning</div>
+                <div class="text-xl font-heading font-black text-white my-1">MAX <span class="text-xs font-normal text-slate-400">Pointer Speed</span></div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                  In Android settings, set Pointer Speed to Maximum, Touch & Hold delay to Short (0.5s), and disable Battery Saver throttling.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- PRO 5-MINUTE PHYSIOLOGICAL HAND WARMUP PROTOCOL -->
+          <div class="cyber-panel p-5 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#180f26] to-slate-950">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-xl">✋</span>
+              <h4 class="text-base font-heading font-bold text-white uppercase tracking-wider">
+                Pro 5-Minute Hand & Reflex Warmup Protocol
+              </h4>
+            </div>
+            <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+              Esports physiotherapists recommend running this 5-minute routine before official tournament lobbies and custom room matches:
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div class="p-3 rounded-xl bg-slate-900/90 border border-purple-500/30">
+                <div class="text-[10px] font-mono font-bold text-purple-400 uppercase">Step 1 (30s)</div>
+                <div class="text-xs font-heading font-bold text-white mt-1 mb-1">🕷️ Spider Taps</div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                  Tap each finger independently in rapid sequence on a flat surface to prime motor cortex synapses for claw grip.
+                </p>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-900/90 border border-purple-500/30">
+                <div class="text-[10px] font-mono font-bold text-purple-400 uppercase">Step 2 (45s)</div>
+                <div class="text-xs font-heading font-bold text-white mt-1 mb-1">🔄 Wrist Extensors</div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                  Extend arm forward, gently pull fingers backward for 15s each hand to release carpal tunnel tension.
+                </p>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-900/90 border border-purple-500/30">
+                <div class="text-[10px] font-mono font-bold text-purple-400 uppercase">Step 3 (60s)</div>
+                <div class="text-xs font-heading font-bold text-white mt-1 mb-1">🌡️ Warm Water Rinse</div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                  Skin temperatures below 20°C decrease nerve velocity by <strong>25ms</strong>. Rinse hands with warm water before scrims.
+                </p>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-900/90 border border-purple-500/30">
+                <div class="text-[10px] font-mono font-bold text-purple-400 uppercase">Step 4 (30s)</div>
+                <div class="text-xs font-heading font-bold text-white mt-1 mb-1">👁️ 20-20-20 Shift</div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                  Alternate focus between phone screen and a distant wall (20 ft) every 3 seconds to warm up ciliary eye muscles.
+                </p>
+              </div>
+
+              <div class="p-3 rounded-xl bg-slate-900/90 border border-purple-500/30">
+                <div class="text-[10px] font-mono font-bold text-purple-400 uppercase">Step 5 (45s)</div>
+                <div class="text-xs font-heading font-bold text-white mt-1 mb-1">🫁 Box Breathing</div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                  Inhale 4s &bull; Hold 4s &bull; Exhale 4s. Lowers resting heart rate and eliminates adrenaline micro-tremors in 1v1 clutch duels.
+                </p>
+              </div>
+            </div>
+          </div>
+
         </div>
       `;
 
+      // Initialize Reflex Trainer
       this.reflexTrainer = new ReflexTrainer('aimArenaBox', 'reflexStatsBox');
-      document.getElementById('startReflexBtn')?.addEventListener('click', () => {
-        document.getElementById('arenaPlaceholder')?.classList.add('hidden');
-        this.reflexTrainer.startTest();
+      this.reflexTrainer.renderModeArena();
+
+      // Bind Mode Selection Buttons
+      container.querySelectorAll('.reflex-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-mode');
+          if (mode && this.reflexTrainer) {
+            this.reflexTrainer.setMode(mode);
+            const startBtn = document.getElementById('startReflexBtn');
+            if (startBtn) {
+              if (mode === 'targets') startBtn.textContent = '🎯 Start Headshot Flick (10 Targets)';
+              else if (mode === 'blitz') startBtn.textContent = '⏱️ Start 30s Rapid Blitz';
+              else if (mode === 'gloo') startBtn.textContent = '🛡️ Start Gloo Reflex (5 Rounds)';
+              else if (mode === 'audio') startBtn.textContent = '🔊 Start Audio Reaction (5 Rounds)';
+              else startBtn.textContent = '⚡ Start Neural Test (5 Rounds)';
+            }
+          }
+        });
+      });
+
+      // Bind Start Test Button
+      const startBtn = document.getElementById('startReflexBtn');
+      if (startBtn) {
+        startBtn.addEventListener('click', () => {
+          if (this.reflexTrainer) {
+            this.reflexTrainer.startTest();
+          }
+        });
+      }
+
+      // Bind Reset Records Button
+      document.getElementById('resetReflexRecordsBtn')?.addEventListener('click', () => {
+        if (confirm('Reset all saved personal reflex records and tiers?')) {
+          if (this.reflexTrainer) {
+            this.reflexTrainer.resetRecords();
+          }
+        }
       });
     }
 
-    // --- TOURNAMENTS & GLOBAL SLOTS SECTION ---
-        // --- TOURNAMENTS & GLOBAL SLOTS TAB (OFFICIAL 24-SLOT 2026 SYSTEM, FFMIC 2025-2026 & NEPAL) ---
+    // --- TOURNAMENTS & GLOBAL SLOTS TAB (OFFICIAL 24-SLOT 2026 SYSTEM, FFMIC 2025-2026 & NEPAL) ---
     renderTournamentsTab(container) {
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
