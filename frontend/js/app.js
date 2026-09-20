@@ -5950,35 +5950,337 @@ this.ffSelectedLoadout = {
     // --- ACADEMY TAB ---
     renderAcademyTab(container) {
       const data = GAMES_DATA[this.activeGame] || GAMES_DATA.bgmi;
+      if (!this.selectedRoleDetail) {
+        this.selectedRoleDetail = 'ff-rusher';
+      }
+      if (!this.squadFormation) {
+        this.squadFormation = 'split_2_2';
+      }
+
+      // Role thematic color mappings & icons
+      const roleThemes = {
+        'ff-rusher': { color: '#f43f5e', border: 'border-rose-500/50', bg: 'from-rose-950/30', badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', icon: '⚡', weapons: 'M1887 Shotgun • MP40', combo: 'Tatsuya + Kelly + Hayato', stat1: 'Entry Knock: 92%', stat2: 'Gloo Speed: 0.15s' },
+        'ff-igl': { color: '#00f0ff', border: 'border-cyan-500/50', bg: 'from-cyan-950/30', badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', icon: '⚔️', weapons: 'Groza • SCAR Marksman', combo: 'Homer + Moco + Maro', stat1: 'Zone IQ: 96%', stat2: 'Split Accuracy: 92%' },
+        'ff-sniper': { color: '#10b981', border: 'border-emerald-500/50', bg: 'from-emerald-950/30', badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', icon: '🎯', weapons: 'Double M82B Barrett • AWM', combo: 'Rafael + Laura + Iris', stat1: 'Wall Pierce: 100%', stat2: 'Headshot: 78%' },
+        'ff-support': { color: '#a855f7', border: 'border-purple-500/50', bg: 'from-purple-950/30', badge: 'bg-purple-500/20 text-purple-300 border-purple-500/40', icon: '🛡️', weapons: 'M79 Launcher • Bizon SMG', combo: 'Dimitri + Thiva + Nairi', stat1: 'Squad Rescue: +45%', stat2: 'Utility IQ: 99%' }
+      };
+
+      const activeRoleObj = data.roles.find(r => r.id === this.selectedRoleDetail) || data.roles[0];
+      const activeRoleTheme = roleThemes[activeRoleObj.id] || roleThemes['ff-rusher'];
 
       container.innerHTML = `
         <div class="space-y-8 animate-fade-in">
-          <!-- Roles -->
-          <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${data.accentColor}"></span>
-              <h3 class="text-lg font-heading uppercase text-white font-bold tracking-wider">Esports Roster Specializations (${data.title.split(' ')[0]})</h3>
+          
+          <!-- 1. LIVE TOURNAMENT BROADCAST TICKER -->
+          <div class="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-red-950/40 via-slate-900/90 to-cyan-950/40 border border-slate-800 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 overflow-hidden">
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+              <span class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-mono font-bold uppercase tracking-wider">
+                LIVE MATCH FEED 🔴
+              </span>
             </div>
-            <p class="text-xs text-slate-400">Competitive rosters fail when duties overlap. Master your exact responsibilities.</p>
+            <div class="w-full overflow-hidden text-xs text-slate-300 font-sub tracking-wider flex items-center gap-6 animate-pulse">
+              <span>🏆 <strong>Eagle Esports Scrims:</strong> Daily Customs Slot 2 starting at 6:00 PM (1-click template in Scrims Tab)</span>
+              <span class="text-slate-600">•</span>
+              <span>🎙️ <strong>Squad Tactical Lounge:</strong> 4 Seats Active &bull; Instant Radio Check ready</span>
+              <span class="text-slate-600">•</span>
+              <span>🎒 <strong>Pro Inventory:</strong> Drop 80 AR rounds for 2x Frag Grenades before Phase 4</span>
+              <span class="text-slate-600">•</span>
+              <span>🧠 <strong>1v1 Clutch IQ:</strong> 84% win-rate verified for 45° Gloo Slide Peek</span>
+            </div>
+          </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-              ${data.roles.map(r => `
-                <div class="cyber-panel p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
-                  <div>
-                    <div class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-[10px] mb-2">${r.tagline}</div>
-                    <h4 class="text-base font-heading font-bold text-white mb-1">${r.name}</h4>
-                    <p class="text-xs text-slate-400 leading-relaxed mb-3">${r.summary}</p>
-                    <div class="text-[11px] font-sub uppercase font-bold text-slate-300 mb-1">Core Duties:</div>
-                    <ul class="space-y-1 text-[11px] text-slate-400 mb-4 list-disc list-inside">
-                      ${r.coreDuties.map(d => `<li>${d}</li>`).join('')}
-                    </ul>
+          <!-- 2. SQUAD COMMAND COCKPIT (4 Interactive Tiles) -->
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#00f0ff]"></span>
+                <h3 class="text-sm font-heading font-black text-white uppercase tracking-wider">
+                  Squad Command Cockpit
+                </h3>
+              </div>
+              <span class="text-[10px] font-mono text-cyan-400">1-Click Tournament Actions ⚡</span>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              
+              <!-- Tile 1: Voice Room -->
+              <div class="academy-cockpit-tile p-4 rounded-2xl bg-gradient-to-br from-purple-950/40 via-slate-900 to-slate-950 border border-purple-500/40 hover:border-purple-400 cursor-pointer transition-all hover:scale-[1.02] group shadow-lg" data-action="open-voice">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-2xl p-2 rounded-xl bg-purple-950/80 border border-purple-500/50 group-hover:scale-110 transition-transform">🎙️</span>
+                  <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[9px] font-mono font-bold">ONLINE</span>
+                </div>
+                <div class="text-sm font-heading font-black text-white group-hover:text-purple-300">Squad Voice Lounge</div>
+                <div class="text-[11px] text-slate-400 mt-1">4 Seats, Mic Mute, Deafen & Quick Radio Pings</div>
+                <div class="mt-3 flex items-center gap-1 text-[10px] font-sub font-bold text-purple-400 uppercase">
+                  <span>Enter Voice Room</span>
+                  <span>➔</span>
+                </div>
+              </div>
+
+              <!-- Tile 2: Scrim Scorekeeper -->
+              <div class="academy-cockpit-tile p-4 rounded-2xl bg-gradient-to-br from-rose-950/40 via-slate-900 to-slate-950 border border-rose-500/40 hover:border-rose-400 cursor-pointer transition-all hover:scale-[1.02] group shadow-lg" data-action="open-scrims">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-2xl p-2 rounded-xl bg-rose-950/80 border border-rose-500/50 group-hover:scale-110 transition-transform">🧮</span>
+                  <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[9px] font-mono font-bold">FFWS 12-PT</span>
+                </div>
+                <div class="text-sm font-heading font-black text-white group-hover:text-rose-300">1-Tap Scorekeeper</div>
+                <div class="text-[11px] text-slate-400 mt-1">Auto-calculate Booyah points & export WhatsApp card</div>
+                <div class="mt-3 flex items-center gap-1 text-[10px] font-sub font-bold text-rose-400 uppercase">
+                  <span>Log Scrim Points</span>
+                  <span>➔</span>
+                </div>
+              </div>
+
+              <!-- Tile 3: Tactical Whiteboard -->
+              <div class="academy-cockpit-tile p-4 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-950 border border-cyan-500/40 hover:border-cyan-400 cursor-pointer transition-all hover:scale-[1.02] group shadow-lg" data-action="open-whiteboard">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-2xl p-2 rounded-xl bg-cyan-950/80 border border-cyan-500/50 group-hover:scale-110 transition-transform">🗺️</span>
+                  <span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-mono font-bold">2-2 SPLIT</span>
+                </div>
+                <div class="text-sm font-heading font-black text-white group-hover:text-cyan-300">Tactics Whiteboard</div>
+                <div class="text-[11px] text-slate-400 mt-1">Draw drop routes, pincer rotations & vehicle paths</div>
+                <div class="mt-3 flex items-center gap-1 text-[10px] font-sub font-bold text-cyan-400 uppercase">
+                  <span>Plan Rotations</span>
+                  <span>➔</span>
+                </div>
+              </div>
+
+              <!-- Tile 4: 1v1 Clutch Trainer -->
+              <div class="academy-cockpit-tile p-4 rounded-2xl bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/40 hover:border-amber-400 cursor-pointer transition-all hover:scale-[1.02] group shadow-lg" data-action="open-clutch">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-2xl p-2 rounded-xl bg-amber-950/80 border border-amber-500/50 group-hover:scale-110 transition-transform">🧠</span>
+                  <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-bold">CLUTCH IQ</span>
+                </div>
+                <div class="text-sm font-heading font-black text-white group-hover:text-amber-300">1v1 Clutch Trainer</div>
+                <div class="text-[11px] text-slate-400 mt-1">Simulate 6 high-stakes final circle standoff scenarios</div>
+                <div class="mt-3 flex items-center gap-1 text-[10px] font-sub font-bold text-amber-400 uppercase">
+                  <span>Train Clutch IQ</span>
+                  <span>➔</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 3. REVAMPED ESPORTS ROSTER COMBAT CARDS -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${data.accentColor}"></span>
+                <h3 class="text-lg font-heading uppercase text-white font-black tracking-wider">
+                  Esports Roster Specializations (${data.title.split(' ')[0]})
+                </h3>
+              </div>
+              <span class="text-xs font-mono text-slate-400">Click Any Role to Inspect Tactical Blueprint 👆</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-4 leading-relaxed">
+              Competitive Tier-1 rosters fail when roles overlap. Each player must master their exact weapons, ability timing, and defensive holds.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              ${data.roles.map(r => {
+                const theme = roleThemes[r.id] || roleThemes['ff-rusher'];
+                const isSelected = this.selectedRoleDetail === r.id;
+                return `
+                  <div class="academy-role-card cyber-panel p-5 rounded-3xl border-2 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${isSelected ? theme.border + ' ring-2 ring-offset-2 ring-offset-slate-950 ring-' + theme.color : 'border-slate-800 hover:border-slate-700'} bg-gradient-to-br ${theme.bg} via-slate-900 to-slate-950 shadow-xl"
+                       data-role-id="${r.id}">
+                    
+                    <div>
+                      <!-- Card Header with Avatar & Badge -->
+                      <div class="flex items-center justify-between mb-3 pb-3 border-b border-slate-800/80">
+                        <div class="flex items-center gap-2.5">
+                          <span class="text-3xl p-1.5 rounded-xl bg-slate-950/80 border border-slate-800">${theme.icon}</span>
+                          <div>
+                            <div class="cyber-badge ${theme.badge} text-[9px] uppercase tracking-wider">${r.tagline}</div>
+                            <h4 class="text-base font-heading font-black text-white mt-0.5">${r.name}</h4>
+                          </div>
+                        </div>
+                        ${isSelected ? `
+                          <span class="px-2 py-0.5 rounded-full bg-emerald-500 text-black text-[9px] font-mono font-black uppercase">
+                            ACTIVE
+                          </span>
+                        ` : ''}
+                      </div>
+
+                      <!-- Meta Weapons & Combo Tags -->
+                      <div class="space-y-1.5 mb-3 text-[11px] font-mono">
+                        <div class="p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                          <span class="text-slate-400">Weapon:</span>
+                          <strong class="text-white">${theme.weapons}</strong>
+                        </div>
+                        <div class="p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                          <span class="text-slate-400">Synergy:</span>
+                          <strong class="text-amber-400">${theme.combo}</strong>
+                        </div>
+                      </div>
+
+                      <!-- Core Duties List -->
+                      <div class="text-[11px] font-sub uppercase font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                        <span>🛡️</span>
+                        <span>Core Tactical Responsibilities:</span>
+                      </div>
+                      <ul class="space-y-1.5 text-[11px] text-slate-300 mb-4">
+                        ${r.coreDuties.slice(0, 3).map(d => `
+                          <li class="flex items-start gap-1.5 leading-tight">
+                            <span class="text-cyan-400 font-bold shrink-0">▸</span>
+                            <span>${d}</span>
+                          </li>
+                        `).join('')}
+                      </ul>
+                    </div>
+
+                    <!-- Underdog Secret Box & Select Button -->
+                    <div class="space-y-2 pt-2 border-t border-slate-800/80">
+                      <div class="bg-slate-950/90 p-2.5 rounded-xl border border-amber-500/30 text-[11px] text-amber-300 leading-normal">
+                        <strong>Underdog Secret:</strong> ${r.proTips[0]}
+                      </div>
+                      <button class="w-full py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-sub font-bold text-xs uppercase rounded-xl transition-all flex items-center justify-center gap-1">
+                        <span>${isSelected ? '✓ Blueprint Selected' : 'Inspect Role Blueprint ➔'}</span>
+                      </button>
+                    </div>
+
                   </div>
-                  <div class="bg-slate-950/80 p-2.5 rounded border border-amber-500/30 text-[11px] text-amber-300 leading-normal">
-                    <strong>Underdog Secret:</strong> ${r.proTips[0]}
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- 4. EXPANDED TACTICAL DOSSIER DRAWER (Active Role Deep Dive) -->
+          <div class="cyber-panel p-6 rounded-3xl border-2 ${activeRoleTheme.border} bg-slate-950/95 shadow-2xl space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div class="flex items-center gap-3">
+                <span class="text-4xl p-2 rounded-2xl bg-slate-900 border border-slate-700">${activeRoleTheme.icon}</span>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h4 class="text-xl font-heading font-black text-white uppercase tracking-wider">${activeRoleObj.name} Tactical Dossier</h4>
+                    <span class="px-2.5 py-0.5 rounded-full ${activeRoleTheme.badge} text-[10px] font-mono font-bold">PRO BENCHMARK</span>
+                  </div>
+                  <p class="text-xs text-slate-400 mt-0.5">${activeRoleObj.summary}</p>
+                </div>
+              </div>
+              <button id="equipRoleBtn" class="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-black text-xs uppercase rounded-xl shadow-lg transition-transform hover:scale-105 flex items-center gap-1.5 self-start sm:self-auto" data-role-name="${activeRoleObj.name}">
+                <span>🎖️</span>
+                <span>Set As My Active Duty</span>
+              </button>
+            </div>
+
+            <!-- 3 Feature Columns -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              
+              <!-- Col 1: HUD & Movement Map -->
+              <div class="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2">
+                <div class="font-heading font-bold text-cyan-400 uppercase flex items-center gap-1.5">
+                  <span>📱</span> 4-Finger Claw Calibration
+                </div>
+                <p class="text-slate-300 leading-relaxed">
+                  Position <strong>Left Fire Button</strong> at 100% scale in upper-left for 0.15s sit-down gloo placement while right thumb maintains continuous drag-aim.
+                </p>
+                <div class="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-emerald-400">
+                  ⚡ Recommended General Sens: 98 - 100
+                </div>
+              </div>
+
+              <!-- Col 2: In-Game Voice Comms Callout -->
+              <div class="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2">
+                <div class="font-heading font-bold text-amber-400 uppercase flex items-center gap-1.5">
+                  <span>🎙️</span> Standard Voice Callout Script
+                </div>
+                <p class="text-slate-300 leading-relaxed italic">
+                  "${activeRoleObj.id === 'ff-rusher' ? 'I am taking double-door staircase! Throw cooked frag at second window!' : activeRoleObj.id === 'ff-igl' ? '30 seconds to blue zone! Abandon loot! Vehicle rotation north ridge now!' : activeRoleObj.id === 'ff-sniper' ? 'Enemy knocked behind red gloo! Do not peek, I am wall-banging with M82B!' : 'Dimitri aura activated inside compound! Fall back to reset and trade-knock!'}"
+                </p>
+                <div class="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-cyan-400">
+                  📢 Communication Rule: Max 3 seconds callout
+                </div>
+              </div>
+
+              <!-- Col 3: Squad Synergy Metrics -->
+              <div class="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2">
+                <div class="font-heading font-bold text-purple-400 uppercase flex items-center gap-1.5">
+                  <span>📊</span> Competitive Telemetry
+                </div>
+                <div class="space-y-1.5 font-mono text-[11px]">
+                  <div class="flex justify-between text-slate-300">
+                    <span>Target Metric #1:</span>
+                    <strong class="text-emerald-400">${activeRoleTheme.stat1}</strong>
+                  </div>
+                  <div class="flex justify-between text-slate-300">
+                    <span>Target Metric #2:</span>
+                    <strong class="text-cyan-400">${activeRoleTheme.stat2}</strong>
+                  </div>
+                  <div class="flex justify-between text-slate-300">
+                    <span>Tournament Grade:</span>
+                    <strong class="text-amber-400">Tier-1 Qualified</strong>
                   </div>
                 </div>
-              `).join('')}
+              </div>
+
             </div>
+          </div>
+
+          <!-- 5. 4-MAN SQUAD FORMATION ENGINE -->
+          <div class="p-6 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">📐</span>
+                <div>
+                  <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                    4-Man Competitive Squad Formation Engine
+                  </h4>
+                  <p class="text-xs text-slate-400">Avoid single-file wipes. Position your 4 roles for instant trade-kills.</p>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                <button class="squad-formation-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase transition-all ${this.squadFormation === 'split_2_2' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow' : 'text-slate-400 hover:text-white'}" data-formation="split_2_2">
+                  2-2 Pincer Split
+                </button>
+                <button class="squad-formation-btn px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase transition-all ${this.squadFormation === 'anchor_3_1' ? 'bg-gradient-to-r from-purple-500 to-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'}" data-formation="anchor_3_1">
+                  3-1 High-Ground Anchor
+                </button>
+              </div>
+            </div>
+
+            <!-- Formation Visual Card -->
+            ${this.squadFormation === 'split_2_2' ? `
+              <div class="p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 via-slate-900/80 to-slate-950 border border-cyan-500/30 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="px-2.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-bold uppercase">
+                    FORMATION: 2-2 PINCER BREACH (AGGRESSIVE)
+                  </span>
+                  <span class="text-xs font-mono text-emerald-400">Trade-Kill Window: 1.2s</span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div class="font-bold text-rose-400">Flank A (Rusher 1 & Rusher 2):</div>
+                    <p class="text-slate-300">Push primary compound entrance with 35m spacing. Double sit-down gloo placement creates artificial choke point.</p>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div class="font-bold text-cyan-400">Flank B (IGL & Sniper):</div>
+                    <p class="text-slate-300">Hold rear ridge 60m away. Sniper wall-bangs enemies rotating behind gloo; IGL calls 3rd-party warnings.</p>
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <div class="p-5 rounded-2xl bg-gradient-to-r from-purple-950/30 via-slate-900/80 to-slate-950 border border-purple-500/30 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="px-2.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-mono font-bold uppercase">
+                    FORMATION: 3-1 HIGH-GROUND OVERWATCH (END-GAME ZONE)
+                  </span>
+                  <span class="text-xs font-mono text-purple-300">Circle Lock Rating: 94%</span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div class="font-bold text-purple-400">High-Ground Anchor (Sniper):</div>
+                    <p class="text-slate-300">Stationed on safe zone natural ridge or water tower. Breaks vehicles and prevents opponents from pushing up.</p>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div class="font-bold text-amber-400">Frontline Trio (Rusher, IGL, Support):</div>
+                    <p class="text-slate-300">Advance low-ground dips in a triangle formation, placing overlapping gloo barriers and dropping Nairi healing.</p>
+                  </div>
+                </div>
+              </div>
+            `}
           </div>
 
           <!-- FREE FIRE CHARACTER SKILL COMBOS META & ALL-CHARACTERS ARSENAL BUILDER -->
@@ -6038,9 +6340,86 @@ this.ffSelectedLoadout = {
         </div>
       `;
 
+      this.bindAcademyEvents();
       if (this.activeGame === 'freefire') {
         this.bindFFCharacterBuilderEvents();
       }
+    }
+
+    bindAcademyEvents() {
+      // 1. Cockpit Tile Jump Actions
+      document.querySelectorAll('.academy-cockpit-tile').forEach(tile => {
+        tile.addEventListener('click', () => {
+          const action = tile.dataset.action;
+          this.playRadioBeep();
+          if (action === 'open-voice') {
+            this.activeTab = 'scrims';
+            this.ffScrimMode = 'voice_room';
+            this.syncTabButtons();
+            this.renderTabContent();
+          } else if (action === 'open-scrims') {
+            this.activeTab = 'scrims';
+            this.ffScrimMode = 'scorekeeper';
+            this.syncTabButtons();
+            this.renderTabContent();
+          } else if (action === 'open-whiteboard') {
+            this.activeTab = 'whiteboard';
+            this.syncTabButtons();
+            this.renderTabContent();
+          } else if (action === 'open-clutch') {
+            this.activeTab = 'playbook';
+            this.pbView = 'clutch';
+            this.syncTabButtons();
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Role Card Selection & Blueprint Inspection
+      document.querySelectorAll('.academy-role-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const roleId = card.dataset.roleId;
+          if (roleId) {
+            this.selectedRoleDetail = roleId;
+            this.playRadioBeep();
+            const container = document.getElementById('mainTabContainer');
+            if (container) this.renderAcademyTab(container);
+          }
+        });
+      });
+
+      // 3. Equip Role to Active Profile Button
+      document.getElementById('equipRoleBtn')?.addEventListener('click', (e) => {
+        const roleName = e.currentTarget.dataset.roleName;
+        if (this.currentUser) {
+          this.currentUser.role = roleName;
+          this.saveActiveUserSession(this.currentUser);
+          this.renderUserAuthHeader();
+        }
+        this.playRadioBeep();
+        const btn = document.getElementById('equipRoleBtn');
+        if (btn) {
+          btn.innerHTML = '<span>✓</span> <span>Equipped to Your ID Pass!</span>';
+          btn.classList.remove('from-cyan-500', 'to-blue-600');
+          btn.classList.add('bg-emerald-500', 'text-black');
+          setTimeout(() => {
+            if (btn) btn.innerHTML = '<span>🎖️</span> <span>Set As My Active Duty</span>';
+          }, 2000);
+        }
+      });
+
+      // 4. Squad Formation Toggle
+      document.querySelectorAll('.squad-formation-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const form = btn.dataset.formation;
+          if (form) {
+            this.squadFormation = form;
+            this.playRadioBeep();
+            const container = document.getElementById('mainTabContainer');
+            if (container) this.renderAcademyTab(container);
+          }
+        });
+      });
     }
 
     // --- FREE FIRE COMPLETE TOURNAMENT LOADOUT SYSTEM ---
