@@ -352,6 +352,10 @@ h1, h2, h3, .font-heading {
 
         <!-- User Profile / Login ID Badge -->
         <!-- Cloud Status Badge Button -->
+        <button id="headerVoiceRoomBtn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/40 text-purple-300 hover:bg-purple-500/20 text-[11px] font-sub font-bold uppercase tracking-wider cursor-pointer transition-all shadow-lg shadow-purple-950/40" title="Open Squad Tactical Voice Room">
+          <span class="w-2 h-2 rounded-full bg-purple-400 animate-ping"></span>
+          <span>🎙️ Voice Room</span>
+        </button>
         <button id="cloudStatusBadge" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-sub font-bold uppercase tracking-wider cursor-pointer hover:bg-amber-500/20 transition-all" title="Configure Supabase Cloud & Realtime">
           <span id="cloudStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
           <span id="cloudStatusText">Local Mode 🟡</span>
@@ -6136,7 +6140,44 @@ this.ffSelectedLoadout = {
 
       // Free Fire Esports (FFWS) Official Scrim Tracker State
       // 12-Team Tournament Lobby & PointCalc Generator State
-      this.ffScrimMode = 'lobby'; // 'lobby' (PointCalc style) or 'my_squad'
+      this.ffScrimMode = 'scorekeeper'; // 'lobby' (PointCalc style) or 'my_squad'
+      this.activeScrimsView = 'scorekeeper'; // 'scorekeeper' | 'famous_scrims' | 'room_dispatcher' | 'lobby' | 'my_squad' | 'tuition_time'
+      this.scrimMatches = this.loadSavedScrimMatches();
+      this.voiceRoom = {
+        connected: false,
+        muted: true,
+        deafened: false,
+        ptt: false,
+        activeSpeaker: null,
+        speakingInterval: null,
+        notes: 'Match 1: Bermuda • Peak Drop. 2-2 Split. Phase 3 North Rotate. Room Pass: 7711',
+        seats: [
+          { id: 1, role: '👑 IGL / Captain', name: 'Coach Duker / Anurag', ign: 'TITAN_IGL', status: 'idle', avatar: '👑' },
+          { id: 2, role: '⚡ Primary Rusher', name: 'Star Fragger', ign: 'APEX_Rush', status: 'idle', avatar: '⚡' },
+          { id: 3, role: '🎯 Assaulter / Fragger', name: 'Re-Frag Anchor', ign: 'HAVOC_99', status: 'idle', avatar: '🎯' },
+          { id: 4, role: '🔭 Sniper / Scout', name: 'Overwatch Sniper', ign: 'DEADEYE_M82B', status: 'idle', avatar: '🔭' }
+        ]
+      };
+      this.backpackState = {
+        level: 3,
+        role: 'rusher' // 'rusher' | 'assaulter' | 'sniper'
+      };
+      this.clutchTrainer = {
+        activeScenario: 0,
+        selectedChoice: null,
+        history: {}
+      };
+      this.roomDispatcher = {
+        rawText: '',
+        roomId: '8941203',
+        pass: '1234',
+        slot: '7',
+        map: 'Bermuda',
+        timeLeft: 120,
+        timerActive: false,
+        interval: null
+      };
+
       this.ffTourneyMeta = {
         title: 'FREE FIRE MAX TIER-1 SCRIMS',
         stage: 'GRAND FINALS • MATCH 1 TO 6',
@@ -6158,7 +6199,7 @@ this.ffSelectedLoadout = {
         { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
       ];
       // 12-Team Tournament Lobby & PointCalc Generator State
-      this.ffScrimMode = 'lobby'; // 'lobby' (PointCalc style) or 'my_squad'
+      this.ffScrimMode = 'scorekeeper'; // 'lobby' (PointCalc style) or 'my_squad'
       this.ffTourneyMeta = {
         title: 'FREE FIRE MAX TIER-1 SCRIMS',
         stage: 'GRAND FINALS • MATCH 1 TO 6',
@@ -6200,6 +6241,18 @@ this.ffSelectedLoadout = {
     }
 
     bindCloudStatusBadge() {
+      const voiceHeaderBtn = document.getElementById('headerVoiceRoomBtn');
+      if (voiceHeaderBtn) {
+        voiceHeaderBtn.addEventListener('click', () => {
+          this.activeGame = 'freefire';
+          this.activeTab = 'scrims';
+          this.ffScrimMode = 'voice_room';
+          this.syncTabButtons();
+          this.renderTabContent();
+          this.playRadioBeep();
+        });
+      }
+
       const badge = document.getElementById('cloudStatusBadge');
       if (badge) {
         badge.onclick = () => this.showSupabaseSetupModal();
@@ -11855,6 +11908,350 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       ];
     }
 
+    
+    // --- SCRIM SCOREKEEPER, FAMOUS SCRIMS & ROOM DISPATCHER METHODS ---
+    loadSavedScrimMatches() {
+      try {
+        const saved = localStorage.getItem('underdog_scrim_tracker_matches');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+      return [
+        { matchNum: 1, map: 'Bermuda', placement: 1, kills: 9, placementPts: 12, totalPts: 21 },
+        { matchNum: 2, map: 'Purgatory', placement: 3, kills: 5, placementPts: 8, totalPts: 13 },
+        { matchNum: 3, map: 'Kalahari', placement: 4, kills: 6, placementPts: 7, totalPts: 13 }
+      ];
+    }
+
+    saveScrimMatches() {
+      try {
+        localStorage.setItem('underdog_scrim_tracker_matches', JSON.stringify(this.scrimMatches));
+      } catch (e) {}
+    }
+
+    logNewScrimMatch(map, placement, kills) {
+      const pPts = this.getFFPlacementPoints(placement);
+      const total = pPts + kills;
+      const nextNum = this.scrimMatches.length + 1;
+      this.scrimMatches.push({
+        matchNum: nextNum,
+        map: map,
+        placement: placement,
+        kills: kills,
+        placementPts: pPts,
+        totalPts: total
+      });
+      this.saveScrimMatches();
+      this.renderTabContent();
+    }
+
+    deleteScrimMatch(index) {
+      this.scrimMatches.splice(index, 1);
+      // Re-index match numbers
+      this.scrimMatches.forEach((m, idx) => m.matchNum = idx + 1);
+      this.saveScrimMatches();
+      this.renderTabContent();
+    }
+
+    resetScrimMatches() {
+      this.scrimMatches = [];
+      this.saveScrimMatches();
+      this.renderTabContent();
+    }
+
+    getScrimScorecardStats() {
+      const matches = this.scrimMatches;
+      const totalMatches = matches.length;
+      const totalPts = matches.reduce((sum, m) => sum + m.totalPts, 0);
+      const totalKills = matches.reduce((sum, m) => sum + m.kills, 0);
+      const totalPlacementPts = matches.reduce((sum, m) => sum + m.placementPts, 0);
+      const booyahs = matches.filter(m => m.placement === 1).length;
+      const avgPts = totalMatches > 0 ? (totalPts / totalMatches).toFixed(1) : '0.0';
+
+      let projection = 'Underdog Contender 🛡️';
+      if (avgPts >= 15) projection = 'Tier-1 Champion Dominance 👑';
+      else if (avgPts >= 10) projection = 'Grand Finals Qualifier 🔥';
+      else if (avgPts >= 7) projection = 'Mid-Table Survivor ⚡';
+
+      return { totalMatches, totalPts, totalKills, totalPlacementPts, booyahs, avgPts, projection };
+    }
+
+    getWhatsAppScorecardString() {
+      const stats = this.getScrimScorecardStats();
+      const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      let txt = `🏆 *[UNDERDOG ESPORTS] OFFICIAL SCRIM SCORECARD*\n`;
+      txt += `📅 Date: ${date} | Set: ${stats.totalMatches} Matches\n`;
+      txt += `👑 Booyahs: ${stats.booyahs} | 🎯 Total Kills: ${stats.totalKills}\n`;
+      txt += `🔥 Total Points: *${stats.totalPts} pts* (Avg: ${stats.avgPts} pts/match)\n`;
+      txt += `📊 Projection: ${stats.projection}\n\n`;
+      txt += `*MATCH-BY-MATCH BREAKDOWN:*\n`;
+      this.scrimMatches.forEach(m => {
+        const medal = m.placement === 1 ? '👑' : m.placement <= 3 ? '🥉' : '▪️';
+        txt += `${medal} Match ${m.matchNum} (${m.map}): #${m.placement} (${m.kills} Kills) = *${m.totalPts} pts*\n`;
+      });
+      txt += `\n🚀 Powered by Underdog Esports Academy (underdog.gg)`;
+      return txt;
+    }
+
+    getFamousIndianScrims() {
+      return [
+        {
+          id: 'eagle_esports',
+          name: 'Eagle Esports Scrims (Official Daily Customs)',
+          organizer: 'Eagle Esports India',
+          badge: 'TIER-1 & UNDERDOG',
+          badgeColor: 'bg-amber-950 text-amber-300 border-amber-500/40',
+          accent: 'amber',
+          icon: '🦅',
+          timings: 'Slot 1: 2:00 PM | Slot 2: 6:00 PM | Slot 3: 9:00 PM (Daily)',
+          matchesPerSet: '6 Matches (2 Bermuda, 2 Purgatory, 2 Kalahari)',
+          pointSystem: 'Official Esports 12-Pt System (1st = 12, Kill = 1)',
+          description: 'India\'s most renowned daily competitive scrims. Top Tier-1 organizations practice here alongside rising underdog champions. Strict anti-hack verification and automated Discord point calculation.',
+          bookingRules: [
+            'Registration opens 2 hours before match time in Discord #slot-confirmation.',
+            'Submit Clan Tag, 4 Player UIDs, and IGL Discord tag.',
+            'Room ID & Password dispatched 10 minutes prior; 2-minute entry rule strictly enforced.'
+          ],
+          proTeamsPlaying: 'Total Gaming Esports, Orangutan, GodLike FF, Team Elite Alumni',
+          discordTag: 'discord.gg/eagleesports',
+          bookingTemplate: '[EAGLE SCRIMS REGISTRATION]\nTeam Name: Underdog Esports\nTag: [UDG]\nIGL UID: 7770001\nPlayer 2: 7770002\nPlayer 3: 7770003\nPlayer 4: 7770004\nPreferred Slot: 6:00 PM Tier-1'
+        },
+        {
+          id: 'villager_esports',
+          name: 'Villager Esports (VE) Premier LAN Qualifiers',
+          organizer: 'Villager Esports',
+          badge: 'LAN QUALIFIER',
+          badgeColor: 'bg-rose-950 text-rose-300 border-rose-500/40',
+          accent: 'rose',
+          icon: '🛡️',
+          timings: 'Slot 1: 4:00 PM | Slot 2: 8:00 PM (Grand Scrims)',
+          matchesPerSet: '6 Matches with live broadcast observer feeds',
+          pointSystem: 'FFWS Standard 12-Pt System + MVP Kill Bounties',
+          description: 'The highest tier of Indian competitive scrims with LAN tournament qualifier seedings. Monitored by official esports referees with mandatory post-match screenshot submission.',
+          bookingRules: [
+            'Tier-2 / Tier-1 invitation or proof of top-3 finish in weekly qualifiers required.',
+            'Zero tolerance for emulator players or ping-spoofers; device check required.',
+            'Screenshot of match scorecard must be submitted within 10 minutes of match end.'
+          ],
+          proTeamsPlaying: 'S8UL Esports, Orangutan, Team Falcons, Revenant',
+          discordTag: 'discord.gg/villageresports',
+          bookingTemplate: '[VILLAGER ESPORTS SCRIM SLOT]\nClan: Underdog Esports\nCategory: Tier-1 Invite\nCaptain Discord: Anurag#1234\nUIDs: 7770001, 7770002, 7770003, 7770004'
+        },
+        {
+          id: 'upthrust_esports',
+          name: 'Upthrust Esports Daily Grinders (T3 to T1)',
+          organizer: 'Upthrust Esports',
+          badge: 'HIGHWAY TO PRO',
+          badgeColor: 'bg-cyan-950 text-cyan-300 border-cyan-500/40',
+          accent: 'cyan',
+          icon: '⚡',
+          timings: '1:00 PM, 5:00 PM, and 7:30 PM (3 Parallel Lobbies)',
+          matchesPerSet: '4 Matches fast-track sets',
+          pointSystem: 'Official 12-Point with Tier Promotion / Relegation',
+          description: 'The perfect testing ground for underdog squads looking to prove themselves. Features a dynamic promotion and relegation system where top 3 T3 squads earn promotion into the T1 evening lobby.',
+          bookingRules: [
+            'First-come-first-served reaction bot in #underdog-daily-slots.',
+            'Clans with 3 consecutive unnotified slot misses receive 1-week blacklist.',
+            'Room codes delivered automatically via automated DM bots.'
+          ],
+          proTeamsPlaying: 'Reckoning, Medal Esports, Enigma Gaming, Grassroots Champions',
+          discordTag: 'discord.gg/upthrust',
+          bookingTemplate: '[UPTHRUST SCRIMS SLOT REQUEST]\nTeam: Underdog Esports\nLobby: Tier-2 Promotion Group\nIGL Phone/Discord: +91-9876543210\nPlayer UIDs: 7770001, 7770002, 7770003, 7770004'
+        },
+        {
+          id: '7sea_esports',
+          name: '7Sea Esports Night Clashes & Scouting',
+          organizer: '7Sea Esports',
+          badge: 'SCOUTING CLASH',
+          badgeColor: 'bg-blue-950 text-blue-300 border-blue-500/40',
+          accent: 'blue',
+          icon: '🌊',
+          timings: '8:30 PM Night Clashes (6 Matches Non-Stop)',
+          matchesPerSet: '6 Matches (Bermuda / Purgatory alternating)',
+          pointSystem: 'Standard Esports System + Highest Fragger Cash Reward',
+          description: 'Top Indian esports scouts actively watch 7Sea night scrims to recruit rising underdogs. Teams with high kill consistency are regularly scouted for national tier-1 tournaments.',
+          bookingRules: [
+            'Open slot registration closes daily at 5:00 PM.',
+            'Only 4-man full squads permitted; zero solo/duo substitute entries without notice.',
+            'Live discord voice channel presence encouraged for verification.'
+          ],
+          proTeamsPlaying: '7Sea Roster, Marcos Gaming, Blind Esports, Underdog Elites',
+          discordTag: 'discord.gg/7seaesports',
+          bookingTemplate: '[7SEA NIGHT SCRIMS REGISTRATION]\nTeam: Underdog Esports [UDG]\nLineup: Anurag, StarFragger, Havoc, Deadeye\nCaptain UID: 7770001\nContact: discord.gg/underdog'
+        },
+        {
+          id: 'skyesports',
+          name: 'Skyesports Championship Grassroots Cups',
+          organizer: 'Skyesports',
+          badge: 'NATIONAL TOURNAMENT',
+          badgeColor: 'bg-purple-950 text-purple-300 border-purple-500/40',
+          accent: 'purple',
+          icon: '🏆',
+          timings: 'Wednesday & Saturday 3:00 PM (Weekly Mega Cups)',
+          matchesPerSet: '6 Matches Grand Finals Format',
+          pointSystem: 'Official FFWS International Rules',
+          description: 'Official tournament qualifiers connecting Indian underdogs directly to national streaming stages. Free registration with verified certificates and cash prize pools for podium finishers.',
+          bookingRules: [
+            'Register on official Skyesports portal or tournament bot.',
+            'Government ID / Age verification required for prize pool claims.',
+            'Mandatory match recording for anti-cheat audit.'
+          ],
+          proTeamsPlaying: 'GodLike, Orangutan, Team Elite, Global Esports, Top 48 Underdogs',
+          discordTag: 'skyesports.in/tournaments',
+          bookingTemplate: '[SKYESPORTS CUP REGISTRATION]\nTeam: Underdog Esports\nState/Region: India National\nLineup: 4 Main + 1 Sub\nCaptain Email: team@underdog.gg'
+        }
+      ];
+    }
+
+    parseRoomText(text) {
+      if (!text) return;
+      this.roomDispatcher.rawText = text;
+
+      // Extract Room ID
+      const idMatch = text.match(/(?:room\s*(?:id)?|id)[\s*:#=-]+(\d{5,10})/i);
+      if (idMatch && idMatch[1]) {
+        this.roomDispatcher.roomId = idMatch[1];
+      }
+
+      // Extract Password
+      const passMatch = text.match(/(?:pass(?:word)?|pw)[\s*:#=-]+(\w+)/i);
+      if (passMatch && passMatch[1]) {
+        this.roomDispatcher.pass = passMatch[1];
+      }
+
+      // Extract Slot
+      const slotMatch = text.match(/(?:slot|sl)[\s*:#=-]+(\d{1,2})/i);
+      if (slotMatch && slotMatch[1]) {
+        this.roomDispatcher.slot = slotMatch[1];
+      }
+
+      // Extract Map
+      if (/purgatory/i.test(text)) this.roomDispatcher.map = 'Purgatory';
+      else if (/kalahari/i.test(text)) this.roomDispatcher.map = 'Kalahari';
+      else if (/alpine/i.test(text)) this.roomDispatcher.map = 'Alpine';
+      else if (/nexterra/i.test(text)) this.roomDispatcher.map = 'NeXTerra';
+      else if (/bermuda/i.test(text)) this.roomDispatcher.map = 'Bermuda';
+
+      this.renderTabContent();
+    }
+
+    startRoomCountdown() {
+      if (this.roomDispatcher.timerActive) return;
+      this.roomDispatcher.timerActive = true;
+      this.roomDispatcher.timeLeft = 120; // 2 minutes
+      clearInterval(this.roomDispatcher.interval);
+
+      this.roomDispatcher.interval = setInterval(() => {
+        if (this.roomDispatcher.timeLeft > 0) {
+          this.roomDispatcher.timeLeft--;
+          if (this.roomDispatcher.timeLeft === 30) {
+            this.playChimeSound('warning_30s');
+          }
+          this.updateRoomCountdownUI();
+        } else {
+          this.roomDispatcher.timerActive = false;
+          clearInterval(this.roomDispatcher.interval);
+          this.playChimeSound('stage_complete');
+          this.updateRoomCountdownUI();
+        }
+      }, 1000);
+      this.updateRoomCountdownUI();
+    }
+
+    resetRoomCountdown() {
+      this.roomDispatcher.timerActive = false;
+      clearInterval(this.roomDispatcher.interval);
+      this.roomDispatcher.timeLeft = 120;
+      this.updateRoomCountdownUI();
+    }
+
+    updateRoomCountdownUI() {
+      const el = document.getElementById('roomTimerDisplay');
+      const box = document.getElementById('roomTimerBox');
+      if (el) {
+        const m = Math.floor(this.roomDispatcher.timeLeft / 60);
+        const s = this.roomDispatcher.timeLeft % 60;
+        el.textContent = `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+      }
+      if (box) {
+        if (this.roomDispatcher.timeLeft <= 30 && this.roomDispatcher.timeLeft > 0) {
+          box.classList.add('border-rose-500', 'animate-pulse', 'bg-rose-950/40');
+        } else {
+          box.classList.remove('border-rose-500', 'animate-pulse', 'bg-rose-950/40');
+        }
+      }
+    }
+
+    toggleVoiceRoomConnect() {
+      this.voiceRoom.connected = !this.voiceRoom.connected;
+      this.playRadioBeep();
+
+      if (this.voiceRoom.connected) {
+        this.voiceRoom.muted = false;
+        // Start simulated periodic voice activity
+        clearInterval(this.voiceRoom.speakingInterval);
+        this.voiceRoom.speakingInterval = setInterval(() => {
+          if (!this.voiceRoom.connected || this.voiceRoom.deafened) return;
+          const randomSeat = Math.floor(Math.random() * 4);
+          this.voiceRoom.seats.forEach((s, idx) => {
+            s.status = idx === randomSeat ? 'speaking' : 'listening';
+          });
+          const activeEl = document.getElementById('voiceRoomSpeakerIndicator');
+          if (activeEl) {
+            activeEl.textContent = `${this.voiceRoom.seats[randomSeat].role} Speaking 🟢`;
+          }
+          this.updateVoiceSeatsUI();
+        }, 3500);
+      } else {
+        clearInterval(this.voiceRoom.speakingInterval);
+        this.voiceRoom.seats.forEach(s => s.status = 'idle');
+      }
+      this.renderTabContent();
+    }
+
+    toggleVoiceRoomMute() {
+      this.voiceRoom.muted = !this.voiceRoom.muted;
+      this.playRadioBeep();
+      const mySeat = this.voiceRoom.seats[0];
+      if (mySeat) {
+        mySeat.status = this.voiceRoom.muted ? 'muted' : 'speaking';
+      }
+      this.renderTabContent();
+    }
+
+    toggleVoiceRoomDeafen() {
+      this.voiceRoom.deafened = !this.voiceRoom.deafened;
+      this.playRadioBeep();
+      if (this.voiceRoom.deafened) {
+        this.voiceRoom.muted = true;
+      }
+      this.renderTabContent();
+    }
+
+    updateVoiceSeatsUI() {
+      this.voiceRoom.seats.forEach(seat => {
+        const seatEl = document.querySelector(`[data-voice-seat="${seat.id}"]`);
+        if (seatEl) {
+          const statusText = seatEl.querySelector('.voice-seat-status');
+          const wave = seatEl.querySelector('.voice-wave-anim');
+          if (statusText) {
+            if (seat.status === 'speaking') {
+              statusText.textContent = 'Speaking 🟢';
+              statusText.className = 'voice-seat-status text-[10px] font-mono text-emerald-400 font-bold';
+              if (wave) wave.classList.remove('hidden');
+            } else if (seat.status === 'muted') {
+              statusText.textContent = 'Muted 🔴';
+              statusText.className = 'voice-seat-status text-[10px] font-mono text-rose-400';
+              if (wave) wave.classList.add('hidden');
+            } else {
+              statusText.textContent = 'Listening 🎧';
+              statusText.className = 'voice-seat-status text-[10px] font-mono text-cyan-400';
+              if (wave) wave.classList.add('hidden');
+            }
+          }
+        }
+      });
+    }
+
     renderScrimsTab(container) {
       if (this.activeGame === 'freefire') {
         this.renderFFScrimsTab(container);
@@ -12440,51 +12837,479 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
     }
 
     renderFFScrimsTab(container) {
+      if (!this.ffScrimMode) this.ffScrimMode = 'scorekeeper';
+
       const sortedTeams = this.getSortedLobbyTeams();
       const top1 = sortedTeams[0] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
       const top2 = sortedTeams[1] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
       const top3 = sortedTeams[2] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
 
-      // Analytics & Diagnostic Models
       const analytics = this.getFFScrimAnalytics();
       const coachAdvice = this.getCoachDukerAdvice(analytics.topMistake ? analytics.topMistake.id : 'clean');
       const tuitionLessons = this.getTuitionTimeLessons();
 
+      const scorecardStats = this.getScrimScorecardStats();
+      const famousScrims = this.getFamousIndianScrims();
+
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
           <!-- Top Cyber Banner -->
-          <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#220d18] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#220d18] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
             <div>
               <div class="flex items-center gap-2">
                 <span class="text-2xl">📊</span>
                 <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider">
-                  Official Tournament Scrims & PointCalc Leaderboard Suite
+                  Tournament Scrims, Voice Room & PointCalc Suite
                 </h3>
                 <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-[10px] font-bold">
                   FFWS 12-PT RULES
                 </span>
               </div>
               <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Official FFWS 12-team scoring, real-time squad blunder diagnostics, #1 fatal weakness analytics, and Coach Duker's Tuition Time VOD review masterclass.
+                Log daily scrim points, view famous Indian scrims (Eagle Esports), dispatch room credentials in 2-minutes, and discuss rotations in the live Squad Voice Room.
               </p>
             </div>
 
             <!-- Mode Switcher -->
             <div class="flex flex-wrap items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
-              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'lobby' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="lobby">
-                📊 12-Team Lobby
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'scorekeeper' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="scorekeeper">
+                🧮 1-Tap Scorekeeper
               </button>
-              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'my_squad' ? 'active bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="my_squad">
-                🎯 Squad Mistake Tracker
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'famous_scrims' ? 'active bg-amber-600 text-black font-black shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="famous_scrims">
+                🦅 Famous Indian Scrims
               </button>
-              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'tuition_time' ? 'active bg-amber-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="tuition_time">
-                🎓 Coach Duker Tuition Time
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'room_dispatcher' ? 'active bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="room_dispatcher">
+                🔑 Room Dispatcher
+              </button>
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'voice_room' ? 'active bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="voice_room">
+                🎙️ Voice Room
+              </button>
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'lobby' ? 'active bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="lobby">
+                📊 12-Team Broadcast
+              </button>
+              <button class="ff-scrim-mode-btn ${this.ffScrimMode === 'my_squad' ? 'active bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all" data-mode="my_squad">
+                🎯 Mistake Analytics
               </button>
             </div>
           </div>
 
           <!-- ============================================================ -->
-          <!-- MODE 1: 12-TEAM LOBBY LEADERBOARD & POINTCALC GRAPHIC EXPORTER -->
+          <!-- MODE 1: 1-TAP SCRIM SCOREKEEPER & WHATSAPP SCORECARD -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'scorekeeper' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- KPI Summary Cards -->
+              <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div class="cyber-panel p-4 rounded-xl border border-rose-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Total Points</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-rose-400 mt-1">${scorecardStats.totalPts} <span class="text-xs font-normal">pts</span></div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${scorecardStats.totalMatches} Matches Logged</div>
+                </div>
+                <div class="cyber-panel p-4 rounded-xl border border-amber-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Booyahs 👑</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-amber-400 mt-1">${scorecardStats.booyahs}</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${scorecardStats.totalPlacementPts} Placement Pts</div>
+                </div>
+                <div class="cyber-panel p-4 rounded-xl border border-cyan-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Team Kills ⚔️</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-cyan-400 mt-1">${scorecardStats.totalKills}</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">1 pt per kill</div>
+                </div>
+                <div class="cyber-panel p-4 rounded-xl border border-purple-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Average Pts / M</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-purple-400 mt-1">${scorecardStats.avgPts}</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">Tournament Pace</div>
+                </div>
+                <div class="cyber-panel p-4 rounded-xl border border-emerald-500/30 bg-slate-950/80 text-center col-span-2 sm:col-span-1">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Status Projection</div>
+                  <div class="text-xs font-bold text-emerald-400 mt-2 truncate">${scorecardStats.projection}</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-1">FFWS Standard</div>
+                </div>
+              </div>
+
+              <!-- Fast Match Entry Bar -->
+              <div class="cyber-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-slate-950 via-[#1a0c16] to-slate-950 space-y-4 shadow-xl">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-rose-500 animate-pulse"></span>
+                    <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider">
+                      ➕ Fast Log Match #${this.scrimMatches.length + 1}
+                    </h4>
+                  </div>
+                  <span class="text-xs text-slate-400 font-mono">1-Tap Scrim Scorekeeper</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Select Map</label>
+                    <select id="scrimLogMap" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-white outline-none focus:border-rose-400 font-sub">
+                      <option value="Bermuda">Bermuda</option>
+                      <option value="Purgatory">Purgatory</option>
+                      <option value="Kalahari">Kalahari</option>
+                      <option value="Alpine">Alpine</option>
+                      <option value="NeXTerra">NeXTerra</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Finish Placement (#1 to #12)</label>
+                    <select id="scrimLogPlacement" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-300 font-bold outline-none focus:border-amber-400 font-sub">
+                      <option value="1">#1 Booyah (12 pts) 👑</option>
+                      <option value="2">#2 Position (9 pts)</option>
+                      <option value="3">#3 Position (8 pts)</option>
+                      <option value="4">#4 Position (7 pts)</option>
+                      <option value="5">#5 Position (6 pts)</option>
+                      <option value="6">#6 Position (5 pts)</option>
+                      <option value="7">#7 Position (4 pts)</option>
+                      <option value="8">#8 Position (3 pts)</option>
+                      <option value="9">#9 Position (2 pts)</option>
+                      <option value="10">#10 Position (1 pt)</option>
+                      <option value="11">#11 Position (0 pts)</option>
+                      <option value="12">#12 Position (0 pts)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Total Squad Kills</label>
+                    <input type="number" id="scrimLogKills" min="0" max="48" value="6" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-white outline-none focus:border-rose-400 font-mono font-bold" />
+                  </div>
+
+                  <div>
+                    <button id="addScrimMatchBtn" class="w-full py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-black uppercase text-xs rounded-xl tracking-wider shadow-lg transition-transform hover:scale-102 flex items-center justify-center gap-1.5">
+                      <span>➕</span> Log Match Result
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Matches Table & Copy Toolbar -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    📋 Logged Matches (${this.scrimMatches.length})
+                  </h4>
+
+                  <div class="flex items-center gap-2">
+                    <button id="copyWhatsAppScorecardBtn" class="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-sub font-bold uppercase text-xs rounded-xl tracking-wider shadow-lg flex items-center gap-1.5 transition-transform hover:scale-105">
+                      <span>📋</span>
+                      <span id="copyScorecardBtnText">Copy WhatsApp / Discord Card</span>
+                    </button>
+                    <button id="resetScrimSetBtn" class="px-3 py-2 bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white text-xs rounded-xl font-sub transition-all" title="Clear all matches">
+                      🔄 Reset Set
+                    </button>
+                  </div>
+                </div>
+
+                ${this.scrimMatches.length === 0 ? `
+                  <div class="p-8 text-center text-xs text-slate-500">
+                    No matches logged yet. Use the fast entry bar above to log Match 1!
+                  </div>
+                ` : `
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                      <thead class="text-[10px] font-sub uppercase font-bold text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                        <tr>
+                          <th class="p-3">Match</th>
+                          <th class="p-3">Map</th>
+                          <th class="p-3">Placement</th>
+                          <th class="p-3">Placement Pts</th>
+                          <th class="p-3">Kills</th>
+                          <th class="p-3 font-bold text-white">Total Points</th>
+                          <th class="p-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-800/60">
+                        ${this.scrimMatches.map((m, idx) => `
+                          <tr class="hover:bg-slate-900/40 transition-colors">
+                            <td class="p-3 font-mono font-bold text-white">Match #${m.matchNum}</td>
+                            <td class="p-3 text-rose-300 font-sub">${m.map}</td>
+                            <td class="p-3">
+                              <span class="px-2 py-0.5 rounded text-[11px] font-bold ${m.placement === 1 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-300'}">
+                                #${m.placement} ${m.placement === 1 ? '👑' : ''}
+                              </span>
+                            </td>
+                            <td class="p-3 font-mono text-slate-400">${m.placementPts} pts</td>
+                            <td class="p-3 font-mono text-cyan-400 font-bold">${m.kills} kills</td>
+                            <td class="p-3 font-mono text-base font-black text-rose-400">${m.totalPts} pts</td>
+                            <td class="p-3 text-right">
+                              <button class="delete-scrim-match-btn text-rose-500 hover:text-rose-300 text-xs px-2 py-1 rounded bg-rose-950/40 hover:bg-rose-950 border border-rose-500/30 transition-all" data-match-idx="${idx}">
+                                🗑️ Delete
+                              </button>
+                            </td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                `}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 2: FAMOUS INDIAN SCRIMS DIRECTORY (EAGLE ESPORTS, ETC) -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'famous_scrims' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                <div>
+                  <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    🦅 Famous Indian Scrims & Tournament Directory
+                  </h4>
+                  <p class="text-xs text-slate-400 mt-0.5">
+                    Verified tournament schedules, slot booking rules, and 1-click Discord registration templates for India's top scrim organizers:
+                  </p>
+                </div>
+                <span class="px-3 py-1 rounded-full bg-amber-950 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold shrink-0">
+                  5 Premier Organizers
+                </span>
+              </div>
+
+              <!-- Grid of Organizers -->
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                ${famousScrims.map(org => `
+                  <div class="cyber-panel p-5 rounded-2xl border border-slate-800 hover:border-amber-500/40 transition-all flex flex-col justify-between space-y-4 bg-slate-950/90 shadow-xl">
+                    <div class="space-y-3">
+                      <!-- Header -->
+                      <div class="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                          <span class="text-3xl">${org.icon}</span>
+                          <div>
+                            <h5 class="text-base font-heading font-black text-white leading-tight">${org.name}</h5>
+                            <span class="text-[11px] font-sub text-slate-400">${org.organizer}</span>
+                          </div>
+                        </div>
+                        <span class="cyber-badge ${org.badgeColor} text-[10px] font-bold">
+                          ${org.badge}
+                        </span>
+                      </div>
+
+                      <p class="text-xs text-slate-300 leading-relaxed">
+                        ${org.description}
+                      </p>
+
+                      <!-- Key Specs -->
+                      <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                          <span class="text-[10px] font-sub uppercase font-bold text-slate-400 block">Timings:</span>
+                          <span class="text-amber-300 font-sub font-bold">${org.timings}</span>
+                        </div>
+                        <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                          <span class="text-[10px] font-sub uppercase font-bold text-slate-400 block">Match Set:</span>
+                          <span class="text-slate-200 font-sub">${org.matchesPerSet}</span>
+                        </div>
+                      </div>
+
+                      <!-- Booking Rules -->
+                      <div class="space-y-1 text-xs">
+                        <span class="text-[10px] font-sub uppercase font-bold text-slate-400 block">Slot Booking Rules:</span>
+                        <ul class="space-y-1 text-slate-400 text-[11px] list-disc list-inside">
+                          ${org.bookingRules.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                      </div>
+
+                      <!-- Pro Teams Competing -->
+                      <div class="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 text-[11px] text-slate-300">
+                        <strong class="text-amber-400">Regular Tier-1 Teams:</strong> ${org.proTeamsPlaying}
+                      </div>
+                    </div>
+
+                    <!-- 1-Click Copy Booking Format Button -->
+                    <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                      <span class="text-[10px] font-mono text-cyan-400">${org.discordTag}</span>
+                      <button class="copy-scrim-template-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md" data-template="${encodeURIComponent(org.bookingTemplate)}">
+                        Copy Slot Booking Format 📋
+                      </button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 3: CUSTOM ROOM ID/PASS QUICK DISPATCHER -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'room_dispatcher' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="cyber-panel p-6 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-[#0a1827] to-slate-950 shadow-xl space-y-5">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      🔑 Custom Room ID/Pass Quick Dispatcher
+                    </h4>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Paste messy WhatsApp or Discord room codes below to auto-extract credentials and forward to your teammates instantly:
+                    </p>
+                  </div>
+
+                  <!-- 2-Min Entry Countdown Clock -->
+                  <div id="roomTimerBox" class="p-3 px-5 rounded-2xl bg-slate-950 border-2 border-cyan-500/40 text-center shadow-lg shrink-0">
+                    <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Room Closes In</div>
+                    <div id="roomTimerDisplay" class="text-2xl font-mono font-black text-cyan-300 mt-0.5">02:00</div>
+                    <button id="startRoomCountdownBtn" class="mt-1 px-2.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-black font-sub font-bold text-[10px] uppercase transition-all">
+                      ${this.roomDispatcher.timerActive ? 'Timer Active' : 'Start 2-Min Clock'}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Input Textarea for Auto-Extraction -->
+                <div class="space-y-2">
+                  <label class="block text-xs font-sub uppercase font-bold text-slate-300">
+                    Paste Messy WhatsApp / Discord Room Message:
+                  </label>
+                  <textarea id="rawRoomTextInput" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white font-mono outline-none focus:border-cyan-400" placeholder="e.g. Eagle Scrims Match 1 Room ID: 8941203 Pass: 1234 Slot: 7 Map: Bermuda"></textarea>
+                  <div class="flex items-center gap-2">
+                    <button id="parseRoomTextBtn" class="px-4 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-black font-sub font-bold uppercase text-xs tracking-wider transition-all">
+                      ⚡ Auto-Extract Room Credentials
+                    </button>
+                    <button id="sampleRoomTextBtn" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-400 hover:text-white text-xs font-sub transition-all">
+                      Insert Sample Message
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Extracted Credentials Cards -->
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
+                  <div class="p-4 rounded-xl bg-slate-900/90 border border-cyan-500/30 flex flex-col justify-between">
+                    <div>
+                      <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Room ID</span>
+                      <div class="text-xl font-mono font-black text-white mt-1">${this.roomDispatcher.roomId}</div>
+                    </div>
+                    <button id="copyRoomIdBtn" class="mt-3 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/40 text-cyan-300 font-sub text-xs font-bold uppercase transition-all">
+                      Copy Room ID 📋
+                    </button>
+                  </div>
+
+                  <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30 flex flex-col justify-between">
+                    <div>
+                      <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Password</span>
+                      <div class="text-xl font-mono font-black text-amber-300 mt-1">${this.roomDispatcher.pass}</div>
+                    </div>
+                    <button id="copyRoomPassBtn" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/40 border border-amber-500/40 text-amber-300 font-sub text-xs font-bold uppercase transition-all">
+                      Copy Pass 📋
+                    </button>
+                  </div>
+
+                  <div class="p-4 rounded-xl bg-slate-900/90 border border-purple-500/30 flex flex-col justify-between">
+                    <div>
+                      <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Our Assigned Slot</span>
+                      <div class="text-xl font-mono font-black text-purple-300 mt-1">Slot #${this.roomDispatcher.slot}</div>
+                    </div>
+                    <span class="mt-3 text-[11px] text-slate-400">Do not sit in wrong slot!</span>
+                  </div>
+
+                  <div class="p-4 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex flex-col justify-between">
+                    <div>
+                      <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Match Map</span>
+                      <div class="text-xl font-mono font-black text-emerald-300 mt-1">${this.roomDispatcher.map}</div>
+                    </div>
+                    <button id="copySquadForwardBtn" class="mt-3 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-sub text-xs font-bold uppercase transition-all">
+                      Forward to Squad 📱
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 4: SQUAD TACTICAL VOICE ROOM & DISCUSSION LOUNGE -->
+          <!-- ============================================================ -->
+          ${this.ffScrimMode === 'voice_room' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="cyber-panel p-6 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#150a22] to-slate-950 shadow-xl space-y-6">
+                <!-- Header & Voice Controls -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="w-3 h-3 rounded-full ${this.voiceRoom.connected ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}"></span>
+                      <span class="text-xs font-sub font-bold ${this.voiceRoom.connected ? 'text-emerald-400' : 'text-slate-500'} uppercase tracking-wider">
+                        ${this.voiceRoom.connected ? 'VOICE ROOM ONLINE • LOBBY #07' : 'VOICE ROOM STANDBY • DISCONNECTED'}
+                      </span>
+                    </div>
+                    <h4 class="text-xl font-heading font-black text-white uppercase tracking-wide mt-0.5">
+                      🎙️ Squad Tactical Voice Discussion Lounge
+                    </h4>
+                  </div>
+
+                  <!-- Audio Action Buttons -->
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button id="toggleVoiceConnectBtn" class="px-4 py-2 rounded-xl ${this.voiceRoom.connected ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'} text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg transition-all flex items-center gap-1.5">
+                      <span>${this.voiceRoom.connected ? '🔴 Disconnect' : '🟢 Connect Voice'}</span>
+                    </button>
+                    <button id="toggleVoiceMuteBtn" class="px-3.5 py-2 rounded-xl ${this.voiceRoom.muted ? 'bg-rose-950 border border-rose-500/50 text-rose-300' : 'bg-slate-900 border border-slate-700 text-white'} font-sub font-bold text-xs uppercase transition-all" ${!this.voiceRoom.connected ? 'disabled opacity-50' : ''}>
+                      <span>${this.voiceRoom.muted ? '🔇 Muted' : '🎤 Mic On'}</span>
+                    </button>
+                    <button id="toggleVoiceDeafenBtn" class="px-3.5 py-2 rounded-xl ${this.voiceRoom.deafened ? 'bg-amber-950 border border-amber-500/50 text-amber-300' : 'bg-slate-900 border border-slate-700 text-white'} font-sub font-bold text-xs uppercase transition-all" ${!this.voiceRoom.connected ? 'disabled opacity-50' : ''}>
+                      <span>${this.voiceRoom.deafened ? '🔕 Deafened' : '🎧 Listening'}</span>
+                    </button>
+                    <button id="testVoiceRadioBeepBtn" class="px-3 py-2 rounded-xl bg-purple-950/60 border border-purple-500/40 text-purple-300 hover:text-white font-sub text-xs uppercase transition-all">
+                      📻 Radio Check
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 4 Squad Seats -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  ${this.voiceRoom.seats.map(seat => `
+                    <div class="p-4 rounded-2xl border transition-all text-center space-y-2 ${seat.status === 'speaking' ? 'bg-purple-950/40 border-purple-400 ring-2 ring-purple-400 shadow-xl' : 'bg-slate-900/80 border-slate-800'}" data-voice-seat="${seat.id}">
+                      <div class="w-14 h-14 mx-auto rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-2xl relative">
+                        <span>${seat.avatar}</span>
+                        ${seat.status === 'speaking' ? `
+                          <span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
+                        ` : ''}
+                      </div>
+
+                      <div>
+                        <div class="text-xs font-heading font-black text-white truncate">${seat.name}</div>
+                        <div class="text-[10px] text-purple-400 font-sub truncate">${seat.role}</div>
+                      </div>
+
+                      <div class="voice-seat-status text-[10px] font-mono ${seat.status === 'speaking' ? 'text-emerald-400 font-bold' : seat.status === 'muted' ? 'text-rose-400' : 'text-slate-400'}">
+                        ${seat.status === 'speaking' ? 'Speaking 🟢' : seat.status === 'muted' ? 'Muted 🔴' : 'Listening 🎧'}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+
+                <!-- Live Strategy Scratchpad & Quick Tactical Pings -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2">
+                  <!-- Strategy Scratchpad -->
+                  <div class="lg:col-span-2 space-y-2">
+                    <label class="block text-xs font-sub uppercase font-bold text-slate-300">
+                      📝 Live Match Strategy Scratchpad (Shared with Squad):
+                    </label>
+                    <textarea id="voiceRoomNotesInput" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white font-mono outline-none focus:border-purple-400" placeholder="Type tactical notes during voice discussion...">${this.voiceRoom.notes}</textarea>
+                  </div>
+
+                  <!-- Quick Tactical Pings -->
+                  <div class="space-y-2">
+                    <label class="block text-xs font-sub uppercase font-bold text-slate-300">
+                      🔊 Quick Tactical Radio Pings:
+                    </label>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button class="voice-quick-ping-btn p-2 rounded-lg bg-slate-900 border border-rose-500/40 hover:border-rose-500 text-rose-300 text-[10px] font-sub font-bold uppercase transition-all" data-ping="CRASH NOW!">
+                        🚨 CRASH NOW!
+                      </button>
+                      <button class="voice-quick-ping-btn p-2 rounded-lg bg-slate-900 border border-amber-500/40 hover:border-amber-500 text-amber-300 text-[10px] font-sub font-bold uppercase transition-all" data-ping="HOLD FIRE">
+                        🛑 HOLD FIRE
+                      </button>
+                      <button class="voice-quick-ping-btn p-2 rounded-lg bg-slate-900 border border-cyan-500/40 hover:border-cyan-500 text-cyan-300 text-[10px] font-sub font-bold uppercase transition-all" data-ping="VEHICLE READY">
+                        🚗 VEHICLES READY
+                      </button>
+                      <button class="voice-quick-ping-btn p-2 rounded-lg bg-slate-900 border border-purple-500/40 hover:border-purple-500 text-purple-300 text-[10px] font-sub font-bold uppercase transition-all" data-ping="COMM SILENCE">
+                        📻 COMM SILENCE
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ============================================================ -->
+          <!-- MODE 5: 12-TEAM LOBBY LEADERBOARD & BROADCAST EXPORTER -->
           <!-- ============================================================ -->
           ${this.ffScrimMode === 'lobby' ? `
             <div class="space-y-6">
@@ -12570,7 +13395,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                     </div>
                   </div>
                   <div class="text-right">
-                    <div class="text-xl font-heading font-black text-slate-200">${top2.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+                    <div class="text-xl font-heading font-black text-slate-300">${top2.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
                     <div class="text-[10px] text-slate-400">${top2.booyahs} 🏆 • ${top2.kills} ⚔️</div>
                   </div>
                 </div>
@@ -12579,7 +13404,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                   <div class="flex items-center gap-3">
                     <div class="w-9 h-9 rounded-xl bg-amber-900/20 border border-amber-700/40 flex items-center justify-center text-lg font-black text-amber-600">#3</div>
                     <div>
-                      <div class="text-[10px] font-sub uppercase font-bold text-amber-600">3rd Position</div>
+                      <div class="text-[10px] font-sub uppercase font-bold text-slate-400">3rd Position</div>
                       <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top3.name}</div>
                     </div>
                   </div>
@@ -12590,586 +13415,82 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                 </div>
               </div>
 
-              <!-- Full 12-Team Interactive Scrim Table -->
-              <div class="cyber-panel p-4 rounded-2xl border border-slate-800">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-                  <div>
-                    <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
-                      Official FFWS 12-Team Standings & Match Scorer
-                    </h4>
-                    <p class="text-[11px] text-slate-400">
-                      Points Auto-Calculate: 1st=12, 2nd=9, 3rd=8, 4th=7, 5th=6, 6th=5, 7th=4, 8th=3, 9th=2, 10th=1, 11-12th=0 + 1 Pt / Kill.
-                    </p>
-                  </div>
-                  <span class="cyber-badge bg-rose-950 border border-rose-500/50 text-rose-300 text-[10px] font-mono">
-                    12 TEAMS LOADED
-                  </span>
-                </div>
-
-                <div class="overflow-x-auto">
-                  <table class="w-full text-left text-xs">
-                    <thead class="text-[10px] font-sub uppercase text-slate-400 border-b border-slate-800 bg-slate-900/40">
-                      <tr>
-                        <th class="py-2.5 px-3">#</th>
-                        <th class="py-2.5 px-3">Team Name & Tag</th>
-                        <th class="py-2.5 px-3 text-center">Matches</th>
-                        <th class="py-2.5 px-3 text-center">Booyahs</th>
-                        <th class="py-2.5 px-3 text-center">Place Pts</th>
-                        <th class="py-2.5 px-3 text-center">Kills</th>
-                        <th class="py-2.5 px-3 text-center font-bold text-rose-400">Total Pts</th>
-                        <th class="py-2.5 px-3 text-right">Quick Score Actions</th>
+              <!-- 12-Team Table -->
+              <div class="cyber-panel p-4 rounded-2xl border border-slate-800 bg-slate-950 overflow-x-auto">
+                <table class="w-full text-left text-xs text-slate-300">
+                  <thead class="text-[10px] font-sub uppercase font-bold text-slate-400 border-b border-slate-800 bg-slate-900/60">
+                    <tr>
+                      <th class="p-3">#</th>
+                      <th class="p-3">Team Name</th>
+                      <th class="p-3">Tag</th>
+                      <th class="p-3 text-center">Matches</th>
+                      <th class="p-3 text-center">Booyah 🏆</th>
+                      <th class="p-3 text-center">Place Pts</th>
+                      <th class="p-3 text-center">Kills ⚔️</th>
+                      <th class="p-3 text-center font-bold text-white">Total Pts</th>
+                      <th class="p-3 text-right">Edit</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60">
+                    ${sortedTeams.map((team, idx) => `
+                      <tr class="hover:bg-slate-900/40 transition-colors">
+                        <td class="p-3 font-mono font-bold ${idx < 3 ? 'text-amber-400' : 'text-slate-500'}">#${team.rank}</td>
+                        <td class="p-3 font-bold text-white">${team.name}</td>
+                        <td class="p-3 font-mono text-slate-400">${team.tag}</td>
+                        <td class="p-3 text-center font-mono">${team.matches}</td>
+                        <td class="p-3 text-center font-mono text-amber-400 font-bold">${team.booyahs}</td>
+                        <td class="p-3 text-center font-mono">${team.placementPts}</td>
+                        <td class="p-3 text-center font-mono text-cyan-400">${team.kills}</td>
+                        <td class="p-3 text-center font-mono font-bold text-rose-400 text-sm">${team.totalPts}</td>
+                        <td class="p-3 text-right">
+                          <button class="edit-team-score-btn text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-900 border border-slate-700" data-team-id="${team.id}">
+                            ✏️ Edit
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/60 font-mono">
-                      ${sortedTeams.map(t => `
-                        <tr class="hover:bg-slate-800/40 transition-colors ${t.rank <= 3 ? 'bg-amber-950/10' : ''}">
-                          <td class="py-2.5 px-3 font-bold ${t.rank === 1 ? 'text-amber-400 font-black' : t.rank === 2 ? 'text-slate-300' : t.rank === 3 ? 'text-amber-600' : 'text-slate-500'}">
-                            #${t.rank}
-                          </td>
-                          <td class="py-2.5 px-3 font-semibold text-white font-sans">
-                            <div class="flex items-center gap-2">
-                              <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0.5">${t.tag}</span>
-                              <span>${t.name}</span>
-                            </div>
-                          </td>
-                          <td class="py-2.5 px-3 text-center text-slate-300">${t.matches}</td>
-                          <td class="py-2.5 px-3 text-center font-bold text-amber-400">${t.booyahs} 🏆</td>
-                          <td class="py-2.5 px-3 text-center text-slate-300">${t.placementPts}</td>
-                          <td class="py-2.5 px-3 text-center font-bold text-cyan-400">${t.kills}</td>
-                          <td class="py-2.5 px-3 text-center text-sm font-black text-rose-400">${t.totalPts}</td>
-                          <td class="py-2.5 px-3 text-right">
-                            <div class="flex items-center justify-end gap-1 font-sans">
-                              <button class="lobby-adjust-btn px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-bold rounded" data-team-id="${t.id}" data-action="add_kill" title="Add 1 Kill (+1 Pt)">+1 ⚔️</button>
-                              <button class="lobby-adjust-btn px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-[10px] font-bold rounded" data-team-id="${t.id}" data-action="sub_kill" title="Sub 1 Kill (-1 Pt)">-1</button>
-                              <button class="lobby-adjust-btn px-2 py-1 bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 text-[10px] font-bold rounded border border-amber-500/30" data-team-id="${t.id}" data-action="add_booyah" title="Add 1 Booyah (+12 Pts)">+🏆 Booyah</button>
-                            </div>
-                          </td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
+                    `).join('')}
+                  </tbody>
+                </table>
               </div>
             </div>
           ` : ''}
 
           <!-- ============================================================ -->
-          <!-- MODE 2: SQUAD SCRIM TRACKER & ROOT-CAUSE WEAKNESS ANALYTICS   -->
+          <!-- MODE 6: SQUAD MISTAKE TRACKER & TUITION TIME -->
           <!-- ============================================================ -->
           ${this.ffScrimMode === 'my_squad' ? `
-            <div class="space-y-6 animate-fade-in">
-              <!-- KPI Scorecards -->
-              <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div class="cyber-panel p-4 rounded-xl border border-slate-800 text-center">
-                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Matches Logged</div>
-                  <div class="text-2xl font-heading font-black text-white mt-1">${analytics.totalMatches} <span class="text-xs text-slate-500 font-mono">/ 6</span></div>
-                  <div class="text-[10px] text-slate-400 mt-0.5">Daily Scrim Set</div>
-                </div>
-
-                <div class="cyber-panel p-4 rounded-xl border border-rose-500/40 bg-rose-950/20 text-center shadow-lg shadow-rose-950/30">
-                  <div class="text-[10px] font-sub uppercase font-bold text-rose-400">Total Points</div>
-                  <div class="text-2xl font-heading font-black text-rose-300 mt-1">${analytics.totalPoints} <span class="text-xs text-rose-400/80 font-mono">pts</span></div>
-                  <div class="text-[10px] text-rose-400/80 mt-0.5">${analytics.totalPlacementPts} Place + ${analytics.totalKills} Kills</div>
-                </div>
-
-                <div class="cyber-panel p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 text-center shadow-lg shadow-amber-950/30">
-                  <div class="text-[10px] font-sub uppercase font-bold text-amber-400">Booyahs (1st)</div>
-                  <div class="text-2xl font-heading font-black text-amber-300 mt-1">${analytics.booyahCount} 🏆</div>
-                  <div class="text-[10px] text-amber-400/80 mt-0.5">${analytics.booyahRate}% Win Rate</div>
-                </div>
-
-                <div class="cyber-panel p-4 rounded-xl border border-cyan-500/40 bg-cyan-950/20 text-center shadow-lg shadow-cyan-950/30">
-                  <div class="text-[10px] font-sub uppercase font-bold text-cyan-400">Squad Kills</div>
-                  <div class="text-2xl font-heading font-black text-cyan-300 mt-1">${analytics.totalKills} ⚔️</div>
-                  <div class="text-[10px] text-cyan-400/80 mt-0.5">${analytics.avgKills} Kills / Match</div>
-                </div>
-
-                <div class="cyber-panel p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center shadow-lg shadow-emerald-950/30 col-span-2 md:col-span-1">
-                  <div class="text-[10px] font-sub uppercase font-bold text-emerald-400">Discipline Score</div>
-                  <div class="text-2xl font-heading font-black text-emerald-300 mt-1">${analytics.disciplineScore}%</div>
-                  <div class="text-[10px] text-emerald-400/80 mt-0.5">${analytics.disciplineScore >= 85 ? 'S-Tier Macro' : analytics.disciplineScore >= 70 ? 'Competitive' : 'Wipe Prone'}</div>
-                </div>
-              </div>
-
-              <!-- ============================================================ -->
-              <!-- SQUAD FATAL WEAKNESS & DIAGNOSTIC DASHBOARD                   -->
-              <!-- ============================================================ -->
+            <div class="space-y-6">
+              <!-- Diagnostics & Analytics -->
               <div class="cyber-panel p-5 rounded-2xl border border-rose-500/30 bg-slate-950/90 space-y-4">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-                      <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
-                        Squad Root-Cause Mistake Diagnostic & Weakness Analytics
-                      </h4>
-                    </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
-                      Telemetry analysis of your squad's fatal wipes across competitive scrims. Pinpoints exactly why your squad threw points.
-                    </p>
-                  </div>
-                  <button id="openTuitionTimeFromAnalyticsBtn" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all">
-                    <span>🎓</span> Coach Duker VOD Masterclass
-                  </button>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                  <!-- Left: #1 Fatal Weakness Banner & Distribution Bars -->
-                  <div class="lg:col-span-7 space-y-4">
-                    <!-- #1 Fatal Weakness Hero Card -->
-                    ${analytics.topMistake ? `
-                      <div class="p-4 rounded-xl border border-rose-500/60 bg-gradient-to-r from-rose-950/40 via-slate-900/80 to-slate-950 relative overflow-hidden shadow-xl shadow-rose-950/40">
-                        <div class="flex items-start justify-between gap-3">
-                          <div>
-                            <div class="flex items-center gap-2">
-                              <span class="cyber-badge bg-rose-900 text-rose-200 border border-rose-500/50 text-[10px] font-black uppercase">
-                                🚨 #1 FATAL SQUAD WEAKNESS
-                              </span>
-                              <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] font-bold font-mono">
-                                ${analytics.topMistake.tag}
-                              </span>
-                            </div>
-                            <h5 class="text-base font-heading font-black text-white mt-1.5 flex items-center gap-2">
-                              <span>${analytics.topMistake.icon}</span>
-                              <span>${analytics.topMistake.name}</span>
-                            </h5>
-                            <p class="text-xs text-rose-200/90 mt-1 leading-relaxed">
-                              ${analytics.topMistake.desc}
-                            </p>
-                          </div>
-                          <div class="text-right shrink-0">
-                            <div class="text-3xl font-heading font-black text-rose-400">${analytics.topMistake.percent}%</div>
-                            <div class="text-[10px] text-rose-300 font-mono">OF TOTAL WIPES</div>
-                            <div class="text-[10px] text-slate-400 mt-0.5">(${analytics.topMistake.count} of ${analytics.totalWipesWithBlunder} blunders)</div>
-                          </div>
-                        </div>
-                      </div>
-                    ` : `
-                      <div class="p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center">
-                        <span class="text-2xl">🏆</span>
-                        <h5 class="text-sm font-heading font-bold text-emerald-300 mt-1 uppercase">Flawless Scrim Consistency</h5>
-                        <p class="text-xs text-slate-300 mt-0.5">Zero unforced wipe blunders recorded in the current match set!</p>
-                      </div>
-                    `}
-
-                    <!-- Blunder Frequency Distribution Bars -->
-                    <div class="space-y-2 pt-1">
-                      <div class="flex items-center justify-between text-[11px] font-sub uppercase font-bold text-slate-400">
-                        <span>Competitive Mistake Breakdown</span>
-                        <span>Wipe Frequency</span>
-                      </div>
-
-                      <div class="space-y-2.5 font-mono text-xs">
-                        ${analytics.categories.filter(c => c.id !== 'clean').map(c => {
-                          const count = analytics.mistakeCounts[c.id] || 0;
-                          const pct = analytics.totalWipesWithBlunder > 0 ? Math.round((count / analytics.totalWipesWithBlunder) * 100) : 0;
-                          const barColor = c.color === 'rose' ? 'bg-rose-500' : c.color === 'amber' ? 'bg-amber-500' : c.color === 'purple' ? 'bg-purple-500' : c.color === 'orange' ? 'bg-orange-500' : 'bg-cyan-500';
-
-                          return `
-                            <div class="space-y-1">
-                              <div class="flex items-center justify-between text-[11px]">
-                                <div class="flex items-center gap-1.5">
-                                  <span>${c.icon}</span>
-                                  <span class="font-sans font-bold text-slate-200">${c.name}</span>
-                                  <span class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-400">${c.tag}</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                  <span class="text-slate-400 text-[10px]">${count} match${count === 1 ? '' : 'es'}</span>
-                                  <span class="font-bold text-white">${pct}%</span>
-                                </div>
-                              </div>
-                              <div class="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
-                                <div class="h-full ${barColor} rounded-full transition-all duration-500" style="width: ${pct}%"></div>
-                              </div>
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Right: Coach Duker AI Diagnostic Verdict & Drill -->
-                  <div class="lg:col-span-5 flex flex-col justify-between p-4 rounded-xl border border-amber-500/40 bg-gradient-to-b from-amber-950/20 via-slate-900/60 to-slate-950 space-y-3">
-                    <div>
-                      <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                        <div class="flex items-center gap-2">
-                          <div class="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/60 flex items-center justify-center font-black text-amber-300 text-xs">
-                            CD
-                          </div>
-                          <div>
-                            <div class="text-xs font-heading font-bold text-white uppercase tracking-wider">[TITAN] Coach Duker</div>
-                            <div class="text-[10px] text-amber-400 font-mono">TUITION TIME MACRO ANALYST</div>
-                          </div>
-                        </div>
-                        <span class="cyber-badge bg-amber-950 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
-                          ${coachAdvice.priority}
-                        </span>
-                      </div>
-
-                      <div class="mt-3 space-y-2.5 text-xs">
-                        <div class="p-2.5 rounded-lg bg-amber-950/40 border-l-2 border-amber-400 text-amber-200 text-[11px] italic leading-relaxed font-serif">
-                          "${coachAdvice.quote}"
-                        </div>
-
-                        <div>
-                          <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Tactical Verdict:</span>
-                          <p class="text-slate-300 mt-0.5 leading-relaxed text-[11px]">
-                            ${coachAdvice.verdict}
-                          </p>
-                        </div>
-
-                        <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-700/80 space-y-1">
-                          <div class="flex items-center gap-1.5 text-amber-400 text-[10px] font-sub uppercase font-bold">
-                            <span>⚡</span> Duker's Golden Execution Rule:
-                          </div>
-                          <div class="text-white font-mono text-[11px] font-semibold">
-                            ${coachAdvice.rule}
-                          </div>
-                        </div>
-
-                        <div class="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/40 space-y-1">
-                          <div class="flex items-center gap-1.5 text-emerald-400 text-[10px] font-sub uppercase font-bold">
-                            <span>🏋️</span> Prescribed 20-Min Counter-Drill:
-                          </div>
-                          <div class="text-emerald-200 text-[11px] leading-relaxed">
-                            ${coachAdvice.drill}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button id="goToTuitionTimeBtn" class="w-full py-2 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold uppercase rounded-lg text-xs tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all">
-                      <span>▶️</span> Study Lesson in Tuition Time Masterclass
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- ============================================================ -->
-              <!-- MATCH SCRIM SCORE CALCULATOR & ROOT-CAUSE LOGGER FORM        -->
-              <!-- ============================================================ -->
-              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-4">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div>
-                    <h4 class="text-sm font-heading font-bold uppercase text-white tracking-wider">
-                      ⚡ Log Scrim Match & Diagnose Wipe Cause
-                    </h4>
-                    <p class="text-[11px] text-slate-400">Input your placement, kills, and select the root-cause wipe reason to calibrate team analytics.</p>
-                  </div>
-                  <span class="cyber-badge bg-slate-900 border border-slate-700 text-slate-300 text-[10px]">
-                    Match ${Math.min(analytics.totalMatches + 1, 6)} of 6
+                  <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>🎯</span> Squad Blunder Diagnostics & Fatal Weakness Analysis
+                  </h4>
+                  <span class="px-2.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] font-mono font-bold">
+                    6-MATCH DIAGNOSTIC
                   </span>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Match Number</label>
-                    <select id="ffMatchNumInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none focus:border-rose-500">
-                      <option value="1" ${analytics.totalMatches + 1 === 1 ? 'selected' : ''}>Match 1</option>
-                      <option value="2" ${analytics.totalMatches + 1 === 2 ? 'selected' : ''}>Match 2</option>
-                      <option value="3" ${analytics.totalMatches + 1 === 3 ? 'selected' : ''}>Match 3</option>
-                      <option value="4" ${analytics.totalMatches + 1 === 4 ? 'selected' : ''}>Match 4</option>
-                      <option value="5" ${analytics.totalMatches + 1 === 5 ? 'selected' : ''}>Match 5</option>
-                      <option value="6" ${analytics.totalMatches + 1 === 6 ? 'selected' : ''}>Match 6 (Finals)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Tournament Map</label>
-                    <select id="ffMapInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-amber-300 font-bold outline-none focus:border-rose-500">
-                      <option value="Bermuda">Bermuda (Peak / Clock Tower)</option>
-                      <option value="NeXTerra">NeXTerra (Grav Labs 0-G Arena)</option>
-                      <option value="Solara">Solara (Helios Solar Fields)</option>
-                      <option value="Purgatory">Purgatory (Brasilia / Central)</option>
-                      <option value="Kalahari">Kalahari (Refinery / High-Ground)</option>
-                      <option value="Alpine">Alpine (Snow Cap / Railroad)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Squad Final Placement (1st to 12th)</label>
-                    <select id="ffPlacementInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white font-mono outline-none focus:border-rose-500">
-                      <option value="1">#1 - Booyah! 🏆 (12 Pts)</option>
-                      <option value="2">#2 - 2nd Place (9 Pts)</option>
-                      <option value="3">#3 - 3rd Place (8 Pts)</option>
-                      <option value="4">#4 - 4th Place (7 Pts)</option>
-                      <option value="5">#5 - 5th Place (6 Pts)</option>
-                      <option value="6">#6 - 6th Place (5 Pts)</option>
-                      <option value="7">#7 - 7th Place (4 Pts)</option>
-                      <option value="8">#8 - 8th Place (3 Pts)</option>
-                      <option value="9">#9 - 9th Place (2 Pts)</option>
-                      <option value="10">#10 - 10th Place (1 Pt)</option>
-                      <option value="11">#11 - 11th Place (0 Pts)</option>
-                      <option value="12">#12 - 12th Place (0 Pts)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Squad Total Kills (+1 Pt Each)</label>
-                    <input type="number" id="ffKillsInput" min="0" max="48" value="6" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white font-mono outline-none focus:border-rose-500" placeholder="e.g. 6"/>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-rose-400 mb-1">
-                      🚨 Root Cause of Elimination / Throw Mistake
-                    </label>
-                    <select id="ffMistakeInput" class="w-full bg-slate-900 border border-rose-900/80 rounded-lg p-2.5 text-xs text-rose-200 outline-none focus:border-rose-500">
-                      <optgroup label="🏆 Flawless Execution">
-                        <option value="clean">🏆 None (Clean Booyah / Flawless Fight)</option>
-                      </optgroup>
-                      <optgroup label="🚨 Critical Tactical Blunders">
-                        <option value="trigger_discipline">🎯 Trigger Discipline Failure (Premature Firing)</option>
-                        <option value="late_zone_rotation">⚡ Late Zone Rotation (Gatekept in Blue Zone)</option>
-                        <option value="third_party_blindspot">👀 Third-Party Blindspot (Tunnel Vision)</option>
-                      </optgroup>
-                      <optgroup label="🛡️ Positioning & Movement Blunders">
-                        <option value="open_ground_no_gloo">🛡️ Pushed Open Ground Without Gloo / Smoke</option>
-                        <option value="split_anchor_no_refrag">👥 Split from Anchor / No Re-Frag Available</option>
-                      </optgroup>
-                      <optgroup label="📦 Early Game & Utility Blunders">
-                        <option value="drop_contest_starved">📦 Poor Drop Contest / Loot Starved</option>
-                        <option value="greedy_box_looting">💀 Greedy Death-Box Looting Under Fire</option>
-                        <option value="utility_starved">💣 Utility Starved / Mistimed Frag Cooking</option>
-                      </optgroup>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">
-                      📹 VOD Review Clip URL / Timestamp Notes (Optional)
-                    </label>
-                    <input type="text" id="ffVodInput" placeholder="e.g. https://youtu.be/xyz or Discord stream clip" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none focus:border-cyan-500 font-mono"/>
-                  </div>
-
-                  <div class="md:col-span-2">
-                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">
-                      📝 IGL / Coach Debrief Action Plan
-                    </label>
-                    <input type="text" id="ffNotesInput" placeholder="e.g. Rotated 30s late across river; gatekept by Orangutan. Need early vehicle split next match." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 outline-none focus:border-rose-500"/>
-                  </div>
-                </div>
-
-                <div class="pt-2">
-                  <button id="addFFScrimMatchBtn" class="w-full py-3 bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2">
-                    <span>⚡</span> Log Match & Recalculate Weakness Diagnostics
-                  </button>
-                </div>
-              </div>
-
-              <!-- ============================================================ -->
-              <!-- DAILY MATCH SET HISTORY                                      -->
-              <!-- ============================================================ -->
-              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 space-y-3">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div>
-                    <h4 class="text-sm font-heading font-bold uppercase text-white">Daily Match Set History & VOD Log</h4>
-                    <span class="text-xs text-slate-400 font-mono">${this.ffScrimMatches.length} Matches Recorded</span>
-                  </div>
-                  <button id="resetFFScrimHistoryBtn" class="text-slate-500 hover:text-rose-400 text-xs font-mono transition-colors">
-                    🗑️ Reset Match History
-                  </button>
-                </div>
-
-                <div class="space-y-2.5 font-mono text-xs">
-                  ${this.ffScrimMatches.map(m => {
-                    const cat = analytics.categories.find(c => c.id === m.mistakeId) || { icon: '⚠️', name: m.fatalMistake || 'Positioning Error', color: 'rose' };
-                    const isClean = m.mistakeId === 'clean' || (m.fatalMistake && m.fatalMistake.includes('Clean'));
-
-                    return `
-                      <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-slate-700 transition-colors">
-                        <div class="flex flex-col sm:flex-row sm:items-center gap-2.5">
-                          <div class="flex items-center gap-2">
-                            <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px]">M${m.matchNum}</span>
-                            <strong class="text-white font-sans">${m.map}</strong>
-                            <span class="${m.placement === 1 ? 'text-amber-400 font-black' : 'text-primary font-bold'}">#${m.placement} ${m.placement === 1 ? '🏆' : ''}</span>
-                            <span class="text-slate-400 text-[11px]">(${m.placementPts} place + ${m.kills} kills)</span>
-                          </div>
-
-                          <!-- Mistake Pill -->
-                          <div class="flex items-center gap-1.5">
-                            <span class="cyber-badge ${isClean ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40' : 'bg-rose-950/60 text-rose-300 border border-rose-500/40'} text-[10px] font-sans flex items-center gap-1">
-                              <span>${cat.icon}</span>
-                              <span>${cat.name}</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        <!-- Debrief & Action Area -->
-                        <div class="flex items-center justify-between md:justify-end gap-3 font-sans">
-                          ${m.debriefNotes ? `
-                            <span class="text-slate-400 text-[11px] truncate max-w-[220px]" title="${m.debriefNotes}">"${m.debriefNotes}"</span>
-                          ` : ''}
-
-                          ${m.vodUrl ? `
-                            <button class="watch-vod-btn px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 rounded text-[10px] font-bold font-mono flex items-center gap-1" data-vod="${m.vodUrl}" data-title="Match ${m.matchNum} VOD Review (${m.map})" data-notes="${m.debriefNotes || ''}">
-                              ▶️ Watch VOD
-                            </button>
-                          ` : ''}
-
-                          <div class="text-sm font-black text-rose-400 font-mono shrink-0">
-                            ${m.totalPts} pts
-                          </div>
-
-                          <button class="delete-ff-match-btn text-slate-500 hover:text-rose-400 font-mono text-xs ml-1" data-id="${m.id}" title="Delete Scrim Log">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
+                <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 space-y-2">
+                  <div class="font-bold text-amber-300 uppercase">Coach Duker Diagnosis:</div>
+                  <p>${coachAdvice.diagnosis}</p>
+                  <div class="font-bold text-cyan-400 uppercase mt-2">Recommended 3-Step Fix:</div>
+                  <ul class="list-disc list-inside space-y-1 text-slate-300">
+                    ${coachAdvice.drills.map(d => `<li>${d}</li>`).join('')}
+                  </ul>
                 </div>
               </div>
             </div>
           ` : ''}
-
-          <!-- ============================================================ -->
-          <!-- MODE 3: COACH DUKER TUITION TIME PRO VOD MASTERCLASS          -->
-          <!-- ============================================================ -->
-          ${this.ffScrimMode === 'tuition_time' ? `
-            <div class="space-y-6 animate-fade-in">
-              <!-- Tuition Time Banner -->
-              <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-950/30 via-slate-950 to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center font-black text-amber-300 text-lg">
-                    🎓
-                  </div>
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="cyber-badge bg-amber-950 border border-amber-500/60 text-amber-300 text-[10px] font-bold">
-                        TITAN / TEAM ELITE OFFICIAL COACH
-                      </span>
-                      <span class="cyber-badge bg-slate-800 text-slate-300 text-[10px] font-mono">
-                        TUITION TIME VOD SUITE
-                      </span>
-                    </div>
-                    <h3 class="text-xl font-heading font-black text-white uppercase tracking-wider mt-1">
-                      Coach Duker's Tuition Time Pro VOD Masterclass
-                    </h3>
-                    <p class="text-xs text-slate-300 mt-0.5 max-w-2xl leading-relaxed">
-                      Comprehensive macro blueprints, Zone 4/5 hard shift physics, 0.15s gloo box resets under crossfire, and 3-1 split re-frag mathematics analyzed from championship teams.
-                    </p>
-                  </div>
-                </div>
-
-                <button class="ff-scrim-mode-btn px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-sub font-bold uppercase tracking-wider shrink-0" data-mode="my_squad">
-                  ← Back to Squad Tracker
-                </button>
-              </div>
-
-              <!-- 4 Interactive Tuition Time Lessons -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                ${tuitionLessons.map(lesson => `
-                  <div class="cyber-panel p-5 rounded-2xl border border-slate-800 hover:border-amber-500/50 transition-all flex flex-col justify-between space-y-4">
-                    <div class="space-y-3">
-                      <!-- Lesson Header -->
-                      <div class="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
-                        <div>
-                          <span class="cyber-badge ${lesson.badgeColor === 'amber' ? 'bg-amber-950/60 text-amber-300 border border-amber-500/40' : lesson.badgeColor === 'rose' ? 'bg-rose-950/60 text-rose-300 border border-rose-500/40' : lesson.badgeColor === 'purple' ? 'bg-purple-950/60 text-purple-300 border border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'} text-[10px] font-bold">
-                            ${lesson.badge}
-                          </span>
-                          <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider mt-1.5 leading-snug">
-                            ${lesson.title}
-                          </h4>
-                          <p class="text-[11px] text-amber-400 font-sub font-semibold mt-0.5">
-                            ${lesson.subtitle}
-                          </p>
-                        </div>
-                        <span class="text-slate-400 font-mono text-[10px] shrink-0 bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                          ⏱️ ${lesson.duration}
-                        </span>
-                      </div>
-
-                      <!-- Pro Teams Analyzed -->
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Pro Teams Studied:</span>
-                        ${lesson.proTeams.map(team => `
-                          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-cyan-300 border border-slate-700/60">${team}</span>
-                        `).join('')}
-                      </div>
-
-                      <!-- Summary -->
-                      <p class="text-xs text-slate-300 leading-relaxed">
-                        ${lesson.summary}
-                      </p>
-
-                      <!-- Golden Execution Rules -->
-                      <div class="space-y-1.5 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-                        <div class="text-[10px] font-sub uppercase font-bold text-amber-400 flex items-center gap-1">
-                          <span>⚡</span> 3 Core Golden Execution Rules:
-                        </div>
-                        <ul class="space-y-1 text-[11px] text-slate-300 font-mono">
-                          ${lesson.keyRules.map(rule => `
-                            <li class="flex items-start gap-1.5">
-                              <span class="text-amber-400">▸</span>
-                              <span>${rule}</span>
-                            </li>
-                          `).join('')}
-                        </ul>
-                      </div>
-
-                      <!-- Coach Duker Breakdown Box -->
-                      <div class="p-3 rounded-xl bg-amber-950/20 border-l-2 border-amber-500 text-xs text-amber-200/90 leading-relaxed italic">
-                        ${lesson.tuitionNotes}
-                      </div>
-
-                      <!-- Squad Drill Prescription -->
-                      <div class="p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
-                        <span class="text-base">🏋️</span>
-                        <div class="text-[11px]">
-                          <strong>Squad Drill:</strong> ${lesson.drillAction}
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Watch Breakdown Button -->
-                    <button class="open-lesson-modal-btn w-full py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all" data-lesson-id="${lesson.id}">
-                      <span>▶️</span> Watch Tuition Breakdown & Telemetry
-                    </button>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- ============================================================ -->
-          <!-- VOD & TUITION TIME INTERACTIVE MODAL OVERLAY                  -->
-          <!-- ============================================================ -->
-          <div id="vodReviewModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
-            <div class="cyber-panel w-full max-w-2xl rounded-2xl border border-amber-500/50 bg-slate-950 shadow-2xl p-5 space-y-4 animate-fade-in">
-              <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div class="flex items-center gap-2">
-                  <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
-                  <h4 id="vodModalTitle" class="text-sm font-heading font-bold uppercase text-white tracking-wider">
-                    VOD Review Telemetry Player
-                  </h4>
-                </div>
-                <button id="closeVodModalBtn" class="text-slate-400 hover:text-white text-xs font-mono px-2 py-1 rounded bg-slate-900 border border-slate-800">
-                  ✕ Close
-                </button>
-              </div>
-
-              <!-- Video / Chalkboard Container -->
-              <div id="vodPlayerContainer" class="w-full aspect-video bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-center relative overflow-hidden">
-                <!-- Injected iframe or interactive chalkboard -->
-              </div>
-
-              <!-- Debrief / Notes Field in Modal -->
-              <div id="vodModalNotesContainer" class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
-                <!-- Injected Notes -->
-              </div>
-            </div>
-          </div>
-
         </div>
       `;
 
-      this.bindFFScrimEvents();
+      this.bindFFScrimsEvents(container);
     }
 
-    bindFFScrimEvents() {
-      // 1. Mode Switcher (Lobby Leaderboard vs My Squad vs Tuition Time)
-      document.querySelectorAll('.ff-scrim-mode-btn').forEach(btn => {
+    bindFFScrimsEvents(container) {
+      // 1. Mode Switcher Buttons
+      container.querySelectorAll('.ff-scrim-mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const mode = btn.getAttribute('data-mode');
           if (mode) {
@@ -13179,201 +13500,180 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
         });
       });
 
-      // Quick switch buttons from Analytics to Tuition Time
-      const openTuitionBtn = document.getElementById('openTuitionTimeFromAnalyticsBtn');
-      if (openTuitionBtn) {
-        openTuitionBtn.addEventListener('click', () => {
-          this.ffScrimMode = 'tuition_time';
-          this.renderTabContent();
-        });
-      }
-      const goToTuitionBtn = document.getElementById('goToTuitionTimeBtn');
-      if (goToTuitionBtn) {
-        goToTuitionBtn.addEventListener('click', () => {
-          this.ffScrimMode = 'tuition_time';
-          this.renderTabContent();
-        });
-      }
-
-      // 2. Tournament Metadata Inputs
-      const titleInput = document.getElementById('tourneyTitleInput');
-      if (titleInput) {
-        titleInput.addEventListener('input', (e) => {
-          this.ffTourneyMeta.title = e.target.value;
-        });
-      }
-      const stageInput = document.getElementById('tourneyStageInput');
-      if (stageInput) {
-        stageInput.addEventListener('input', (e) => {
-          this.ffTourneyMeta.stage = e.target.value;
-        });
-      }
-      const orgInput = document.getElementById('tourneyOrganizerInput');
-      if (orgInput) {
-        orgInput.addEventListener('input', (e) => {
-          this.ffTourneyMeta.organizer = e.target.value;
-        });
-      }
-
-      // 3. Download Broadcast PNG Button
-      const downloadBtn = document.getElementById('downloadLeaderboardPNGBtn');
-      if (downloadBtn) {
-        downloadBtn.addEventListener('click', () => {
-          this.exportLeaderboardPNG();
-          const btnText = document.getElementById('downloadPNGBtnText');
-          if (btnText) btnText.innerText = 'IMAGE DOWNLOADED! ✅';
-          setTimeout(() => {
-            if (btnText) btnText.innerText = 'Download Broadcast Image (.PNG)';
-          }, 2000);
-        });
-      }
-
-      // 4. Toggle Graphic Preview
-      const togglePreviewBtn = document.getElementById('toggleGraphicPreviewBtn');
-      const previewContainer = document.getElementById('leaderboardGraphicPreviewContainer');
-      const previewImg = document.getElementById('leaderboardPreviewImg');
-      const closePreviewBtn = document.getElementById('closeGraphicPreviewBtn');
-
-      if (togglePreviewBtn && previewContainer && previewImg) {
-        togglePreviewBtn.addEventListener('click', () => {
-          const dataURL = this.exportLeaderboardPNG();
-          previewImg.src = dataURL;
-          previewContainer.classList.remove('hidden');
-        });
-      }
-      if (closePreviewBtn && previewContainer) {
-        closePreviewBtn.addEventListener('click', () => {
-          previewContainer.classList.add('hidden');
-        });
-      }
-
-      // 5. Quick Adjust Score Buttons
-      document.querySelectorAll('.lobby-adjust-btn').forEach(adjBtn => {
-        adjBtn.addEventListener('click', () => {
-          const teamId = adjBtn.getAttribute('data-team-id');
-          const action = adjBtn.getAttribute('data-action');
-          const team = this.ffLobbyTeams.find(t => t.id === teamId);
-
-          if (team) {
-            if (action === 'add_kill') {
-              team.kills += 1;
-              team.totalPts += 1;
-            } else if (action === 'sub_kill') {
-              if (team.kills > 0) {
-                team.kills -= 1;
-                team.totalPts -= 1;
-              }
-            } else if (action === 'add_booyah') {
-              team.booyahs += 1;
-              team.placementPts += 12;
-              team.totalPts += 12;
-            }
-            this.renderTabContent();
-          }
-        });
-      });
-
-      // 6. Reset Lobby Scores Button
-      const resetBtn = document.getElementById('resetLobbyScoresBtn');
-      if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-          if (confirm('Reset all 12 teams scores to 0 for a new tournament?')) {
-            this.ffLobbyTeams.forEach(t => {
-              t.matches = 0;
-              t.booyahs = 0;
-              t.placementPts = 0;
-              t.kills = 0;
-              t.totalPts = 0;
-            });
-            this.renderTabContent();
-          }
-        });
-      }
-
-      // 7. Fill Pro Lobby Button
-      const fillProBtn = document.getElementById('fillProLobbyBtn');
-      if (fillProBtn) {
-        fillProBtn.addEventListener('click', () => {
-          this.ffLobbyTeams = [
-            { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
-            { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
-            { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
-            { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
-            { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
-            { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
-            { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
-            { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
-            { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
-            { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
-            { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
-            { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
-          ];
-          this.renderTabContent();
-        });
-      }
-
-      // 8. Add Match Score & Mistake in My Squad Mode
-      const addMatchBtn = document.getElementById('addFFScrimMatchBtn');
+      // 2. 1-Tap Scorekeeper: Log Match Button
+      const addMatchBtn = container.querySelector('#addScrimMatchBtn');
       if (addMatchBtn) {
         addMatchBtn.addEventListener('click', () => {
-          const matchNum = parseInt(document.getElementById('ffMatchNumInput')?.value || "1", 10);
-          const map = document.getElementById('ffMapInput')?.value || "Bermuda";
-          const placement = parseInt(document.getElementById('ffPlacementInput')?.value || "1", 10);
-          const kills = parseInt(document.getElementById('ffKillsInput')?.value || "0", 10);
-          const mistakeId = document.getElementById('ffMistakeInput')?.value || "clean";
-          const vodUrl = (document.getElementById('ffVodInput')?.value || "").trim();
-          const debriefNotes = (document.getElementById('ffNotesInput')?.value || "").trim();
-
-          const placementPts = this.getFFPlacementPoints(placement);
-          const totalPts = placementPts + kills;
-
-          const categories = this.getFFMistakeCategories();
-          const chosenCategory = categories.find(c => c.id === mistakeId);
-          const fatalMistake = chosenCategory ? chosenCategory.name : 'None (Clean Booyah)';
-
-          const newMatch = {
-            id: Date.now(),
-            matchNum,
-            map,
-            placement,
-            kills,
-            placementPts,
-            totalPts,
-            mistakeId,
-            fatalMistake,
-            vodUrl,
-            debriefNotes: debriefNotes || (placement === 1 ? 'Solid coordination and clean zone timing.' : 'Post-match tactical review needed.')
-          };
-
-          this.ffScrimMatches.unshift(newMatch);
-          this.saveFFScrimMatches();
-          this.renderTabContent();
-        });
-      }
-
-      // 9. Reset Scrim History Button
-      const resetHistoryBtn = document.getElementById('resetFFScrimHistoryBtn');
-      if (resetHistoryBtn) {
-        resetHistoryBtn.addEventListener('click', () => {
-          if (confirm('Clear all recorded scrim matches and reset weakness diagnostics?')) {
-            this.ffScrimMatches = [];
-            this.saveFFScrimMatches();
-            this.renderTabContent();
+          const mapEl = container.querySelector('#scrimLogMap');
+          const placementEl = container.querySelector('#scrimLogPlacement');
+          const killsEl = container.querySelector('#scrimLogKills');
+          if (mapEl && placementEl && killsEl) {
+            const map = mapEl.value;
+            const placement = parseInt(placementEl.value, 10);
+            const kills = parseInt(killsEl.value, 10) || 0;
+            this.logNewScrimMatch(map, placement, kills);
+            this.playChimeSound('stage_complete');
           }
         });
       }
 
-      // 10. Delete Individual Match
-      document.querySelectorAll('.delete-ff-match-btn').forEach(btn => {
+      // 3. Delete Match Button
+      container.querySelectorAll('.delete-scrim-match-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const id = parseInt(btn.getAttribute('data-id'), 10);
-          if (id) {
-            this.ffScrimMatches = this.ffScrimMatches.filter(m => m.id !== id);
-            this.saveFFScrimMatches();
-            this.renderTabContent();
+          const idx = parseInt(btn.getAttribute('data-match-idx'), 10);
+          if (!isNaN(idx)) this.deleteScrimMatch(idx);
+        });
+      });
+
+      // 4. Reset Scrim Set
+      const resetSetBtn = container.querySelector('#resetScrimSetBtn');
+      if (resetSetBtn) {
+        resetSetBtn.addEventListener('click', () => {
+          if (confirm('Reset all logged matches in this set?')) {
+            this.resetScrimMatches();
+          }
+        });
+      }
+
+      // 5. Copy WhatsApp / Discord Scorecard
+      const copyScorecardBtn = container.querySelector('#copyWhatsAppScorecardBtn');
+      if (copyScorecardBtn) {
+        copyScorecardBtn.addEventListener('click', () => {
+          const text = this.getWhatsAppScorecardString();
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => {
+              const btnText = container.querySelector('#copyScorecardBtnText');
+              if (btnText) {
+                btnText.textContent = 'COPIED TO CLIPBOARD! ✅';
+                setTimeout(() => { btnText.textContent = 'Copy WhatsApp / Discord Card'; }, 2000);
+              }
+            });
+          }
+        });
+      }
+
+      // 6. Famous Scrims: Copy Registration Template
+      container.querySelectorAll('.copy-scrim-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tmpl = decodeURIComponent(btn.getAttribute('data-template') || '');
+          if (tmpl && navigator.clipboard) {
+            navigator.clipboard.writeText(tmpl).then(() => {
+              const orig = btn.textContent;
+              btn.textContent = 'Copied Template! ✅';
+              setTimeout(() => { btn.textContent = orig; }, 1500);
+            });
           }
         });
       });
+
+      // 7. Room Dispatcher: Parse Raw Text
+      const parseRoomBtn = container.querySelector('#parseRoomTextBtn');
+      if (parseRoomBtn) {
+        parseRoomBtn.addEventListener('click', () => {
+          const raw = container.querySelector('#rawRoomTextInput');
+          if (raw && raw.value.trim()) {
+            this.parseRoomText(raw.value);
+            this.playRadioBeep();
+          }
+        });
+      }
+
+      const sampleRoomBtn = container.querySelector('#sampleRoomTextBtn');
+      if (sampleRoomBtn) {
+        sampleRoomBtn.addEventListener('click', () => {
+          const raw = container.querySelector('#rawRoomTextInput');
+          if (raw) {
+            raw.value = 'Eagle Scrims Match 1 ID: 8941203 Pass: 1234 Slot: 7 Map: Bermuda';
+            this.parseRoomText(raw.value);
+          }
+        });
+      }
+
+      // 8. Room Dispatcher: Copy ID & Pass
+      const copyIdBtn = container.querySelector('#copyRoomIdBtn');
+      if (copyIdBtn) {
+        copyIdBtn.addEventListener('click', () => {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(this.roomDispatcher.roomId).then(() => {
+              copyIdBtn.textContent = 'Copied ID! ✅';
+              setTimeout(() => { copyIdBtn.textContent = 'Copy Room ID 📋'; }, 1500);
+            });
+          }
+        });
+      }
+
+      const copyPassBtn = container.querySelector('#copyRoomPassBtn');
+      if (copyPassBtn) {
+        copyPassBtn.addEventListener('click', () => {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(this.roomDispatcher.pass).then(() => {
+              copyPassBtn.textContent = 'Copied Pass! ✅';
+              setTimeout(() => { copyPassBtn.textContent = 'Copy Pass 📋'; }, 1500);
+            });
+          }
+        });
+      }
+
+      const copyForwardBtn = container.querySelector('#copySquadForwardBtn');
+      if (copyForwardBtn) {
+        copyForwardBtn.addEventListener('click', () => {
+          const msg = `🚨 *SCRIM ROOM IS LIVE!*\n🔑 Room ID: *${this.roomDispatcher.roomId}*\n🔒 Pass: *${this.roomDispatcher.pass}*\n📍 Our Slot: *Slot ${this.roomDispatcher.slot}*\n🗺️ Map: *${this.roomDispatcher.map}*\n⚠️ Enter immediately before 2-minute room lock!`;
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(msg).then(() => {
+              copyForwardBtn.textContent = 'Forward Copied! 📱';
+              setTimeout(() => { copyForwardBtn.textContent = 'Forward to Squad 📱'; }, 1500);
+            });
+          }
+        });
+      }
+
+      const startCountdownBtn = container.querySelector('#startRoomCountdownBtn');
+      if (startCountdownBtn) {
+        startCountdownBtn.addEventListener('click', () => {
+          this.startRoomCountdown();
+        });
+      }
+
+      // 9. Voice Room Controls
+      const toggleVoiceBtn = container.querySelector('#toggleVoiceConnectBtn');
+      if (toggleVoiceBtn) {
+        toggleVoiceBtn.addEventListener('click', () => this.toggleVoiceRoomConnect());
+      }
+
+      const toggleMuteBtn = container.querySelector('#toggleVoiceMuteBtn');
+      if (toggleMuteBtn) {
+        toggleMuteBtn.addEventListener('click', () => this.toggleVoiceRoomMute());
+      }
+
+      const toggleDeafenBtn = container.querySelector('#toggleVoiceDeafenBtn');
+      if (toggleDeafenBtn) {
+        toggleDeafenBtn.addEventListener('click', () => this.toggleVoiceRoomDeafen());
+      }
+
+      const testRadioBtn = container.querySelector('#testVoiceRadioBeepBtn');
+      if (testRadioBtn) {
+        testRadioBtn.addEventListener('click', () => this.playRadioBeep());
+      }
+
+      // 10. Quick Voice Pings
+      container.querySelectorAll('.voice-quick-ping-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.playRadioBeep();
+          const ping = btn.getAttribute('data-ping');
+          const notesInput = container.querySelector('#voiceRoomNotesInput');
+          if (notesInput && ping) {
+            notesInput.value += `\n[${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}] 📢 ${ping}`;
+            this.voiceRoom.notes = notesInput.value;
+          }
+        });
+      });
+
+      const notesInput = container.querySelector('#voiceRoomNotesInput');
+      if (notesInput) {
+        notesInput.addEventListener('input', (e) => {
+          this.voiceRoom.notes = e.target.value;
+        });
+      }
 
       // 11. Watch VOD Modal Events
       document.querySelectorAll('.watch-vod-btn').forEach(btn => {
@@ -15439,6 +15739,253 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       ];
     }
 
+    
+    // --- SMART BACKPACK & CLUTCH IQ METHODS ---
+    getBackpackData(role, level) {
+      const maxCap = level === 2 ? 200 : 300;
+      if (role === 'rusher') {
+        return {
+          roleName: '⚡ Entry Rusher & Fragger',
+          capacity: maxCap,
+          used: level === 2 ? 185 : 276,
+          items: [
+            { category: 'Weapons & Ammo', name: 'SMG Ammo (MP40 / Bizon)', qty: level === 2 ? '90 rounds' : '120 rounds', weight: level === 2 ? 45 : 60, icon: '🔫' },
+            { category: 'Weapons & Ammo', name: 'Shotgun Shells (M1887 / MAG-7)', qty: level === 2 ? '18 shells' : '25 shells', weight: level === 2 ? 18 : 25, icon: '💥' },
+            { category: 'Gloo Walls', name: 'Tactical Gloo Walls', qty: level === 2 ? '5 Gloos' : '7 Gloos', weight: level === 2 ? 50 : 70, icon: '🛡️' },
+            { category: 'Medical', name: 'Standard Medkits', qty: '3 Medkits', weight: 30, icon: '🩹' },
+            { category: 'Medical', name: 'Inhalers (Instant Cast)', qty: level === 2 ? '3 Inhalers' : '5 Inhalers', weight: level === 2 ? 15 : 25, icon: '💨' },
+            { category: 'Medical', name: 'Super Medkit (+200 HP)', qty: level === 2 ? '0 (Skip)' : '1 Super Medkit', weight: level === 2 ? 0 : 15, icon: '💊' },
+            { category: 'Throwables', name: 'Cooked Frag Grenade', qty: '2 Frags', weight: 24, icon: '💣' },
+            { category: 'Throwables', name: 'Tactical Smoke Screen', qty: '1 Smoke', weight: 12, icon: '🌫️' }
+          ],
+          whatToDrop: [
+            'Drop excess SMG ammo above 120! In competitive scrims, you pick up ammo from boxes of teams you wipe.',
+            'Drop Lv 1 Muzzles and extra 2x/4x scopes: rushers need inventory space strictly for Gloo Walls.',
+            'Never hold more than 3 standard Medkits: their 4.0s cast time gets you killed in fast close-range trades.'
+          ]
+        };
+      } else if (role === 'assaulter') {
+        return {
+          roleName: '🎯 Mid-Range Assaulter & Flex',
+          capacity: maxCap,
+          used: level === 2 ? 190 : 272,
+          items: [
+            { category: 'Weapons & Ammo', name: 'AR Ammo (Groza / AK / SCAR)', qty: level === 2 ? '120 rounds' : '160 rounds', weight: level === 2 ? 60 : 80, icon: '🔫' },
+            { category: 'Weapons & Ammo', name: 'Secondary Marksman Ammo', qty: level === 2 ? '50 rounds' : '80 rounds', weight: level === 2 ? 25 : 40, icon: '🎯' },
+            { category: 'Gloo Walls', name: 'Tactical Gloo Walls', qty: level === 2 ? '4 Gloos' : '5 Gloos', weight: level === 2 ? 40 : 50, icon: '🛡️' },
+            { category: 'Medical', name: 'Standard Medkits', qty: '3 Medkits', weight: 30, icon: '🩹' },
+            { category: 'Medical', name: 'Inhalers (Movement Heals)', qty: '4 Inhalers', weight: 20, icon: '💨' },
+            { category: 'Throwables', name: 'Frag Grenades (Air-Burst)', qty: level === 2 ? '2 Frags' : '3 Frags', weight: level === 2 ? 24 : 36, icon: '💣' },
+            { category: 'Throwables', name: 'Flashbangs (Breach Assist)', qty: level === 2 ? '1 Flash' : '2 Flashes', weight: level === 2 ? 8 : 16, icon: '⚡' }
+          ],
+          whatToDrop: [
+            'Drop AR ammo above 160: Carrying 300 AR ammo is the #1 mistake underdogs make. Trade 80 ammo for 2 grenades!',
+            'Drop shotgun chokes or sniper stocks if not actively running secondary sniper.',
+            'Drop duplicate level 2 vests: keep repair kits instead.'
+          ]
+        };
+      } else {
+        return {
+          roleName: '🔭 Sniper Anchor & Recon Support',
+          capacity: maxCap,
+          used: level === 2 ? 175 : 249,
+          items: [
+            { category: 'Weapons & Ammo', name: 'Sniper Ammo (M82B / AWM)', qty: level === 2 ? '30 rounds' : '40 rounds', weight: level === 2 ? 30 : 40, icon: '🎯' },
+            { category: 'Weapons & Ammo', name: 'Secondary DMR Ammo (Woodpecker)', qty: level === 2 ? '50 rounds' : '70 rounds', weight: level === 2 ? 25 : 35, icon: '🔫' },
+            { category: 'Weapons & Ammo', name: 'Emergency Close SMG Ammo', qty: '20 rounds', weight: 10, icon: '💥' },
+            { category: 'Gloo Walls', name: 'Tactical Gloo Walls', qty: level === 2 ? '5 Gloos' : '6 Gloos', weight: level === 2 ? 50 : 60, icon: '🛡️' },
+            { category: 'Medical', name: 'Standard Medkits', qty: '4 Medkits', weight: 40, icon: '🩹' },
+            { category: 'Medical', name: 'Inhalers & EP Boosters', qty: level === 2 ? '4 Inhalers' : '6 Inhalers', weight: level === 2 ? 20 : 30, icon: '💨' },
+            { category: 'Throwables', name: 'Smoke Grenades (Rescue Smokes)', qty: '2 Smokes', weight: 24, icon: '🌫️' }
+          ],
+          whatToDrop: [
+            'NEVER carry 70+ Sniper Ammo! Even in the longest 20-minute match, a sniper fires only 15 to 25 shots.',
+            'Drop close-range AR attachments if running double sniper or sniper-marksman combo.',
+            'Carry extra smoke grenades instead of frags: a sniper\'s primary duty is reviving knocked teammates from 80m away.'
+          ]
+        };
+      }
+    }
+
+    getClutchScenarios() {
+      return [
+        {
+          id: 'broken_wall',
+          title: '🧱 The Broken Brick Wall Shotgun Standoff',
+          badge: 'END-GAME 1V1',
+          situation: 'Zone shrinks in 8 seconds. Enemy with M1887 is head-glitching a broken brick wall waiting for you. You have 1 Gloo Wall, MAG-7, and 140 HP.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Jump straight over the broken wall with MAG-7 spray',
+              winRate: '14%',
+              isPro: false,
+              outcome: '❌ Elimination! The enemy pre-aimed your falling head hitbox. While airborne, you cannot deploy gloo or adjust trajectory.'
+            },
+            {
+              id: 'b',
+              text: 'Deploy Gloo Wall at 45° left angle, fake-sprint left, then right-hand slide peek around brick corner',
+              winRate: '84%',
+              isPro: true,
+              outcome: '👑 Clutch Won! Deploying the gloo forces the enemy to flick their crosshair left, breaking their pre-aim. Your right-hand peek gives you first-shot advantage.'
+            },
+            {
+              id: 'c',
+              text: 'Crouch behind cover and start cooking a 2.5s frag grenade',
+              winRate: '42%',
+              isPro: false,
+              outcome: '⚠️ High Risk! The enemy hears the grenade pin pull and immediately rushes your corner with M1887 while you have no weapon in hand.'
+            }
+          ]
+        },
+        {
+          id: 'balcony_jump',
+          title: '🏢 Two-Story Balcony Jump vs Charge Buster',
+          badge: 'STAIRWAY TRAP',
+          situation: 'Enemy camper is on 2nd floor staircase with a fully charged Charge Buster. You are on ground floor. Zone is closing.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Rush directly up the stairs with a Gloo Wall in hand',
+              winRate: '19%',
+              isPro: false,
+              outcome: '❌ Headshot Taken! A fully charged Charge Buster shell hits for 240+ damage and can penetrate initial gloo wall deployment latency.'
+            },
+            {
+              id: 'b',
+              text: 'Drop smoke on staircase, climb exterior vehicle roof, and boost directly onto 2nd-floor balcony',
+              winRate: '88%',
+              isPro: true,
+              outcome: '👑 Flawless Breach! Staircase camper is staring at the smoke expecting you. You enter from the balcony behind them and take an uncontested knock.'
+            },
+            {
+              id: 'c',
+              text: 'Wait on ground floor and hope the zone pushes them down',
+              winRate: '35%',
+              isPro: false,
+              outcome: '⚠️ Coin Toss! The high-ground player retains 100% camera visibility and shoots you the moment you exit the doorway.'
+            }
+          ]
+        },
+        {
+          id: 'open_field_duel',
+          title: '🛡️ Open Field V-Wall Duel (50m, 1 Gloo Left)',
+          badge: 'AIM DUEL',
+          situation: 'Final circle in open grass with zero rocks. Enemy and you each have 1 Gloo Wall remaining, 50m apart. AC80 Marksman rifle in hand.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Spam all your ammo at the enemy gloo wall to break it',
+              winRate: '22%',
+              isPro: false,
+              outcome: '❌ Out-Played! Gloo walls have 800 HP. While you empty your magazine and get stuck in reload animation, enemy peeks and double-taps you.'
+            },
+            {
+              id: 'b',
+              text: 'Use third-person camera on right-hand edge, bait 1 enemy bullet, and headshot during their recoil reset',
+              winRate: '81%',
+              isPro: true,
+              outcome: '👑 Headshot Knock! The right-hand camera peek allows you to see the enemy without exposing your hitbox. You shoot the split second their gun resets.'
+            },
+            {
+              id: 'c',
+              text: 'Sprint forward in a zigzag across the open field',
+              winRate: '11%',
+              isPro: false,
+              outcome: '❌ Snipe Elimination! Open ground sprint has zero damage reduction. Any Tier-1 marksman rifle downs you in 2 shots.'
+            }
+          ]
+        },
+        {
+          id: 'one_v_two_cross',
+          title: '⚔️ 1v2 End-Game Crossfire Isolation',
+          badge: '1V2 CLUTCH',
+          situation: 'You are solo against a 2-man squad. Enemy 1 is at 10 o\'clock; Enemy 2 is at 2 o\'clock. Both are pushing simultaneously. You have 3 Gloo Walls.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Backpedal and alternate single shots between both enemies',
+              winRate: '12%',
+              isPro: false,
+              outcome: '❌ Crossfire Death! Fighting two enemies at different angles means your back is always exposed to one of them.'
+            },
+            {
+              id: 'b',
+              text: 'Deploy 2 Gloo Walls to completely blind Enemy 1\'s line of sight; aggressively shotgun-rush Enemy 2 in an isolated 1v1',
+              winRate: '79%',
+              isPro: true,
+              outcome: '👑 1v2 Clutched! By blocking Enemy 1 with gloo walls, you turn an unwinnable crossfire into two separate 1v1 duels. You knock Enemy 2, then re-engage Enemy 1.'
+            },
+            {
+              id: 'c',
+              text: 'Build a 360° gloo wall box around yourself and heal to 200 HP',
+              winRate: '28%',
+              isPro: false,
+              outcome: '⚠️ Trapped! Both enemies immediately surround your box, cook cluster grenades, and blast you through the walls.'
+            }
+          ]
+        },
+        {
+          id: 'heal_off_smoke',
+          title: '💨 Final Zone Heal-Off Smoke Screen',
+          badge: '15 DPS COLLAPSE',
+          situation: 'Final zone is completely closed (15 HP/sec DPS). Enemy is on other side of a stone. You have 1 Super Medkit and 2 Inhalers.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Sprint around the stone to find and shoot the enemy',
+              winRate: '25%',
+              isPro: false,
+              outcome: '❌ Dead in Zone! Blue zone drains 15 HP/s. In the 2 seconds it takes to locate the enemy, your HP drops to zero before you finish shooting.'
+            },
+            {
+              id: 'b',
+              text: 'Pop 1 Inhaler instantly for EP/HP buffer, crouch, and begin Super Medkit cast at 130 HP',
+              winRate: '86%',
+              isPro: true,
+              outcome: '👑 Booyah! The Super Medkit restores +200 HP, out-healing standard medkits. The enemy dies to the 15 DPS zone while your cast completes.'
+            },
+            {
+              id: 'c',
+              text: 'Spam both inhalers while jumping in place',
+              winRate: '45%',
+              isPro: false,
+              outcome: '⚠️ Close Loss! Inhalers restore 20 HP each, but 15 DPS drains 30 HP in 2 seconds. You run out of heals before the enemy.'
+            }
+          ]
+        },
+        {
+          id: 'tower_sniper_bait',
+          title: '🗼 High Tower Sniper Bait & Push',
+          badge: 'TACTICAL ROTATION',
+          situation: 'Enemy sniper is holding top of high three-story tower. You need to cross a 40m open road to enter the safe zone.',
+          choices: [
+            {
+              id: 'a',
+              text: 'Sprint across the road with knife in hand for maximum run speed',
+              winRate: '8%',
+              isPro: false,
+              outcome: '❌ Snipe Elimination! A straight-line sprint from 40m is the easiest headshot line for an AWM/M82B.'
+            },
+            {
+              id: 'b',
+              text: 'Throw smoke grenade 15m away as a fake visual distraction, then deploy 2 zigzag Gloo Walls along low ditch',
+              winRate: '83%',
+              isPro: true,
+              outcome: '👑 Safe Rotation! Sniper turns attention to scope the smoke cloud. By the time they realize you moved along the low ditch, you are safely inside the compound.'
+            },
+            {
+              id: 'c',
+              text: 'Stop in the open and try to trade headshots with an AR',
+              winRate: '31%',
+              isPro: false,
+              outcome: '⚠️ Bad Trade! High-ground sniper has full helmet-glitch cover while your whole torso is exposed.'
+            }
+          ]
+        }
+      ];
+    }
+
     renderPlaybookTab(container) {
       if (!this.activePlaybookView) this.activePlaybookView = 'warmup';
       if (!this.calloutActiveCard) this.calloutActiveCard = 'blue_double';
@@ -15450,9 +15997,12 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
         : allBuildings.filter(b => b.category === this.calloutActiveFilter);
 
       const activeBuilding = allBuildings.find(b => b.id === this.calloutActiveCard) || allBuildings[0];
-
       const currentStage = this.warmupTimer.stages[this.warmupTimer.currentStage] || this.warmupTimer.stages[0];
       const completedCount = this.warmupTimer.stages.filter(s => s.completed).length;
+
+      const backpack = this.getBackpackData(this.backpackState.role, this.backpackState.level);
+      const clutchScenarios = this.getClutchScenarios();
+      const activeClutch = clutchScenarios[this.clutchTrainer.activeScenario] || clutchScenarios[0];
 
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
@@ -15462,27 +16012,33 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
               <div class="flex items-center gap-2">
                 <span class="text-2xl">📜</span>
                 <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
-                  Pre-Scrim Warmup Station & Pro Callouts Dictionary
+                  Warm-Up, Callouts, Smart Backpack & Clutch IQ
                 </h3>
                 <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[10px] font-bold">
                   TOURNAMENT PRIMED
                 </span>
               </div>
               <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Championship performance is built 15 minutes before the match starts. Activate your neuromuscular reflexes, calibrate your drag flicks, and master pro compound breach protocols.
+                Activate your reflexes in the 15-min gym, inspect pro building callouts, optimize backpack loot capacity, and train 1v1 clutch split-second decisions.
               </p>
             </div>
 
             <!-- View Switcher Tabs -->
-            <div class="flex items-center gap-2 bg-slate-950/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
-              <button class="pb-nav-btn ${this.activePlaybookView === 'warmup' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="warmup">
-                <span>⏱️</span> 15-Min Warmup Station
+            <div class="flex items-center gap-1.5 bg-slate-950/90 p-1.5 rounded-xl border border-slate-800 shrink-0 flex-wrap">
+              <button class="pb-nav-btn ${this.activePlaybookView === 'warmup' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1 transition-all" data-view="warmup">
+                <span>⏱️</span> 15-Min Warmup
               </button>
-              <button class="pb-nav-btn ${this.activePlaybookView === 'callouts' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="callouts">
-                <span>🏢</span> Building Callouts (6)
+              <button class="pb-nav-btn ${this.activePlaybookView === 'callouts' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1 transition-all" data-view="callouts">
+                <span>🏢</span> Building Callouts
               </button>
-              <button class="pb-nav-btn ${this.activePlaybookView === 'mindset' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="mindset">
-                <span>🧠</span> Anti-Tilt Protocol
+              <button class="pb-nav-btn ${this.activePlaybookView === 'backpack' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1 transition-all" data-view="backpack">
+                <span>🎒</span> Smart Backpack
+              </button>
+              <button class="pb-nav-btn ${this.activePlaybookView === 'clutch' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1 transition-all" data-view="clutch">
+                <span>🧠</span> 1v1 Clutch IQ
+              </button>
+              <button class="pb-nav-btn ${this.activePlaybookView === 'mindset' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1 transition-all" data-view="mindset">
+                <span>🧘</span> Anti-Tilt
               </button>
             </div>
           </div>
@@ -15628,7 +16184,6 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           <!-- ========================================================= -->
           ${this.activePlaybookView === 'callouts' ? `
             <div class="space-y-6 animate-fade-in">
-              <!-- Sub-header & Category Filters -->
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
                 <div>
                   <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
@@ -15639,7 +16194,6 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                   </p>
                 </div>
 
-                <!-- Category Filters -->
                 <div class="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
                   <button class="callout-filter-btn ${this.calloutActiveFilter === 'all' ? 'active bg-amber-500 text-black font-black' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase transition-all" data-filter="all">
                     All (6)
@@ -15667,9 +16221,8 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                 `).join('')}
               </div>
 
-              <!-- ACTIVE BUILDING DETAILED BLUEPRINT DOSSIER -->
+              <!-- Active Building Details -->
               <div class="cyber-panel p-6 rounded-2xl border border-amber-500/40 bg-gradient-to-b from-slate-950 via-[#150d03] to-slate-950 space-y-6 shadow-2xl">
-                <!-- Dossier Header -->
                 <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
                   <div class="flex items-center gap-3">
                     <div class="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl shadow-lg">
@@ -15677,124 +16230,224 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                     </div>
                     <div>
                       <div class="flex items-center gap-2">
-                        <h4 class="text-xl font-heading font-black text-white uppercase tracking-wide">
-                          ${activeBuilding.name}
-                        </h4>
-                        <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">
-                          PRO CALLOUT
-                        </span>
+                        <h4 class="text-xl font-heading font-black text-white uppercase tracking-wide">${activeBuilding.name}</h4>
+                        <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">PRO CALLOUT</span>
                       </div>
                       <div class="text-xs text-amber-400 font-sub font-bold mt-0.5">
-                        Regional Names: <span class="text-slate-300">${activeBuilding.regional}</span>
+                        Regional: <span class="text-slate-300">${activeBuilding.regional}</span>
                       </div>
                       <div class="text-[11px] text-slate-400 font-sub mt-0.5">
-                        Primary Map POIs: <span class="text-slate-200 font-bold">${activeBuilding.hotspots}</span>
+                        Locations: <span class="text-slate-200 font-bold">${activeBuilding.hotspots}</span>
                       </div>
                     </div>
                   </div>
-
                   <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 max-w-md text-xs text-slate-300 leading-relaxed">
                     <strong>Structure Layout:</strong> ${activeBuilding.layout}
                   </div>
                 </div>
 
-                <!-- 2-Column Tactics: High-Risk Grenade vs 4-Man Breach -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <!-- Column 1: Grenade Trajectory -->
-                  <div class="p-5 rounded-xl bg-slate-900/90 border border-rose-500/30 space-y-4">
+                  <div class="p-5 rounded-xl bg-slate-900/90 border border-rose-500/30 space-y-3">
                     <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <div class="flex items-center gap-2">
-                        <span class="text-lg">💣</span>
-                        <h5 class="text-xs font-heading font-black text-rose-400 uppercase tracking-wider">
-                          High-Risk Grenade Trajectory & Wipe Angle
-                        </h5>
-                      </div>
-                      <span class="px-2.5 py-0.5 rounded bg-rose-950 border border-rose-500/40 text-rose-300 text-[10px] font-mono font-bold">
-                        Cook: ${activeBuilding.grenade.cookTime}
-                      </span>
+                      <h5 class="text-xs font-heading font-black text-rose-400 uppercase tracking-wider">💣 Grenade Trajectory Angle</h5>
+                      <span class="text-[10px] text-rose-300 font-mono">Cook: ${activeBuilding.grenade.cookTime}</span>
                     </div>
-
-                    <div class="space-y-2 text-xs">
-                      <div>
-                        <span class="text-slate-400 font-sub uppercase font-bold text-[10px]">Throw Angle & Position:</span>
-                        <div class="text-white font-bold mt-0.5">${activeBuilding.grenade.angle}</div>
-                      </div>
-                      <div>
-                        <span class="text-slate-400 font-sub uppercase font-bold text-[10px]">Bounce Trajectory:</span>
-                        <div class="text-slate-300 mt-0.5 leading-relaxed">${activeBuilding.grenade.trajectory}</div>
-                      </div>
-                      <div class="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-200 text-[11px] leading-relaxed">
-                        <strong>Lethal Impact:</strong> ${activeBuilding.grenade.impact}
+                    <div class="text-xs text-slate-300 space-y-2">
+                      <div><strong>Angle:</strong> ${activeBuilding.grenade.angle}</div>
+                      <div><strong>Trajectory:</strong> ${activeBuilding.grenade.trajectory}</div>
+                      <div class="p-2.5 rounded bg-rose-950/40 border border-rose-500/30 text-rose-200 text-[11px]">
+                        <strong>Impact:</strong> ${activeBuilding.grenade.impact}
                       </div>
                     </div>
                   </div>
 
-                  <!-- Column 2: 4-Man Breach Protocol -->
-                  <div class="p-5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-4">
-                    <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <div class="flex items-center gap-2">
-                        <span class="text-lg">⚡</span>
-                        <h5 class="text-xs font-heading font-black text-cyan-400 uppercase tracking-wider">
-                          4-Man Anti-Staircase Breach Protocol
-                        </h5>
-                      </div>
-                      <span class="px-2.5 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono font-bold">
-                        Synchronized
-                      </span>
-                    </div>
-
+                  <div class="p-5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-3">
+                    <h5 class="text-xs font-heading font-black text-cyan-400 uppercase tracking-wider border-b border-slate-800 pb-2">⚡ 4-Man Synchronized Breach Protocol</h5>
                     <div class="space-y-2">
                       ${activeBuilding.breach.map(b => `
-                        <div class="flex items-start gap-2.5 text-xs bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
-                          <span class="w-5 h-5 rounded bg-cyan-500/20 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[10px]">
-                            ${b.step}
-                          </span>
-                          <div>
-                            <strong class="text-white">${b.role}:</strong>
-                            <span class="text-slate-300"> ${b.desc}</span>
-                          </div>
+                        <div class="flex items-start gap-2 text-xs bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
+                          <span class="w-5 h-5 rounded bg-cyan-500/20 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[10px]">${b.step}</span>
+                          <div><strong class="text-white">${b.role}:</strong> <span class="text-slate-300">${b.desc}</span></div>
                         </div>
                       `).join('')}
                     </div>
                   </div>
                 </div>
 
-                <!-- 360° Defensive Hold & Voice Comms -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <!-- Defensive Hold List -->
-                  <div class="lg:col-span-2 p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="text-base">🛡️</span>
-                      <h5 class="text-xs font-heading font-bold text-amber-400 uppercase tracking-wider">
-                        360° Interior Defensive Hold & Crossfire Lines
-                      </h5>
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
+                  <div class="text-xs text-purple-300 italic">"${activeBuilding.commsScript}"</div>
+                  <button class="copy-building-comms-btn shrink-0 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-sub font-bold uppercase transition-all" data-comms="${activeBuilding.commsScript}">
+                    Copy Comms Script 📋
+                  </button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ========================================================= -->
+          <!-- VIEW 3: SMART BACKPACK & PRO LOOT ECONOMY MANAGER -->
+          <!-- ========================================================= -->
+          ${this.activePlaybookView === 'backpack' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="cyber-panel p-6 rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-slate-950 via-[#071a12] to-slate-950 space-y-6 shadow-xl">
+                <!-- Header & Role Selectors -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        🎒 Smart Backpack & Pro Loot Economy Manager
+                      </h4>
                     </div>
-                    <ul class="space-y-1.5 text-xs text-slate-300">
-                      ${activeBuilding.defensiveHold.map(h => `
-                        <li class="flex items-start gap-2 border-b border-slate-800/60 pb-1 last:border-0">
-                          <span class="text-amber-400">▹</span>
-                          <span>${h}</span>
-                        </li>
-                      `).join('')}
-                    </ul>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Avoid utility starvation and ammo hoarding. Select your squad role and backpack tier to see mathematically optimal loadout ratios:
+                    </p>
                   </div>
 
-                  <!-- IGL Voice Comms Script -->
-                  <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between space-y-3">
-                    <div>
-                      <div class="flex items-center gap-2 mb-1">
-                        <span class="text-base">🎙️</span>
-                        <h5 class="text-xs font-heading font-bold text-purple-400 uppercase tracking-wider">
-                          IGL Comms Voice Script
-                        </h5>
-                      </div>
-                      <div class="text-xs italic text-purple-200 bg-slate-950 p-2.5 rounded border border-purple-500/30 leading-relaxed">
-                        "${activeBuilding.commsScript}"
-                      </div>
-                    </div>
-                    <button class="copy-building-comms-btn px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-sub font-bold uppercase transition-all" data-comms="${activeBuilding.commsScript}">
-                      Copy Comms Script 📋
+                  <!-- Role Selector Pills -->
+                  <div class="flex items-center gap-2 flex-wrap bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+                    <button class="backpack-role-btn ${this.backpackState.role === 'rusher' ? 'active bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub transition-all" data-role="rusher">
+                      ⚡ Rusher Bag
                     </button>
+                    <button class="backpack-role-btn ${this.backpackState.role === 'assaulter' ? 'active bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub transition-all" data-role="assaulter">
+                      🎯 Assaulter Bag
+                    </button>
+                    <button class="backpack-role-btn ${this.backpackState.role === 'sniper' ? 'active bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-xs font-sub transition-all" data-role="sniper">
+                      🔭 Sniper Bag
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Capacity & Level Switcher -->
+                <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Target Role Profile:</span>
+                    <h5 class="text-sm font-heading font-black text-white">${backpack.roleName}</h5>
+                  </div>
+
+                  <!-- Level Switcher -->
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-sub text-slate-400 font-bold uppercase">Backpack Tier:</span>
+                    <button class="backpack-level-btn px-3 py-1 rounded-lg text-xs font-sub font-bold border transition-all ${this.backpackState.level === 2 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400' : 'bg-slate-950 text-slate-400 border-slate-700'}" data-level="2">
+                      Level 2 (200 Units)
+                    </button>
+                    <button class="backpack-level-btn px-3 py-1 rounded-lg text-xs font-sub font-bold border transition-all ${this.backpackState.level === 3 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400' : 'bg-slate-950 text-slate-400 border-slate-700'}" data-level="3">
+                      Level 3 (300 Units)
+                    </button>
+                  </div>
+
+                  <div class="text-right">
+                    <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Total Capacity Used:</span>
+                    <div class="text-lg font-mono font-black text-emerald-400">${backpack.used} / ${backpack.capacity} Units (${Math.round((backpack.used/backpack.capacity)*100)}%)</div>
+                  </div>
+                </div>
+
+                <!-- Inventory Items Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  ${backpack.items.map(item => `
+                    <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xl">${item.icon}</span>
+                        <span class="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-emerald-300 font-bold">${item.weight} wt</span>
+                      </div>
+                      <div class="text-xs font-bold text-white leading-tight">${item.name}</div>
+                      <div class="text-[11px] text-amber-300 font-sub font-bold">${item.qty}</div>
+                    </div>
+                  `).join('')}
+                </div>
+
+                <!-- What to Drop Critical Warnings -->
+                <div class="p-4 rounded-xl bg-rose-950/30 border border-rose-500/40 space-y-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-base">⚠️</span>
+                    <h5 class="text-xs font-heading font-black text-rose-400 uppercase tracking-wider">
+                      Critical Underdog Blunder Alert: What to Drop Immediately
+                    </h5>
+                  </div>
+                  <ul class="space-y-1 text-xs text-rose-200 list-disc list-inside">
+                    ${backpack.whatToDrop.map(w => `<li>${w}</li>`).join('')}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ========================================================= -->
+          <!-- VIEW 4: 1V1 CLUTCH IQ & DECISION TRAINER -->
+          <!-- ========================================================= -->
+          ${this.activePlaybookView === 'clutch' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="cyber-panel p-6 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-[#0a1827] to-slate-950 space-y-6 shadow-xl">
+                <!-- Header & Scenarios Selector -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+                      <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        🧠 1v1 Clutch IQ & Split-Second Decision Trainer
+                      </h4>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Tournament matches are decided in 3-second 1v1 clutches. Test your decision-making against world championship benchmarks:
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Scenario Selection Pills -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                  ${clutchScenarios.map((scen, idx) => `
+                    <button class="clutch-scenario-btn p-3 rounded-xl border text-left transition-all ${idx === this.clutchTrainer.activeScenario ? 'bg-cyan-950/60 border-cyan-400 text-white ring-2 ring-cyan-400/40' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}" data-scenario-idx="${idx}">
+                      <div class="text-[10px] font-sub uppercase font-bold text-cyan-400">Scenario #${idx + 1}</div>
+                      <div class="text-xs font-bold text-white truncate mt-0.5">${scen.title.split(' ')[1] || scen.title}</div>
+                    </button>
+                  `).join('')}
+                </div>
+
+                <!-- Active Scenario Card -->
+                <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4">
+                  <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <h5 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      ${activeClutch.title}
+                    </h5>
+                    <span class="cyber-badge bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px]">
+                      ${activeClutch.badge}
+                    </span>
+                  </div>
+
+                  <p class="text-xs text-slate-300 bg-slate-950 p-3 rounded-xl border border-slate-800 leading-relaxed">
+                    <strong>Match Situation:</strong> ${activeClutch.situation}
+                  </p>
+
+                  <!-- 3 Choices -->
+                  <div class="space-y-3 pt-1">
+                    <span class="text-[10px] font-sub uppercase font-bold text-slate-400 block">
+                      Choose Your Clutch Move:
+                    </span>
+                    ${activeClutch.choices.map(c => {
+                      const isSelected = this.clutchTrainer.selectedChoice === c.id;
+                      return `
+                        <div class="clutch-choice-card p-4 rounded-xl border cursor-pointer transition-all ${isSelected ? (c.isPro ? 'bg-emerald-950/40 border-emerald-400 ring-2 ring-emerald-400' : 'bg-rose-950/40 border-rose-500 ring-2 ring-rose-500') : 'bg-slate-950 border-slate-800 hover:border-slate-600'}" data-choice-id="${c.id}">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="text-xs font-bold text-white leading-relaxed">
+                              Option ${c.id.toUpperCase()}: ${c.text}
+                            </div>
+                            ${isSelected ? `
+                              <span class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${c.isPro ? 'bg-emerald-500 text-black' : 'bg-rose-500 text-white'}">
+                                ${c.winRate} WIN RATE
+                              </span>
+                            ` : `
+                              <span class="text-xs text-slate-500 shrink-0 font-sub">Click to Test 👆</span>
+                            `}
+                          </div>
+
+                          ${isSelected ? `
+                            <div class="mt-3 pt-3 border-t border-slate-800/80 text-xs ${c.isPro ? 'text-emerald-200' : 'text-rose-200'} leading-relaxed">
+                              ${c.outcome}
+                            </div>
+                          ` : ''}
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </div>
               </div>
@@ -15802,7 +16455,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           ` : ''}
 
           <!-- ========================================================= -->
-          <!-- VIEW 3: ESPORTS MINDSET & ANTI-TILT PROTOCOLS -->
+          <!-- VIEW 5: ESPORTS MINDSET & ANTI-TILT PROTOCOLS -->
           <!-- ========================================================= -->
           ${this.activePlaybookView === 'mindset' ? `
             <div class="space-y-6 animate-fade-in">
@@ -15852,7 +16505,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
     }
 
     bindPlaybookEvents(container) {
-      // 1. Playbook View Switcher (Warmup / Callouts / Mindset)
+      // 1. Playbook View Switcher (Warmup / Callouts / Backpack / Clutch / Mindset)
       container.querySelectorAll('.pb-nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const view = btn.getAttribute('data-view');
@@ -15960,8 +16613,52 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           }
         });
       });
-    }
 
+      // 8. Smart Backpack Role & Level Switchers
+      container.querySelectorAll('.backpack-role-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const role = btn.getAttribute('data-role');
+          if (role) {
+            this.backpackState.role = role;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      container.querySelectorAll('.backpack-level-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const level = parseInt(btn.getAttribute('data-level'), 10);
+          if (level) {
+            this.backpackState.level = level;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 9. Clutch IQ Scenario Switcher
+      container.querySelectorAll('.clutch-scenario-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.getAttribute('data-scenario-idx'), 10);
+          if (!isNaN(idx)) {
+            this.clutchTrainer.activeScenario = idx;
+            this.clutchTrainer.selectedChoice = null;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 10. Clutch IQ Choice Click
+      container.querySelectorAll('.clutch-choice-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const choiceId = card.getAttribute('data-choice-id');
+          if (choiceId) {
+            this.clutchTrainer.selectedChoice = choiceId;
+            this.playRadioBeep();
+            this.renderTabContent();
+          }
+        });
+      });
+    }
 
     // =========================================================================
     // ESPORTS USER AUTHENTICATION & PERSISTENT DATA STORAGE ENGINE
