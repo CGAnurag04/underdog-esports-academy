@@ -5788,6 +5788,15 @@ this.ffSelectedLoadout = {
       }
     }
 
+    switchGame(game) {
+      if (game && game !== this.activeGame) {
+        this.activeGame = game;
+        this.updateGameButtonsUI();
+        this.renderGameContext();
+        this.renderTabContent();
+      }
+    }
+
     bindGameSwitcher() {
       const gameBtns = document.querySelectorAll('.game-btn');
       gameBtns.forEach(btn => {
@@ -12174,7 +12183,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       }).map((team, idx) => ({ ...team, rank: idx + 1 }));
     }
 
-    exportLeaderboardPNG() {
+    exportLeaderboardPNG(download = true) {
       const sortedTeams = this.getSortedLobbyTeams();
       const canvas = document.createElement('canvas');
       canvas.width = 1200;
@@ -13366,30 +13375,227 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           ` : ''}
 
           <!-- ============================================================ -->
-          <!-- MODE 6: SQUAD MISTAKE TRACKER & TUITION TIME -->
+          <!-- MODE 6: SQUAD MISTAKE TRACKER, BLUNDER DIAGNOSTICS & TUITION TIME -->
           <!-- ============================================================ -->
           ${this.ffScrimMode === 'my_squad' ? `
-            <div class="space-y-6">
-              <!-- Diagnostics & Analytics -->
-              <div class="cyber-panel p-5 rounded-2xl border border-rose-500/30 bg-slate-950/90 space-y-4">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>🎯</span> Squad Blunder Diagnostics & Fatal Weakness Analysis
-                  </h4>
-                  <span class="px-2.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-500/40 text-[10px] font-mono font-bold">
-                    6-MATCH DIAGNOSTIC
+            <div class="space-y-6 animate-fade-in" id="mistakeAnalyticsModeView">
+              
+              <!-- 1. KPI SUMMARY HUD CARDS -->
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div class="cyber-panel p-4 rounded-xl border border-rose-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Tactical Discipline</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black ${analytics.disciplineScore >= 80 ? 'text-emerald-400' : analytics.disciplineScore >= 60 ? 'text-amber-400' : 'text-rose-400'} mt-1">
+                    ${analytics.disciplineScore}<span class="text-xs text-slate-400 font-normal">/100</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 font-mono mt-0.5">
+                    ${analytics.disciplineScore >= 80 ? 'S-Tier Macro Discipline 🛡️' : analytics.disciplineScore >= 60 ? 'Moderate Blunder Risk ⚡' : 'Critical Wipe Alert 🚨'}
+                  </div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-amber-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Booyah Conversion</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-amber-400 mt-1">${analytics.booyahRate}%</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${analytics.booyahCount} Booyahs (${analytics.totalMatches} Matches)</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-rose-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Unforced Blunder Rate</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-rose-400 mt-1">${analytics.blunderRate}%</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${analytics.totalWipesWithBlunder} of ${analytics.totalMatches} Wipes Blunder</div>
+                </div>
+
+                <div class="cyber-panel p-4 rounded-xl border border-cyan-500/30 bg-slate-950/80 text-center">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Scrim Combat Avg</div>
+                  <div class="text-2xl lg:text-3xl font-mono font-black text-cyan-300 mt-1">${analytics.avgPts} <span class="text-xs font-normal">pts</span></div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${analytics.avgKills} Team Frags / Match</div>
+                </div>
+              </div>
+
+              <!-- 2. COACH DUKER PRIORITY 1 BLUNDER DIAGNOSIS -->
+              <div class="cyber-panel p-5 rounded-2xl border-2 border-rose-500/50 bg-gradient-to-r from-slate-950 via-[#1f0c18] to-slate-950 shadow-xl space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">🧠</span>
+                    <div>
+                      <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        Coach Duker Priority #1 Wipe Diagnosis
+                      </h4>
+                      <div class="text-xs text-rose-300 font-mono font-bold mt-0.5">${coachAdvice.title || 'Championship Consistency Protocol'}</div>
+                    </div>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-500/50 text-[10px] font-mono font-bold uppercase shrink-0">
+                    ${coachAdvice.priority || 'CRITICAL PRIORITY'}
                   </span>
                 </div>
 
-                <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 space-y-2">
-                  <div class="font-bold text-amber-300 uppercase">Coach Duker Diagnosis:</div>
-                  <p>${coachAdvice.diagnosis}</p>
-                  <div class="font-bold text-cyan-400 uppercase mt-2">Recommended 3-Step Fix:</div>
-                  <ul class="list-disc list-inside space-y-1 text-slate-300">
-                    ${coachAdvice.drills.map(d => `<li>${d}</li>`).join('')}
-                  </ul>
+                <!-- Quote from Coach Duker -->
+                <div class="p-3.5 rounded-xl bg-slate-900/90 border-l-4 border-amber-400 text-amber-200 italic font-serif text-xs leading-relaxed">
+                  "${coachAdvice.quote || 'Winning one match is easy; staying in the top 3 across all 6 matches requires disciplined macro play.'}"
+                </div>
+
+                <!-- Detailed Verdict -->
+                <p class="text-xs text-slate-300 leading-relaxed">
+                  ${coachAdvice.verdict || ''}
+                </p>
+
+                <!-- Golden Rule & Prescribed Drill -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-500/40 text-xs text-amber-200">
+                    <strong class="text-amber-400 uppercase block font-sub mb-1">👑 Tournament Golden Rule:</strong>
+                    ${coachAdvice.rule || ''}
+                  </div>
+                  <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/40 text-xs text-emerald-200">
+                    <strong class="text-emerald-400 uppercase block font-sub mb-1">🎯 Prescribed Team Drill:</strong>
+                    ${coachAdvice.drill || ''}
+                  </div>
                 </div>
               </div>
+
+              <!-- 3. SQUAD FATAL MISTAKE FREQUENCY MATRIX -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>📊</span> Squad Mistake Category Breakdown (${analytics.totalMatches} Matches)
+                  </h4>
+                  <span class="text-xs font-mono text-slate-400">Automated Wipe Telemetry</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  ${analytics.categories.map(cat => {
+                    const count = analytics.mistakeCounts[cat.id] || 0;
+                    const pct = analytics.totalMatches > 0 ? Math.round((count / analytics.totalMatches) * 100) : 0;
+                    return `
+                      <div class="p-3.5 rounded-xl bg-slate-900/80 border ${count > 0 && cat.id !== 'clean' ? 'border-rose-500/40 bg-rose-950/10' : 'border-slate-800'} space-y-2">
+                        <div class="flex items-center justify-between">
+                          <span class="text-xs font-heading font-bold text-white flex items-center gap-1.5">
+                            <span>${cat.icon}</span> ${cat.name}
+                          </span>
+                          <span class="text-xs font-mono font-bold ${count > 0 && cat.id !== 'clean' ? 'text-rose-400' : 'text-slate-400'}">
+                            ${count}x (${pct}%)
+                          </span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                          <div class="h-1.5 rounded-full ${cat.id === 'clean' ? 'bg-emerald-500' : 'bg-rose-500'}" style="width: ${pct}%"></div>
+                        </div>
+                        <p class="text-[11px] text-slate-400 leading-tight">${cat.desc}</p>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+
+              <!-- 4. MATCH-BY-MATCH DEBRIEF LOG & MISTAKE TAGGER -->
+              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <span>📋</span> Match-by-Match Wipe Debrief & VOD Review (${this.ffScrimMatches.length})
+                    </h4>
+                    <p class="text-[11px] text-slate-400">Tag what caused each elimination to train your IGL and squad.</p>
+                  </div>
+                  <button id="addQuickDebriefMatchBtn" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-sub text-xs font-bold uppercase transition-all shadow shrink-0">
+                    ➕ Add Match Debrief
+                  </button>
+                </div>
+
+                <div class="space-y-3">
+                  ${this.ffScrimMatches.map((m, idx) => `
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all space-y-3">
+                      <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="px-2 py-0.5 rounded bg-slate-800 text-amber-400 font-mono text-xs font-bold">#${m.matchNum}</span>
+                          <span class="text-sm font-heading font-bold text-white">${m.map}</span>
+                          <span class="cyber-badge ${m.placement === 1 ? 'bg-amber-950 text-amber-300 border-amber-500/40' : 'bg-slate-800 text-slate-300'} text-[10px]">
+                            Finish #${m.placement} (${m.placementPts} pts)
+                          </span>
+                          <span class="text-xs font-mono text-rose-300 font-bold">${m.kills} Kills</span>
+                          <span class="text-xs font-mono text-cyan-300 font-bold">= ${m.totalPts} Total Pts</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                          ${m.vodUrl ? `
+                            <button class="watch-vod-btn px-2.5 py-1 rounded bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/40 text-[11px] font-sub font-bold uppercase flex items-center gap-1" data-vod="${m.vodUrl}" data-title="Match ${m.matchNum} (${m.map}) VOD Review" data-notes="${encodeURIComponent(m.debriefNotes || '')}">
+                              <span>🎬</span> Watch VOD
+                            </button>
+                          ` : ''}
+                          <button class="delete-debrief-match-btn text-xs text-rose-400 hover:text-rose-300 p-1 font-mono" data-match-id="${m.id}" title="Delete Match">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Fatal Blunder Category:</label>
+                          <select class="match-mistake-select w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none focus:border-rose-400 font-sub" data-match-id="${m.id}">
+                            ${analytics.categories.map(c => `
+                              <option value="${c.id}" ${(m.mistakeId === c.id || (m.fatalMistake && m.fatalMistake.includes(c.tag))) ? 'selected' : ''}>
+                                ${c.icon} ${c.name}
+                              </option>
+                            `).join('')}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Debrief / Coach Notes:</label>
+                          <input type="text" class="match-debrief-input w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-cyan-400 font-sub" data-match-id="${m.id}" value="${m.debriefNotes || ''}" placeholder="e.g. Anchor held river bank too long..."/>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
+              <!-- 5. COACH DUKER "TUITION TIME" MASTERCLASS (4 VOD LESSONS) -->
+              <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#181208] to-slate-950 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-2xl">🎓</span>
+                      <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        Coach Duker's "Tuition Time" Masterclass VOD Vault
+                      </h4>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Elite tactical breakdowns from international tournaments (FFWS & EWC).
+                    </p>
+                  </div>
+                  <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-xs font-mono font-bold shrink-0">
+                    4 PRO LESSONS
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  ${tuitionLessons.map(lesson => `
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 transition-all space-y-3 flex flex-col justify-between">
+                      <div class="space-y-2">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[9px] font-bold">
+                            ${lesson.badge} &bull; ${lesson.duration}
+                          </span>
+                          <span class="text-[10px] font-mono text-cyan-400">Timestamp: ${lesson.videoTimestamp}</span>
+                        </div>
+                        <h5 class="text-sm font-heading font-black text-white leading-snug">${lesson.title}</h5>
+                        <p class="text-xs text-slate-300 leading-relaxed">${lesson.summary}</p>
+
+                        <div class="space-y-1 text-xs">
+                          <span class="text-[10px] font-sub uppercase font-bold text-amber-400">Pro Teams Studied:</span>
+                          <div class="text-[11px] text-slate-300 font-mono">${lesson.proTeams.join(' • ')}</div>
+                        </div>
+
+                        <div class="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-amber-200/90 italic font-serif">
+                          "${lesson.tuitionNotes}"
+                        </div>
+                      </div>
+
+                      <button class="open-lesson-modal-btn w-full py-2 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-black font-sub font-black uppercase text-xs rounded-xl tracking-wider shadow transition-transform hover:scale-102 flex items-center justify-center gap-1.5" data-lesson-id="${lesson.id}">
+                        <span>🎬</span> Open Masterclass Debrief
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+
             </div>
           ` : ''}
         </div>
@@ -13595,12 +13801,167 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
         });
       }
 
+      // --- MISTAKE ANALYTICS SUITE EVENT LISTENERS ---
+      // Mistake Tag Dropdown change
+      container.querySelectorAll('.match-mistake-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const mId = parseInt(sel.getAttribute('data-match-id'), 10);
+          const val = sel.value;
+          const match = this.ffScrimMatches.find(m => m.id === mId);
+          if (match) {
+            match.mistakeId = val;
+            const cat = this.getFFMistakeCategories().find(c => c.id === val);
+            if (cat) match.fatalMistake = cat.name;
+            this.saveFFScrimMatches();
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // Match Debrief Notes change
+      container.querySelectorAll('.match-debrief-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+          const mId = parseInt(inp.getAttribute('data-match-id'), 10);
+          const match = this.ffScrimMatches.find(m => m.id === mId);
+          if (match) {
+            match.debriefNotes = inp.value.trim();
+            this.saveFFScrimMatches();
+          }
+        });
+      });
+
+      // Delete Debrief Match
+      container.querySelectorAll('.delete-debrief-match-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mId = parseInt(btn.getAttribute('data-match-id'), 10);
+          if (confirm('Delete this match debrief log?')) {
+            this.ffScrimMatches = this.ffScrimMatches.filter(m => m.id !== mId);
+            this.saveFFScrimMatches();
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // Add Match Debrief
+      const addDebriefBtn = container.querySelector('#addQuickDebriefMatchBtn');
+      if (addDebriefBtn) {
+        addDebriefBtn.addEventListener('click', () => {
+          const nextNum = this.ffScrimMatches.length + 1;
+          const newMatch = {
+            id: Date.now(),
+            matchNum: nextNum,
+            map: 'Bermuda',
+            placement: 4,
+            kills: 5,
+            placementPts: 7,
+            totalPts: 12,
+            mistakeId: 'late_zone_rotation',
+            fatalMistake: 'Late Zone Rotation (Gatekept in Blue Zone)',
+            vodUrl: '',
+            debriefNotes: 'Logged from Mistake Diagnostics.'
+          };
+          this.ffScrimMatches.push(newMatch);
+          this.saveFFScrimMatches();
+          this.renderTabContent();
+          this.playChimeSound('stage_complete');
+        });
+      }
+
+      // --- 12-TEAM LOBBY BROADCAST EVENT LISTENERS ---
+      const dlLeaderboardBtn = container.querySelector('#downloadLeaderboardPNGBtn');
+      if (dlLeaderboardBtn) {
+        dlLeaderboardBtn.addEventListener('click', () => {
+          this.exportLeaderboardPNG(true);
+          this.playChimeSound('stage_complete');
+        });
+      }
+
+      const togglePreviewBtn = container.querySelector('#toggleGraphicPreviewBtn');
+      if (togglePreviewBtn) {
+        togglePreviewBtn.addEventListener('click', () => {
+          const box = container.querySelector('#leaderboardGraphicPreviewContainer');
+          const img = container.querySelector('#leaderboardPreviewImg');
+          if (box && img) {
+            if (box.classList.contains('hidden')) {
+              const dataUrl = this.exportLeaderboardPNG(false);
+              img.src = dataUrl;
+              box.classList.remove('hidden');
+            } else {
+              box.classList.add('hidden');
+            }
+          }
+        });
+      }
+
+      const closePreviewBtn = container.querySelector('#closeGraphicPreviewBtn');
+      if (closePreviewBtn) {
+        closePreviewBtn.addEventListener('click', () => {
+          const box = container.querySelector('#leaderboardGraphicPreviewContainer');
+          if (box) box.classList.add('hidden');
+        });
+      }
+
+      const fillProBtn = container.querySelector('#fillProLobbyBtn');
+      if (fillProBtn) {
+        fillProBtn.addEventListener('click', () => {
+          this.ffLobbyTeams = [
+            { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
+            { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
+            { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
+            { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
+            { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
+            { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
+            { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
+            { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
+            { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
+            { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
+            { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
+            { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
+          ];
+          this.renderTabContent();
+          this.playChimeSound('stage_complete');
+        });
+      }
+
+      const resetScoresBtn = container.querySelector('#resetLobbyScoresBtn');
+      if (resetScoresBtn) {
+        resetScoresBtn.addEventListener('click', () => {
+          if (confirm('Reset all lobby points to 0 for a new tournament?')) {
+            this.ffLobbyTeams.forEach(t => {
+              t.matches = 0;
+              t.booyahs = 0;
+              t.placementPts = 0;
+              t.kills = 0;
+              t.totalPts = 0;
+            });
+            this.renderTabContent();
+            this.playChimeSound('stage_complete');
+          }
+        });
+      }
+
+      // Metadata inputs
+      const titleInp = container.querySelector('#tourneyTitleInput');
+      if (titleInp) {
+        titleInp.addEventListener('change', (e) => { this.ffTourneyMeta.title = e.target.value; });
+      }
+      const stageInp = container.querySelector('#tourneyStageInput');
+      if (stageInp) {
+        stageInp.addEventListener('change', (e) => { this.ffTourneyMeta.stage = e.target.value; });
+      }
+      const orgInp = container.querySelector('#tourneyOrganizerInput');
+      if (orgInp) {
+        orgInp.addEventListener('change', (e) => { this.ffTourneyMeta.organizer = e.target.value; });
+      }
+
       // 11. Watch VOD Modal Events
       document.querySelectorAll('.watch-vod-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const url = btn.getAttribute('data-vod');
           const title = btn.getAttribute('data-title');
-          const notes = btn.getAttribute('data-notes');
+          const rawNotes = btn.getAttribute('data-notes') || '';
+          let notes = rawNotes;
+          try { notes = decodeURIComponent(rawNotes); } catch(e) {}
           this.showVodModal(url, title, notes);
         });
       });
@@ -13743,11 +14104,14 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
             </span>
           </div>
 
-          <div class="cyber-panel p-5 rounded-xl border border-slate-800">
-            <h4 class="text-sm font-heading font-bold text-white uppercase mb-2">Multi-Game Scrim Engine Active</h4>
+          <div class="cyber-panel p-5 rounded-xl border border-slate-800 space-y-3">
+            <h4 class="text-sm font-heading font-bold text-white uppercase">Multi-Game Scrim Engine Active</h4>
             <p class="text-xs text-slate-300 leading-relaxed">
-              Switch to <strong>Free Fire</strong> in the top header to access the complete FFWS 12-Team PointCalc Suite, #1 Squad Weakness Analytics, and Coach Duker's Tuition Time Pro VOD Masterclass.
+              Access the complete FFWS 12-Point Scrim Scorekeeper, Famous Indian Scrims Directory (Eagle Esports), Squad Voice Room, #1 Squad Weakness Diagnostics, and Coach Duker's Tuition Time Pro VOD Masterclass.
             </p>
+            <button id="switchFFScrimsFromDefaultBtn" class="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-2 transition-transform hover:scale-105">
+              <span>🦅</span> Open Free Fire Scrims & Mistake Analytics Suite
+            </button>
           </div>
         </div>
       `;
@@ -14024,6 +14388,13 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       `;
 
       // Initialize Reflex Trainer
+      const switchBtn = container.querySelector('#switchFFScrimsFromDefaultBtn');
+      if (switchBtn) {
+        switchBtn.addEventListener('click', () => {
+          this.switchGame('freefire');
+          this.renderTabContent();
+        });
+      }
       this.reflexTrainer = new ReflexTrainer('aimArenaBox', 'reflexStatsBox');
       this.reflexTrainer.renderModeArena();
 
