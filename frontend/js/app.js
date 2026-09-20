@@ -5610,6 +5610,16 @@ class ReflexTrainer {
       // Free Fire Custom HUD & Sensitivity State
       this.selectedCoachId = 'coach_duker';
       this.selectedCoachTab = 'strategy';
+      this.coachingActiveView = 'decision_making';
+      this.decisionState = {
+        players: '4',
+        shift: 'north',
+        utility: 'medium',
+        mobility: 'vehicles',
+        density: 'high'
+      };
+      this.selectedFlightPath = 'nw_se';
+      this.selectedFlightPoi = 'peak';
       this.ffActiveHudPreset = 'ff_default_2finger';
       this.ffSelectedHudButton = 'fire_right';
       this.ffCustomSens = null;
@@ -9366,320 +9376,838 @@ ${curPreset.proTip}`;
       return FF_COACHING_STAFF.find(c => c.id === id) || FF_COACHING_STAFF[0];
     }
 
+    // --- IGL DECISION MATRIX COMPUTATION ENGINE ---
+    getDecisionMatrixResult() {
+      const state = this.decisionState || { players: '4', shift: 'north', utility: 'medium', mobility: 'vehicles', density: 'high' };
+      const { players, shift, utility, mobility, density } = state;
+
+      if (players === '1' || players === '2') {
+        return {
+          title: "STRATEGY 5: SOLO/DUO PLACEMENT POINT EXTRACTION & 3RD-PARTY AMBUSH",
+          badge: "PLACEMENT EXTRACTION (+8 PTS)",
+          badgeColor: "bg-rose-950/80 text-rose-300 border-rose-500/50",
+          accentColor: "rose",
+          icon: "🐀",
+          reason: "When down 2 or 3 players, an open 50-50 fight against a 4-man Tier-1 squad has less than a 6% statistical win rate. Your tournament goal immediately shifts to surviving into Top 3 to extract placement points and stealing knocks during the final 4v4 brawl.",
+          steps: [
+            { step: "1", title: "GHOST ROTATION & SILENT PRONE", desc: "Do NOT rotate via roads or vehicles. Prone in environmental water dips, bushes, or behind burnt vehicle husks outside high-ground visual scan lines." },
+            { step: "2", title: "ABSOLUTE TRIGGER DISCIPLINE", desc: "Strict zero-fire order. Even if an enemy runs 10 meters past you, do NOT shoot unless you are directly compromised. Firing alerts all 4 squads to your position." },
+            { step: "3", title: "THIRD-PARTY SQUEEZE & BOOYAH STEAL", desc: "Wait until the final two full squads engage in 4v4 brawl and kill-feed shows 3+ knocks. Throw your remaining grenades and steal knock points with DMR/Sniper to finish Top 2." }
+          ],
+          comms: "Hold fire! Total radio silence! Let Team A and Team B fight. Nobody peek until 3 knocks appear in kill-feed. When they push each other, throw final nades and take placement points!",
+          proTeam: "Total Gaming Esports / Mafia Solo Clutch (FFMIC Finals)",
+          goldenRule: "THE 4-KNOCK TRIGGER RULE: Never reveal your solo position until at least 4 total players are down across the lobby."
+        };
+      }
+
+      if (utility === 'starved') {
+        return {
+          title: "STRATEGY 2: THE WEAK-SIDE BLUE LINE EDGE WRAP (0-GLOO PROTOCOL)",
+          badge: "WEAK-SIDE ROTATION",
+          badgeColor: "bg-amber-950/80 text-amber-300 border-amber-500/50",
+          accentColor: "amber",
+          icon: "🌀",
+          reason: "You have less than 3 gloo walls. Crashing the center compound or crossing open fields without gloo walls is suicide against AC80/Woodpecker head-glitches. Rotating on the 'weak side' (where blue and white circles are closest) guarantees zero enemies can attack your rear.",
+          steps: [
+            { step: "1", title: "DELAYED 0:15 BLUE ZONE MOVE", desc: "Wait for the blue zone timer to reach 0:15 before moving. Let center teams eliminate each other and draw lobby attention away from your flank." },
+            { step: "2", title: "BLUE RADIATION PERIMETER HUG", desc: "Sustain low-ground pathing along the exact blue radiation border. Use rocks, trenches, and broken walls rather than artificial gloo walls." },
+            { step: "3", title: "RESOURCE EXTRACTION SWEEP", desc: "Isolate and eliminate the single squad holding the edge. Loot their death boxes immediately for 8+ gloo walls before pushing Phase 5." }
+          ],
+          comms: "No center crash! We have no gloo walls! Wrap weak side behind the blue line. Hug the sea-shore dip. Let center teams kill each other, we take their gloo walls when we wipe edge!",
+          proTeam: "Buriram United & Team Elite (Coach Duker Weak-Side Rotation)",
+          goldenRule: "THE BLUE LINE BUFFER: Keep the blue radiation line within 15 meters behind your back so you only have to scan a 180° forward cone."
+        };
+      }
+
+      if (mobility === 'vehicles' && density === 'high' && players === '4') {
+        return {
+          title: "STRATEGY 1: FAST CENTRAL FORTRESS CRASH & 360° V-WALL HOLD",
+          badge: "CENTRAL COMPOUND LOCK",
+          badgeColor: "bg-purple-950/80 text-purple-300 border-purple-500/50",
+          accentColor: "purple",
+          icon: "⚡",
+          reason: "With a full 4-man squad, vehicles, and 8+ teams alive, peripheral choke points will turn into meat grinders. Crashing the exact center of Zone 3 immediately secures Zone 4/5 placement and forces all other 7 teams to fight each other around you.",
+          steps: [
+            { step: "1", title: "CONVOY BOOST BEFORE 1:00", desc: "Accelerate both vehicles at maximum boost before the zone timer hits 1:00. Do not stop for skirmishes on the road." },
+            { step: "2", title: "V-WALL CRASH & TIRE BLOW", desc: "Crash vehicles bumper-to-bumper into building corners to create indestructible artificial cover. Shoot out vehicle tires so enemies cannot hit feet." },
+            { step: "3", title: "2-2 CROSSFIRE BALCONY SPLIT", desc: "Two players hold upper-floor head-glitch windows with M82B/Woodpecker; two rusher anchors hold the ground entrance with double shotguns." }
+          ],
+          comms: "Convoy boost now! Center compound only! Dewa watch the staircase, TheCruz blow vehicle tires for the wall! Hold hard crossfire, zero peeking without callout!",
+          proTeam: "EVOS Esports / Magic Squad (FFWS Bangkok Champions)",
+          goldenRule: "THE 1-MINUTE CRASH LAW: If your vehicles aren't rolling toward the center before the 1:00 zone mark, you have lost center priority."
+        };
+      }
+
+      if (shift === 'north' || shift === 'south') {
+        return {
+          title: "STRATEGY 3: HIGH-GROUND CHOKE GATEKEEP & RE-FRAG TRAP",
+          badge: "HIGH-GROUND GATEKEEP",
+          badgeColor: "bg-emerald-950/80 text-emerald-300 border-emerald-500/50",
+          accentColor: "emerald",
+          icon: "⛰️",
+          reason: "The zone has shifted hard toward mountainous terrain. Teams caught in the low ground must sprint uphill while taking 8 HP/sec blue zone radiation ticks. Holding the crest line with a staggered firing line yields 4–6 free elimination points.",
+          steps: [
+            { step: "1", title: "CREST LOCK 30S BEFORE CLOSURE", desc: "Secure the mountain ridge 30 seconds before the blue zone begins shrinking. Place 2 gloo walls at a 45° defensive wedge." },
+            { step: "2", title: "STAGGERED FIRING LINE FOCUS", desc: "Sniper initiates tags at 120m+ to force enemies to burn their gloo walls early. Rusher holds rear slope to prevent flankers." },
+            { step: "3", title: "SYNCHRONIZED TATSUYA SWEEP", desc: "As the blue zone swallows the enemy's cover, push down simultaneously with Tatsuya dash to finish survivors." }
+          ],
+          comms: "Hold the ridge line! Do not drop down! Gatekeep the squads climbing from Bimasakti dip. Let the blue zone tick them, then double tap! Rusher, watch our rear flank!",
+          proTeam: "Team Soul & Team Falcons (FFWS / BGIS LAN Gatekeep)",
+          goldenRule: "THE REVERSE-SLOPE TETHER: Keep at least one player 15m behind the crest on the reverse slope to trade knocks instantly if sniper gets knocked."
+        };
+      }
+
+      return {
+        title: "STRATEGY 4: THE 3-1 RECON SCOUT & REVERSE DIP TETHER",
+        badge: "3-1 RECON SCOUT",
+        badgeColor: "bg-cyan-950/80 text-cyan-300 border-cyan-500/50",
+        accentColor: "cyan",
+        icon: "🏎️",
+        reason: "Lobby density is uncertain or you are pushing an unverified compound. Driving all 4 players blindly into an ambush is how underdogs throw matches. Sending a fast scout 80m ahead eliminates blind ambushes.",
+        steps: [
+          { step: "1", title: "FAST RECON BUGGY DISPATCH", desc: "Fastest vehicle (Buggy / Bike) drives 80m ahead to clear compound audio and bait enemy shots without dismounting." },
+          { phase: "2", title: "REVERSE DIP ANCHOR TETHER", desc: "Main 3-man convoy parks in a reverse dip out of enemy line of sight. Ready to boost in if scout calls clear." },
+          { phase: "3", title: "SYNCHRONIZED PINCH / ABORT", desc: "If compound is occupied, do NOT push. Route around to adjacent ridge. If clear, main convoy crashes instantly." }
+        ],
+        comms: "Justin scout ahead only! Do not dismount! Drive by the two-story house. Main squad hold reverse slope. If they shoot, fall back West!",
+        proTeam: "GodLike Esports / ClutchGod (Jonathan Pacing)",
+        goldenRule: "THE 80-METER TETHER: The scout must never be further than 4 seconds of driving time from the main squad's support fire."
+      };
+    }
+
+    // --- PLAY SYNTHESIZED RADIO BEEP ---
+    playRadioBeep() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } catch (e) {}
+    }
+
     renderCoachingTab(container) {
+      if (!this.coachingActiveView) this.coachingActiveView = 'decision_making';
+      if (!this.decisionState) {
+        this.decisionState = { players: '4', shift: 'north', utility: 'medium', mobility: 'vehicles', density: 'high' };
+      }
+      if (!this.selectedFlightPath) this.selectedFlightPath = 'nw_se';
+      if (!this.selectedFlightPoi) this.selectedFlightPoi = 'peak';
+
       const coach = this.getCoach(this.selectedCoachId);
+      const decision = this.getDecisionMatrixResult();
 
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
+
           <!-- Top Cyber Banner -->
           <div class="cyber-panel p-5 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#150d22] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div>
               <div class="flex items-center gap-2">
                 <span class="text-2xl">🧠</span>
                 <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
-                  Pro Coaching Staff & Strategic Masterclass Hub
+                  Pro Coaching, IGL Decision Making & Macro Hub
                 </h3>
                 <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/50 text-[10px] font-bold">
-                  TIER-1 COACHES
+                  TIER-1 MACRO
                 </span>
               </div>
               <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Learn directly from the world's most accomplished Free Fire coaches and strategic analysts. Step-by-step tournament blueprints, interactive video analysis notes, daily training routines, and verified social channels.
+                Master the tournament mental game. Access the <strong>IGL Mid-Game Decision Matrix</strong>, early-game flight path contest planners, voice comms standardizers, and verified masterclasses from world champion coaches.
               </p>
             </div>
 
             <div class="flex items-center gap-2 shrink-0">
-              <button id="copyCoachStratBtn" class="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-purple-950/60 flex items-center gap-1.5 transition-transform hover:scale-105">
+              <button id="copyCoachStratBtn" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-sub font-bold uppercase rounded-xl text-xs tracking-wider shadow-lg shadow-purple-950/60 flex items-center gap-1.5 transition-transform hover:scale-105">
                 <span>📋</span>
-                <span id="copyCoachStratBtnText">Copy Strategy Checklist</span>
+                <span id="copyCoachStratBtnText">Copy Strategy Brief</span>
               </button>
             </div>
           </div>
 
-          <!-- Coach Category Filters & Carousel -->
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-sub uppercase font-bold text-slate-400">Select Coach or Analyst:</span>
-                <span class="text-[11px] text-purple-400 font-mono">(${FF_COACHING_STAFF.length} Verified Coaches)</span>
-              </div>
-
-              <!-- Region Filter -->
-              <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-[10px] font-sub font-bold uppercase">
-                <button class="coach-filter-btn active px-2.5 py-1 rounded bg-purple-600 text-white" data-region="all">All Coaches</button>
-                <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="india">🇮🇳 India</button>
-                <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="international">🌍 International</button>
-              </div>
+          <!-- COACHING VIEW NAVIGATION SWITCHER -->
+          <div class="cyber-panel p-2.5 rounded-xl border border-purple-500/40 bg-slate-950/90 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping"></span>
+              <span class="text-xs font-heading font-black text-white uppercase tracking-wider">Active Section:</span>
             </div>
 
-            <!-- Coaches Horizontal Scroll Carousel -->
-            <div class="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
-              ${FF_COACHING_STAFF.map(c => {
-                const isSelected = c.id === this.selectedCoachId;
-                return `
-                  <button class="coach-card-btn px-4 py-3 rounded-2xl border text-left transition-all shrink-0 hover:scale-105 flex items-center gap-3 ${
-                    isSelected
-                      ? 'border-purple-500 bg-gradient-to-br from-purple-950/90 via-slate-900 to-purple-950/90 text-white shadow-xl shadow-purple-950/60 ring-2 ring-purple-500/50'
-                      : 'border-slate-800 bg-slate-900/90 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
-                  }" data-coach-id="${c.id}" data-coach-region="${c.region}">
-                    <div class="w-10 h-10 rounded-xl bg-slate-800/90 border border-purple-500/40 flex items-center justify-center text-xl shrink-0">
-                      ${c.avatar}
-                    </div>
-                    <div>
-                      <div class="flex items-center gap-1.5 leading-tight">
-                        <span class="font-heading font-bold text-xs text-white">${c.name}</span>
-                        <span>${c.flag}</span>
-                      </div>
-                      <div class="text-[10px] text-purple-300 font-mono mt-0.5">${c.team}</div>
-                      <div class="mt-1">
-                        <span class="cyber-badge ${isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'} text-[8px] py-0 px-1.5 font-bold">
-                          ${c.badge}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                `;
-              }).join('')}
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="coaching-nav-btn ${this.coachingActiveView === 'decision_making' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="decision_making">
+                🧠 IGL Decision Making & Drop Planner
+              </button>
+              <button class="coaching-nav-btn ${this.coachingActiveView === 'coaches' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="coaches">
+                🎓 Pro Coaches & Masterclass Dossiers
+              </button>
+              <button class="coaching-nav-btn ${this.coachingActiveView === 'comms' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="comms">
+                🎙️ IGL Voice Comms & Audio Soundboard
+              </button>
             </div>
           </div>
 
-          <!-- Active Coach Dossier & Tactical Notebook -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            <!-- Left 4-Cols: Coach Dossier, Achievements & Verified Social Handles -->
-            <div class="lg:col-span-4 space-y-4">
-              <div class="cyber-panel p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-b from-slate-950 via-[#100b1a] to-slate-950 space-y-4">
-                
-                <!-- Profile Header -->
-                <div class="flex items-start justify-between border-b border-slate-800 pb-3">
-                  <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 rounded-2xl bg-purple-950/80 border-2 border-purple-500 flex items-center justify-center text-2xl shadow-lg">
-                      ${coach.avatar}
-                    </div>
-                    <div>
-                      <div class="flex items-center gap-1.5">
-                        <h4 class="text-sm font-heading font-black text-white uppercase">${coach.name}</h4>
-                        <span class="text-base">${coach.flag}</span>
-                      </div>
-                      <div class="text-[11px] text-purple-400 font-mono font-bold">${coach.role}</div>
-                      <div class="text-[10px] text-slate-400 font-mono">${coach.team}</div>
-                    </div>
-                  </div>
-                </div>
+          <!-- ============================================================= -->
+          <!-- VIEW 1: IGL DECISION MAKING & DROP PLANNER -->
+          <!-- ============================================================= -->
+          ${this.coachingActiveView === 'decision_making' ? `
+            <div class="space-y-6 animate-fade-in">
 
-                <!-- Trophies & Recognition -->
-                <div class="space-y-1.5">
-                  <div class="text-[10px] font-sub uppercase font-bold text-amber-400 flex items-center gap-1">
-                    <span>🏆</span>
-                    <span>Career Honors & Championships</span>
-                  </div>
-                  <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 leading-relaxed font-mono">
-                    ${coach.trophies}
-                  </div>
-                </div>
-
-                <!-- Verified Official Social Channels & Handles -->
-                <div class="space-y-2 pt-1 border-t border-slate-800/80">
-                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Official Social Media & Channels:</div>
-                  
-                  <!-- YouTube Button -->
-                  <a href="${coach.youtubeUrl}" target="_blank" rel="noopener noreferrer" 
-                     class="w-full px-3.5 py-2.5 rounded-xl bg-red-950/60 border border-red-500/50 hover:bg-red-900/70 text-red-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
-                    <div class="flex items-center gap-2">
-                      <span class="text-base">🔴</span>
-                      <div>
-                        <div class="text-[11px] text-white font-bold leading-tight">${coach.youtubeName}</div>
-                        <div class="text-[9px] text-red-400 font-mono">Official YouTube Channel</div>
-                      </div>
-                    </div>
-                    <span class="text-xs text-red-400 font-bold">&rarr;</span>
-                  </a>
-
-                  <!-- Instagram Button -->
-                  <a href="${coach.instaUrl}" target="_blank" rel="noopener noreferrer"
-                     class="w-full px-3.5 py-2.5 rounded-xl bg-pink-950/60 border border-pink-500/50 hover:bg-pink-900/70 text-pink-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
-                    <div class="flex items-center gap-2">
-                      <span class="text-base">📸</span>
-                      <div>
-                        <div class="text-[11px] text-white font-bold leading-tight">${coach.instaHandle}</div>
-                        <div class="text-[9px] text-pink-400 font-mono">Verified Instagram Handle</div>
-                      </div>
-                    </div>
-                    <span class="text-xs text-pink-400 font-bold">&rarr;</span>
-                  </a>
-                </div>
-
-                <!-- Coaching Philosophy Quote -->
-                <div class="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 space-y-1">
-                  <div class="text-[10px] font-sub font-bold uppercase text-purple-300">Core Coaching Philosophy:</div>
-                  <p class="text-[11px] text-slate-300 italic leading-relaxed">
-                    "${coach.philosophy}"
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right 8-Cols: Interactive Strategy Notebook & Video Notes -->
-            <div class="lg:col-span-8 space-y-4">
-              <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/90 space-y-4">
-                
-                <!-- Strategy Title Header -->
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <!-- SECTION 1: IGL MID-GAME DECISION MATRIX WIZARD -->
+              <div class="cyber-panel p-5 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-[#0a1829] to-slate-950 space-y-5">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
                   <div>
-                    <div class="text-xs font-sub font-bold uppercase text-purple-400">Signature Tournament Strategy</div>
-                    <h3 class="text-base font-heading font-black text-white mt-0.5">
-                      ${coach.strategyTitle}
-                    </h3>
+                    <div class="flex items-center gap-2">
+                      <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+                      <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        🧭 IGL Mid-Game Decision Matrix (Phase 3 & 4 Macro Engine)
+                      </h4>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Select your squad's live tournament condition below to compute the mathematically optimal rotation strategy:
+                    </p>
+                  </div>
+                  <span class="px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-400/40 text-cyan-300 text-[11px] font-mono font-bold">
+                    Real-Time Strategy Output
+                  </span>
+                </div>
+
+                <!-- Interactive Scenario Inputs Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                  <!-- Input 1: Alive Players -->
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div class="text-[10px] font-mono uppercase font-bold text-slate-400">1. Squad Alive:</div>
+                    <div class="grid grid-cols-2 gap-1 text-[11px] font-mono font-bold">
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.players === '4' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="players" data-val="4">4 Full</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.players === '3' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="players" data-val="3">3 Down 1</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.players === '2' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="players" data-val="2">2 Duo</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.players === '1' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="players" data-val="1">1 Solo</button>
+                    </div>
                   </div>
 
-                  <!-- Sub-Tab Switcher (Strategy / Video / Drills) -->
-                  <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 text-xs font-sub font-bold uppercase">
-                    <button class="coach-tab-btn ${this.selectedCoachTab === 'strategy' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="strategy">
-                      📋 Strategy
-                    </button>
-                    <button class="coach-tab-btn ${this.selectedCoachTab === 'video' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="video">
-                      🎬 Video Notes
-                    </button>
-                    <button class="coach-tab-btn ${this.selectedCoachTab === 'drills' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="drills">
-                      ⏱️ 60m Drills
-                    </button>
+                  <!-- Input 2: Zone Shift Direction -->
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div class="text-[10px] font-mono uppercase font-bold text-slate-400">2. Zone Shift:</div>
+                    <div class="grid grid-cols-2 gap-1 text-[11px] font-mono font-bold">
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.shift === 'north' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="shift" data-val="north">⬆️ North</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.shift === 'south' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="shift" data-val="south">⬇️ South</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.shift === 'center' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="shift" data-val="center">🎯 Center</button>
+                      <button class="dm-pill p-1.5 rounded text-center border transition-all ${this.decisionState.shift === 'water' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="shift" data-val="water">🌊 Water</button>
+                    </div>
+                  </div>
+
+                  <!-- Input 3: Gloo / Utility Economy -->
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div class="text-[10px] font-mono uppercase font-bold text-slate-400">3. Gloo Economy:</div>
+                    <div class="grid grid-cols-1 gap-1 text-[11px] font-mono font-bold">
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.utility === 'rich' ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="utility" data-val="rich">🟢 Rich (8+ Gloo)</button>
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.utility === 'medium' ? 'bg-amber-600 text-white border-amber-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="utility" data-val="medium">🟡 Medium (4-7)</button>
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.utility === 'starved' ? 'bg-rose-600 text-white border-rose-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="utility" data-val="starved">🔴 Starved (< 3)</button>
+                    </div>
+                  </div>
+
+                  <!-- Input 4: Mobility & Vehicles -->
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div class="text-[10px] font-mono uppercase font-bold text-slate-400">4. Mobility:</div>
+                    <div class="grid grid-cols-1 gap-1 text-[11px] font-mono font-bold">
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.mobility === 'vehicles' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="mobility" data-val="vehicles">🏎️ 2+ Vehicles</button>
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.mobility === 'on_foot' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="mobility" data-val="on_foot">🏃 On Foot (Sprint)</button>
+                    </div>
+                  </div>
+
+                  <!-- Input 5: Lobby Traffic Density -->
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div class="text-[10px] font-mono uppercase font-bold text-slate-400">5. Lobby Traffic:</div>
+                    <div class="grid grid-cols-1 gap-1 text-[11px] font-mono font-bold">
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.density === 'high' ? 'bg-purple-600 text-white border-purple-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="density" data-val="high">🔥 High (8+ Teams)</button>
+                      <button class="dm-pill p-1 rounded text-center border transition-all ${this.decisionState.density === 'low' ? 'bg-purple-600 text-white border-purple-400' : 'bg-slate-950 text-slate-400 border-slate-800'}" data-key="density" data-val="low">🎯 Low (< 5 Teams)</button>
+                    </div>
                   </div>
                 </div>
 
-                <!-- SUB-TAB 1: STRATEGY PROTOCOL -->
-                ${this.selectedCoachTab === 'strategy' ? `
-                  <div class="space-y-4 animate-fade-in">
-                    <!-- Concept Overview -->
-                    <p class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-                      ${coach.summary}
-                    </p>
-
-                    <!-- Tactical 4-Step Scrim Protocol -->
-                    <div class="space-y-2.5">
-                      <div class="text-xs font-sub uppercase font-bold text-amber-400 flex items-center gap-1.5">
-                        <span>⚡</span>
-                        <span>Official 4-Phase Scrim Execution Protocol:</span>
+                <!-- DYNAMIC TACTICAL VERDICT CARD -->
+                <div class="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-slate-900 via-[#101b2b] to-slate-950 border border-cyan-500/50 shadow-2xl space-y-4 animate-fade-in">
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                    <div class="flex items-center gap-3">
+                      <div class="w-12 h-12 rounded-2xl bg-cyan-950/80 border border-cyan-400/60 flex items-center justify-center text-2xl shadow-lg">
+                        ${decision.icon}
                       </div>
-                      
-                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        ${coach.tacticalSteps.map(s => `
-                          <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800/90 space-y-1 hover:border-purple-500/40 transition-colors">
-                            <div class="flex items-center gap-2">
-                              <span class="w-5 h-5 rounded-full bg-purple-900/80 border border-purple-500/60 text-purple-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                                ${s.step}
-                              </span>
-                              <h5 class="text-xs font-heading font-bold text-white uppercase">${s.title}</h5>
-                            </div>
-                            <p class="text-[11px] text-slate-300 leading-relaxed pt-0.5">
-                              ${s.desc}
-                            </p>
-                          </div>
-                        `).join('')}
+                      <div>
+                        <span class="cyber-badge ${decision.badgeColor} border px-2 py-0.5 text-[9px]">
+                          ${decision.badge}
+                        </span>
+                        <h3 class="text-base font-heading font-black text-white uppercase tracking-wider mt-1">
+                          ${decision.title}
+                        </h3>
                       </div>
                     </div>
+                    <div class="text-right">
+                      <div class="text-[10px] font-mono text-slate-400 uppercase">Pro Reference Team:</div>
+                      <div class="text-xs font-mono font-bold text-amber-400">${decision.proTeam}</div>
+                    </div>
+                  </div>
 
-                    <!-- Critical Mistake Warning -->
-                    <div class="p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 space-y-1">
-                      <div class="flex items-center gap-1.5 text-xs font-sub font-bold uppercase text-red-400">
-                        <span>⚠️</span>
-                        <span>Why Underdog Squads Fail on This Strategy:</span>
+                  <!-- Strategic Rationale -->
+                  <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-300 leading-relaxed font-sans">
+                    <strong class="text-white uppercase font-heading tracking-wider">Strategic Rationale:</strong> ${decision.reason}
+                  </div>
+
+                  <!-- Step-by-Step Phase Execution -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    ${decision.steps.map(s => `
+                      <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                        <div class="flex items-center gap-1.5 text-xs font-heading font-bold text-cyan-400 uppercase">
+                          <span>⚡ Step ${s.step}:</span>
+                          <span>${s.title}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-300 leading-relaxed pt-0.5">
+                          ${s.desc}
+                        </p>
                       </div>
-                      <p class="text-[11px] text-slate-200 leading-relaxed">
-                        ${coach.mistakesUnderdogsMake}
+                    `).join('')}
+                  </div>
+
+                  <!-- IGL Voice Comms Script -->
+                  <div class="p-3.5 rounded-xl bg-cyan-950/40 border border-cyan-500/40 flex items-start gap-3">
+                    <span class="text-xl shrink-0">🎙️</span>
+                    <div>
+                      <div class="text-[10px] font-mono uppercase font-bold text-cyan-300 tracking-wider">Exact IGL Voice Comms Callout Script:</div>
+                      <p class="text-xs text-slate-100 font-mono italic mt-1 leading-relaxed">
+                        "${decision.comms}"
                       </p>
                     </div>
                   </div>
-                ` : ''}
 
-                <!-- SUB-TAB 2: VIDEO BREAKDOWN & TIMESTAMPS -->
-                ${this.selectedCoachTab === 'video' ? `
-                  <div class="space-y-4 animate-fade-in">
-                    <div class="relative w-full aspect-video bg-gradient-to-br from-[#0a0f1d] via-[#0e1629] to-[#070b14] rounded-2xl border-2 border-slate-800 overflow-hidden flex flex-col justify-between p-4 shadow-xl">
-                      <!-- Mock Video Watermark -->
-                      <div class="flex items-center justify-between z-10">
-                        <div class="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-full border border-slate-800 text-[10px] font-mono text-white">
-                          <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                          <span>${coach.videoNotes.title}</span>
-                        </div>
-                        <span class="bg-purple-950/80 border border-purple-500/50 text-purple-300 text-[10px] font-mono px-2 py-0.5 rounded-full">
-                          ${coach.videoNotes.duration}
-                        </span>
-                      </div>
-
-                      <!-- Center Play Simulation Graphic -->
-                      <div class="self-center flex flex-col items-center gap-2 text-center my-auto cursor-pointer group">
-                        <div class="w-16 h-16 rounded-full bg-purple-600/90 group-hover:bg-purple-500 text-white flex items-center justify-center text-2xl shadow-2xl transition-transform group-hover:scale-110">
-                          ▶
-                        </div>
-                        <span class="text-xs text-slate-300 font-sub font-bold uppercase tracking-wider group-hover:text-white">
-                          Interactive Tactical Video Analysis & Playback
-                        </span>
-                      </div>
-
-                      <!-- Video Progress Mock Bar -->
-                      <div class="w-full space-y-1 z-10">
-                        <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div class="w-2/5 h-full bg-gradient-to-r from-purple-500 to-indigo-500"></div>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono text-slate-400">
-                          <span>05:44 / ${coach.videoNotes.duration}</span>
-                          <span>1080p 60FPS Tactical Broadcast</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Timestamped Coaching Notes -->
-                    <div class="space-y-2">
-                      <div class="text-xs font-sub uppercase font-bold text-slate-400">Timestamped Coaching Keyframes:</div>
-                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        ${coach.videoNotes.timestamps.map(t => `
-                          <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex items-center gap-2.5">
-                            <span class="px-2 py-0.5 bg-purple-950 text-purple-300 border border-purple-500/50 rounded font-mono text-[10px] font-bold shrink-0">
-                              ${t.time}
-                            </span>
-                            <span class="text-slate-200 text-[11px] font-medium">${t.title}</span>
-                          </div>
-                        `).join('')}
-                      </div>
-                    </div>
+                  <!-- Golden Law Banner -->
+                  <div class="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 flex items-center justify-between text-xs font-mono text-amber-300">
+                    <span>👑 <strong>IGL GOLDEN LAW:</strong> ${decision.goldenRule}</span>
                   </div>
-                ` : ''}
+                </div>
+              </div>
 
-                <!-- SUB-TAB 3: 60-MINUTE DAILY PRACTICE ROUTINE -->
-                ${this.selectedCoachTab === 'drills' ? `
-                  <div class="space-y-4 animate-fade-in">
-                    <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <div>
-                        <h4 class="text-xs font-heading font-bold text-white uppercase">Coach ${coach.alias}'s 60-Minute Daily Scrim Routine</h4>
-                        <p class="text-[11px] text-slate-400">Execute this 4-block training routine with your squad daily before competitive matches.</p>
-                      </div>
-                      <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold">
-                        DAILY DISCIPLINE
+              <!-- SECTION 2: FLIGHT PATH & DROP CONTEST SIMULATOR -->
+              <div class="cyber-panel p-5 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#180f28] to-slate-950 space-y-5">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-2xl">🛩️</span>
+                      <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        Interactive Flight Path & Early Drop Contest Simulator
+                      </h4>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Calculate parachute glide physics, 50-50 contest risk percentages, and 15-second weapon thresholds:
+                    </p>
+                  </div>
+
+                  <!-- Map & Trajectory Selectors -->
+                  <div class="flex items-center gap-2">
+                    <select id="flightPathSelect" class="bg-slate-900 border border-purple-500/40 rounded-xl px-3 py-1.5 text-xs text-purple-300 font-mono outline-none">
+                      <option value="nw_se" ${this.selectedFlightPath === 'nw_se' ? 'selected' : ''}>✈️ Northwest &rarr; Southeast (Peak Direct)</option>
+                      <option value="w_e" ${this.selectedFlightPath === 'w_e' ? 'selected' : ''}>✈️ West &rarr; East (Rim Nam &rarr; Keraton)</option>
+                      <option value="n_s" ${this.selectedFlightPath === 'n_s' ? 'selected' : ''}>✈️ North &rarr; South (Waterfront &rarr; Mars)</option>
+                      <option value="ne_sw" ${this.selectedFlightPath === 'ne_sw' ? 'selected' : ''}>✈️ Northeast &rarr; Southwest (Mill &rarr; Sentosa)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Interactive POI Drop Cards Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                  <!-- Peak Card -->
+                  <div class="flight-poi-card p-3.5 rounded-xl border ${this.selectedFlightPath === 'nw_se' ? 'border-rose-500/80 bg-rose-950/30' : 'border-slate-800 bg-slate-900/90'} space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="font-heading font-black text-white text-xs uppercase">🏔️ PEAK (CENTRAL)</span>
+                      <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold ${this.selectedFlightPath === 'nw_se' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400'}">
+                        ${this.selectedFlightPath === 'nw_se' ? 'HOT (92% RISK)' : 'MODERATE (45%)'}
                       </span>
                     </div>
+                    <div class="text-[11px] font-mono text-slate-300 space-y-1">
+                      <div>Distance from plane: <strong>${this.selectedFlightPath === 'nw_se' ? '120m (Direct Dive)' : '680m (45° Glide)'}</strong></div>
+                      <div>Touchdown time: <strong>${this.selectedFlightPath === 'nw_se' ? '22s (234 km/h)' : '34s (175 km/h)'}</strong></div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 leading-tight">
+                      ${this.selectedFlightPath === 'nw_se' ? '⚠️ EVOS/Magic Squad hot contest! Rusher must secure Shotgun within 15s or veer off West.' : 'Secondary contest likely. Drop balcony for instant high-ground advantage.'}
+                    </p>
+                  </div>
 
-                    <div class="space-y-2.5">
-                      ${coach.drillSchedule.map((d, idx) => `
-                        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div class="space-y-0.5">
-                            <div class="flex items-center gap-2">
-                              <span class="cyber-badge bg-slate-800 text-amber-400 font-mono text-[9px]">BLOCK ${idx + 1}</span>
-                              <span class="text-xs font-heading font-bold text-white uppercase">${d.name}</span>
-                            </div>
-                            <p class="text-[11px] text-slate-300">${d.desc}</p>
+                  <!-- Clock Tower Card -->
+                  <div class="flight-poi-card p-3.5 rounded-xl border border-slate-800 bg-slate-900/90 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="font-heading font-black text-white text-xs uppercase">🕰️ CLOCK TOWER</span>
+                      <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold ${this.selectedFlightPath === 'w_e' ? 'bg-rose-600 text-white' : 'bg-amber-500/20 text-amber-300'}">
+                        ${this.selectedFlightPath === 'w_e' ? 'HOT (85% RISK)' : 'MEDIUM (50%)'}
+                      </span>
+                    </div>
+                    <div class="text-[11px] font-mono text-slate-300 space-y-1">
+                      <div>Distance from plane: <strong>${this.selectedFlightPath === 'w_e' ? '210m (Fast Dive)' : '540m (Angled)'}</strong></div>
+                      <div>Touchdown time: <strong>${this.selectedFlightPath === 'w_e' ? '24s' : '31s'}</strong></div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 leading-tight">
+                      Drop 2-story green house. Do not loot open courtyard without 2+ gloo walls.
+                    </p>
+                  </div>
+
+                  <!-- Mill Card -->
+                  <div class="flight-poi-card p-3.5 rounded-xl border border-slate-800 bg-slate-900/90 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="font-heading font-black text-white text-xs uppercase">🏭 MILL (NORTH-EAST)</span>
+                      <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold ${this.selectedFlightPath === 'ne_sw' ? 'bg-rose-600 text-white' : 'bg-emerald-500/20 text-emerald-300'}">
+                        ${this.selectedFlightPath === 'ne_sw' ? 'HOT (80% RISK)' : 'LOW (20%)'}
+                      </span>
+                    </div>
+                    <div class="text-[11px] font-mono text-slate-300 space-y-1">
+                      <div>Distance from plane: <strong>${this.selectedFlightPath === 'ne_sw' ? '180m' : '880m (Long Glide)'}</strong></div>
+                      <div>Touchdown time: <strong>${this.selectedFlightPath === 'ne_sw' ? '23s' : '44s'}</strong></div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 leading-tight">
+                      Total Gaming sniper vantage. Secure top rooftop and staircase choke points immediately.
+                    </p>
+                  </div>
+
+                  <!-- Rim Nam Village (Safe Split) -->
+                  <div class="flight-poi-card p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-950/20 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="font-heading font-black text-emerald-300 text-xs uppercase">🌊 RIM NAM (SAFE SPLIT)</span>
+                      <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-600 text-white">
+                        SAFE (0-10% RISK)
+                      </span>
+                    </div>
+                    <div class="text-[11px] font-mono text-slate-300 space-y-1">
+                      <div>Distance from plane: <strong>650m - 1100m</strong></div>
+                      <div>Touchdown time: <strong>38s - 48s</strong></div>
+                    </div>
+                    <p class="text-[10px] text-slate-300 leading-tight">
+                      Recommended underdog backup drop. 100% safe 4-man loot, 8+ gloo walls, and vehicle spawns for Zone 2.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- The 50-50 Drop Contest Rules Box -->
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div class="space-y-1">
+                    <div class="text-xs font-heading font-bold text-amber-400 uppercase flex items-center gap-1.5">
+                      <span>⚖️</span>
+                      <span>The 15-Second Competitive Drop Contest Protocol:</span>
+                    </div>
+                    <p class="text-[11px] text-slate-300 leading-relaxed max-w-3xl">
+                      If a rival team lands within 30 meters of your building: Rusher must find a <strong>Shotgun (M1887/Charge Buster) + 1 Gloo Wall</strong> within 15 seconds. If un-looted, call immediate fallback to edge huts rather than fighting 50-50 with fists or pistols.
+                    </p>
+                  </div>
+                  <div class="px-3 py-1.5 rounded-xl bg-purple-950 border border-purple-500/40 text-purple-300 text-[11px] font-mono shrink-0">
+                    Rule: Never 50-50 with Pistols
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          ` : ''}
+
+          <!-- ============================================================= -->
+          <!-- VIEW 2: PRO COACHES & MASTERCLASS DOSSIERS -->
+          <!-- ============================================================= -->
+          ${this.coachingActiveView === 'coaches' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- Coach Category Filters & Carousel -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-sub uppercase font-bold text-slate-400">Select Coach or Analyst:</span>
+                    <span class="text-[11px] text-purple-400 font-mono">(${FF_COACHING_STAFF.length} Verified Coaches)</span>
+                  </div>
+
+                  <!-- Region Filter -->
+                  <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-[10px] font-sub font-bold uppercase">
+                    <button class="coach-filter-btn active px-2.5 py-1 rounded bg-purple-600 text-white" data-region="all">All Coaches</button>
+                    <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="india">🇮🇳 India</button>
+                    <button class="coach-filter-btn px-2.5 py-1 rounded text-slate-400 hover:text-white" data-region="international">🌍 International</button>
+                  </div>
+                </div>
+
+                <!-- Coaches Horizontal Scroll Carousel -->
+                <div class="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+                  ${FF_COACHING_STAFF.map(c => {
+                    const isSelected = c.id === this.selectedCoachId;
+                    return `
+                      <button class="coach-card-btn px-4 py-3 rounded-2xl border text-left transition-all shrink-0 hover:scale-105 flex items-center gap-3 ${
+                        isSelected
+                          ? 'border-purple-500 bg-gradient-to-br from-purple-950/90 via-slate-900 to-purple-950/90 text-white shadow-xl shadow-purple-950/60 ring-2 ring-purple-500/50'
+                          : 'border-slate-800 bg-slate-900/90 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
+                      }" data-coach-id="${c.id}" data-coach-region="${c.region}">
+                        <div class="w-10 h-10 rounded-xl bg-slate-800/90 border border-purple-500/40 flex items-center justify-center text-xl shrink-0">
+                          ${c.avatar}
+                        </div>
+                        <div>
+                          <div class="flex items-center gap-1.5 leading-tight">
+                            <span class="font-heading font-bold text-xs text-white">${c.name}</span>
+                            <span>${c.flag}</span>
                           </div>
-                          <div class="px-3 py-1 bg-purple-950/80 border border-purple-500/40 text-purple-300 font-mono text-xs font-bold rounded-lg shrink-0 text-center">
-                            ${d.time}
+                          <div class="text-[10px] text-purple-300 font-mono mt-0.5">${c.team}</div>
+                          <div class="mt-1">
+                            <span class="cyber-badge ${isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'} text-[8px] py-0 px-1.5 font-bold">
+                              ${c.badge}
+                            </span>
                           </div>
                         </div>
-                      `).join('')}
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+
+              <!-- Active Coach Dossier & Tactical Notebook -->
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Left 4-Cols: Coach Dossier -->
+                <div class="lg:col-span-4 space-y-4">
+                  <div class="cyber-panel p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-b from-slate-950 via-[#100b1a] to-slate-950 space-y-4">
+                    <div class="flex items-start justify-between border-b border-slate-800 pb-3">
+                      <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-2xl bg-purple-950/80 border-2 border-purple-500 flex items-center justify-center text-2xl shadow-lg">
+                          ${coach.avatar}
+                        </div>
+                        <div>
+                          <div class="flex items-center gap-1.5">
+                            <h4 class="text-sm font-heading font-black text-white uppercase">${coach.name}</h4>
+                            <span class="text-base">${coach.flag}</span>
+                          </div>
+                          <div class="text-[11px] text-purple-400 font-mono font-bold">${coach.role}</div>
+                          <div class="text-[10px] text-slate-400 font-mono">${coach.team}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="space-y-1.5">
+                      <div class="text-[10px] font-sub uppercase font-bold text-amber-400 flex items-center gap-1">
+                        <span>🏆</span>
+                        <span>Career Honors & Championships</span>
+                      </div>
+                      <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 leading-relaxed font-mono">
+                        ${coach.trophies}
+                      </div>
+                    </div>
+
+                    <div class="space-y-2 pt-1 border-t border-slate-800/80">
+                      <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Official Social Media:</div>
+                      <a href="${coach.youtubeUrl}" target="_blank" rel="noopener noreferrer" 
+                         class="w-full px-3.5 py-2.5 rounded-xl bg-red-950/60 border border-red-500/50 hover:bg-red-900/70 text-red-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
+                        <div class="flex items-center gap-2">
+                          <span class="text-base">🔴</span>
+                          <div>
+                            <div class="text-[11px] text-white font-bold leading-tight">${coach.youtubeName}</div>
+                            <div class="text-[9px] text-red-400 font-mono">Official YouTube Channel</div>
+                          </div>
+                        </div>
+                        <span class="text-xs text-red-400 font-bold">&rarr;</span>
+                      </a>
+
+                      <a href="${coach.instaUrl}" target="_blank" rel="noopener noreferrer"
+                         class="w-full px-3.5 py-2.5 rounded-xl bg-pink-950/60 border border-pink-500/50 hover:bg-pink-900/70 text-pink-200 text-xs font-sub font-bold flex items-center justify-between transition-all hover:scale-[1.02] shadow">
+                        <div class="flex items-center gap-2">
+                          <span class="text-base">📸</span>
+                          <div>
+                            <div class="text-[11px] text-white font-bold leading-tight">${coach.instaHandle}</div>
+                            <div class="text-[9px] text-pink-400 font-mono">Verified Instagram Handle</div>
+                          </div>
+                        </div>
+                        <span class="text-xs text-pink-400 font-bold">&rarr;</span>
+                      </a>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 space-y-1">
+                      <div class="text-[10px] font-sub font-bold uppercase text-purple-300">Core Coaching Philosophy:</div>
+                      <p class="text-[11px] text-slate-300 italic leading-relaxed">
+                        "${coach.philosophy}"
+                      </p>
                     </div>
                   </div>
-                ` : ''}
+                </div>
 
+                <!-- Right 8-Cols: Interactive Strategy Notebook -->
+                <div class="lg:col-span-8 space-y-4">
+                  <div class="cyber-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/90 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                      <div>
+                        <div class="text-xs font-sub font-bold uppercase text-purple-400">Signature Tournament Strategy</div>
+                        <h3 class="text-base font-heading font-black text-white mt-0.5">
+                          ${coach.strategyTitle}
+                        </h3>
+                      </div>
+
+                      <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 text-xs font-sub font-bold uppercase">
+                        <button class="coach-tab-btn ${this.selectedCoachTab === 'strategy' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="strategy">
+                          📋 Strategy
+                        </button>
+                        <button class="coach-tab-btn ${this.selectedCoachTab === 'video' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="video">
+                          🎬 Video Notes
+                        </button>
+                        <button class="coach-tab-btn ${this.selectedCoachTab === 'drills' ? 'active bg-purple-600 text-white' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg" data-tab="drills">
+                          ⏱️ 60m Drills
+                        </button>
+                      </div>
+                    </div>
+
+                    ${this.selectedCoachTab === 'strategy' ? `
+                      <div class="space-y-4 animate-fade-in">
+                        <p class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                          ${coach.summary}
+                        </p>
+
+                        <div class="space-y-2.5">
+                          <div class="text-xs font-sub uppercase font-bold text-amber-400 flex items-center gap-1.5">
+                            <span>⚡</span>
+                            <span>Official 4-Phase Scrim Execution Protocol:</span>
+                          </div>
+                          
+                          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            ${coach.tacticalSteps.map(s => `
+                              <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800/90 space-y-1 hover:border-purple-500/40 transition-colors">
+                                <div class="flex items-center gap-2">
+                                  <span class="w-5 h-5 rounded-full bg-purple-900/80 border border-purple-500/60 text-purple-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                    ${s.step}
+                                  </span>
+                                  <h5 class="text-xs font-heading font-bold text-white uppercase">${s.title}</h5>
+                                </div>
+                                <p class="text-[11px] text-slate-300 leading-relaxed pt-0.5">
+                                  ${s.desc}
+                                </p>
+                              </div>
+                            `).join('')}
+                          </div>
+                        </div>
+
+                        <div class="p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 space-y-1">
+                          <div class="flex items-center gap-1.5 text-xs font-sub font-bold uppercase text-red-400">
+                            <span>⚠️</span>
+                            <span>Why Underdog Squads Fail on This Strategy:</span>
+                          </div>
+                          <p class="text-[11px] text-slate-200 leading-relaxed">
+                            ${coach.mistakesUnderdogsMake}
+                          </p>
+                        </div>
+                      </div>
+                    ` : ''}
+
+                    ${this.selectedCoachTab === 'video' ? `
+                      <div class="space-y-4 animate-fade-in">
+                        <div class="relative w-full aspect-video bg-gradient-to-br from-[#0a0f1d] via-[#0e1629] to-[#070b14] rounded-2xl border-2 border-slate-800 overflow-hidden flex flex-col justify-between p-4 shadow-xl">
+                          <div class="flex items-center justify-between z-10">
+                            <div class="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-full border border-slate-800 text-[10px] font-mono text-white">
+                              <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                              <span>${coach.videoNotes.title}</span>
+                            </div>
+                            <span class="bg-purple-950/80 border border-purple-500/50 text-purple-300 text-[10px] font-mono px-2 py-0.5 rounded-full">
+                              ${coach.videoNotes.duration}
+                            </span>
+                          </div>
+
+                          <div class="self-center flex flex-col items-center gap-2 text-center my-auto cursor-pointer group">
+                            <div class="w-16 h-16 rounded-full bg-purple-600/90 group-hover:bg-purple-500 text-white flex items-center justify-center text-2xl shadow-2xl transition-transform group-hover:scale-110">
+                              ▶
+                            </div>
+                            <span class="text-xs text-slate-300 font-sub font-bold uppercase tracking-wider group-hover:text-white">
+                              Interactive Tactical Video Analysis & Playback
+                            </span>
+                          </div>
+
+                          <div class="w-full space-y-1 z-10">
+                            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div class="w-2/5 h-full bg-gradient-to-r from-purple-500 to-indigo-500"></div>
+                            </div>
+                            <div class="flex justify-between text-[10px] font-mono text-slate-400">
+                              <span>05:44 / ${coach.videoNotes.duration}</span>
+                              <span>1080p 60FPS Tactical Broadcast</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="space-y-2">
+                          <div class="text-xs font-sub uppercase font-bold text-slate-400">Timestamped Coaching Keyframes:</div>
+                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            ${coach.videoNotes.timestamps.map(t => `
+                              <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex items-center gap-2.5">
+                                <span class="px-2 py-0.5 bg-purple-950 text-purple-300 border border-purple-500/50 rounded font-mono text-[10px] font-bold shrink-0">
+                                  ${t.time}
+                                </span>
+                                <span class="text-slate-200 text-[11px] font-medium">${t.title}</span>
+                              </div>
+                            `).join('')}
+                          </div>
+                        </div>
+                      </div>
+                    ` : ''}
+
+                    ${this.selectedCoachTab === 'drills' ? `
+                      <div class="space-y-4 animate-fade-in">
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <div>
+                            <h4 class="text-xs font-heading font-bold text-white uppercase">Coach ${coach.alias}'s 60-Minute Daily Scrim Routine</h4>
+                            <p class="text-[11px] text-slate-400">Execute this 4-block training routine with your squad daily before competitive matches.</p>
+                          </div>
+                          <span class="cyber-badge bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold">
+                            DAILY DISCIPLINE
+                          </span>
+                        </div>
+
+                        <div class="space-y-2.5">
+                          ${coach.drillSchedule.map((d, idx) => `
+                            <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div class="space-y-0.5">
+                                <div class="flex items-center gap-2">
+                                  <span class="cyber-badge bg-slate-800 text-amber-400 font-mono text-[9px]">BLOCK ${idx + 1}</span>
+                                  <span class="text-xs font-heading font-bold text-white uppercase">${d.name}</span>
+                                </div>
+                                <p class="text-[11px] text-slate-300">${d.desc}</p>
+                              </div>
+                              <div class="px-3 py-1 bg-purple-950/80 border border-purple-500/40 text-purple-300 font-mono text-xs font-bold rounded-lg shrink-0 text-center">
+                                ${d.time}
+                              </div>
+                            </div>
+                          `).join('')}
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          ` : ''}
+
+          <!-- ============================================================= -->
+          <!-- VIEW 3: IGL VOICE COMMS & AUDIO SOUNDBOARD -->
+          <!-- ============================================================= -->
+          ${this.coachingActiveView === 'comms' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- Golden Laws Banner -->
+              <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#181106] to-slate-950 space-y-3">
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-amber-400 animate-pulse"></span>
+                  <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                    The 3 Golden Laws of Championship IGL Voice Comms
+                  </h4>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                    <div class="text-xs font-heading font-bold text-amber-400 uppercase">1. AUDIO PRIORITY SILENCE</div>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">
+                      Zero talking during close-range CQB footstep audio. Dead players must mute microphones instantly unless calling precise spectator angles.
+                    </p>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                    <div class="text-xs font-heading font-bold text-amber-400 uppercase">2. THE 3-WORD PROTOCOL</div>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">
+                      Eliminate rambling. Every callout must follow: <strong>[Target] - [Location] - [HP/Action]</strong>. Example: <em>"One knock - Red roof - Rush now!"</em>
+                    </p>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                    <div class="text-xs font-heading font-bold text-amber-400 uppercase">3. SINGLE VOICE OF COMMAND</div>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">
+                      In Phase 4/5, the IGL's call is absolute. Even a risky call executed together as 4 players is 10x better than 4 players hesitating.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Interactive Audio Callout Soundboard -->
+              <div class="cyber-panel p-5 rounded-2xl border border-cyan-500/40 bg-slate-950 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                      🎙️ Interactive Competitive Callout Soundboard
+                    </h4>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Click any tactical comms button below to trigger synthesized radio feedback and phonetic voice script:
+                    </p>
+                  </div>
+                  <span class="text-xs font-mono text-cyan-400 bg-cyan-950 px-2.5 py-1 rounded-lg border border-cyan-500/40">
+                    6 Audio Drills
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  <!-- Comms Button 1 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-cyan-400 text-left space-y-1.5 transition-all group" data-comms="knock">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-cyan-400 uppercase group-hover:text-cyan-300">📢 1. Knock Confirmation</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "ONE KNOCK! RED WAREHOUSE! RUSH NOW, RUSH NOW!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Triggers immediate 4-man collapse within 3 seconds before revive.</div>
+                  </button>
+
+                  <!-- Comms Button 2 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-amber-400 text-left space-y-1.5 transition-all group" data-comms="third_party">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-amber-400 uppercase group-hover:text-amber-300">⚠️ 2. Third-Party Warning</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "THIRD-PARTY BEHIND! RESET GLOO BOX 360°! DO NOT LOOT!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Commands rusher to drop 2 rear gloos and anchor reverse angle.</div>
+                  </button>
+
+                  <!-- Comms Button 3 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-rose-400 text-left space-y-1.5 transition-all group" data-comms="grenade">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-rose-400 uppercase group-hover:text-rose-300">💣 3. Grenade Cook Alert</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "NADE COOKED 2 SECONDS! CORNER BALCONY! DUCK BEHIND!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Instantly warns teammates to un-crouch and back off from gloo wall.</div>
+                  </button>
+
+                  <!-- Comms Button 4 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-emerald-400 text-left space-y-1.5 transition-all group" data-comms="fallback">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-emerald-400 uppercase group-hover:text-emerald-300">🛡️ 4. Fallback Order</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "DISENGAGE! PULL BACK TO WATER DIP! DO NOT OVEREXTEND!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Stops fragger from chasing kill point into crossfire trap.</div>
+                  </button>
+
+                  <!-- Comms Button 5 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-purple-400 text-left space-y-1.5 transition-all group" data-comms="rotation">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-purple-400 uppercase group-hover:text-purple-300">🏎️ 5. Zone Boost Countdown</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "ZONE 15 SECONDS! DROP FIGHT, VEHICLE BOOST GO GO GO!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Breaks tunnel vision and forces squad onto vehicle convoy.</div>
+                  </button>
+
+                  <!-- Comms Button 6 -->
+                  <button class="comms-sound-btn p-4 rounded-xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800 hover:border-cyan-400 text-left space-y-1.5 transition-all group" data-comms="gloo_reset">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-bold text-cyan-400 uppercase group-hover:text-cyan-300">🔄 6. Fast Gloo Box Reset</span>
+                      <span class="text-xs text-slate-500 font-mono">🔊 Play</span>
+                    </div>
+                    <p class="text-xs text-white font-mono font-bold leading-tight">
+                      "BOPS DROP NAIRI WALL! DIMITRI READY FOR INSTANT REVIVE!"
+                    </p>
+                    <div class="text-[10px] text-slate-400">Coordinates character active skill synergies under heavy fire.</div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
         </div>
       `;
 
@@ -9687,7 +10215,50 @@ ${curPreset.proTip}`;
     }
 
     bindCoachingEvents() {
-      // 1. Coach Selection Carousel
+      // 1. Coaching Main View Switcher (Decision Making / Coaches / Comms)
+      document.querySelectorAll('.coaching-nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const view = btn.getAttribute('data-view');
+          if (view) {
+            this.coachingActiveView = view;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Decision Matrix Interactive Pills
+      document.querySelectorAll('.dm-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          const key = pill.getAttribute('data-key');
+          const val = pill.getAttribute('data-val');
+          if (key && val) {
+            this.decisionState[key] = val;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 3. Flight Path Selector
+      const fpSelect = document.getElementById('flightPathSelect');
+      if (fpSelect) {
+        fpSelect.addEventListener('change', (e) => {
+          this.selectedFlightPath = e.target.value;
+          this.renderTabContent();
+        });
+      }
+
+      // 4. Comms Soundboard Buttons
+      document.querySelectorAll('.comms-sound-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.playRadioBeep();
+          btn.classList.add('ring-2', 'ring-cyan-400', 'bg-cyan-950/40');
+          setTimeout(() => {
+            btn.classList.remove('ring-2', 'ring-cyan-400', 'bg-cyan-950/40');
+          }, 300);
+        });
+      });
+
+      // 5. Coach Selection Carousel (Existing)
       document.querySelectorAll('.coach-card-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const coachId = btn.getAttribute('data-coach-id');
@@ -9698,7 +10269,7 @@ ${curPreset.proTip}`;
         });
       });
 
-      // 2. Coach Region Filter
+      // 6. Coach Region Filter
       document.querySelectorAll('.coach-filter-btn').forEach(fBtn => {
         fBtn.addEventListener('click', () => {
           document.querySelectorAll('.coach-filter-btn').forEach(b => {
@@ -9720,7 +10291,7 @@ ${curPreset.proTip}`;
         });
       });
 
-      // 3. Sub-Tab Switcher (Strategy / Video / Drills)
+      // 7. Sub-Tab Switcher in Coach Dossier (Strategy / Video / Drills)
       document.querySelectorAll('.coach-tab-btn').forEach(sTab => {
         sTab.addEventListener('click', () => {
           const tab = sTab.getAttribute('data-tab');
@@ -9731,15 +10302,31 @@ ${curPreset.proTip}`;
         });
       });
 
-      // 4. Copy Coach Strategy Button
+      // 8. Copy Coach Strategy Button
       const copyBtn = document.getElementById('copyCoachStratBtn');
       if (copyBtn) {
         copyBtn.addEventListener('click', () => {
-          const coach = this.getCoach(this.selectedCoachId);
-          const stepsText = coach.tacticalSteps.map(s => `${s.step}. ${s.title}: ${s.desc}`).join('\n');
-          const drillsText = coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n');
+          let textToCopy = '';
+          if (this.coachingActiveView === 'decision_making') {
+            const dec = this.getDecisionMatrixResult();
+            textToCopy = `[UNDERDOG ESPORTS - IGL MACRO DECISION BRIEF]
+Strategy: ${dec.title} (${dec.badge})
+Pro Reference: ${dec.proTeam}
 
-          const textToCopy = `[UNDERDOG ESPORTS ACADEMY - COACH STRATEGY BRIEF]
+STRATEGIC RATIONALE:
+${dec.reason}
+
+EXECUTION PROTOCOL:
+${dec.steps.map(s => `${s.step}. ${s.title}: ${s.desc}`).join('\n')}
+
+IGL VOICE CALLOUT:
+"${dec.comms}"
+
+GOLDEN LAW:
+${dec.goldenRule}`;
+          } else {
+            const coach = this.getCoach(this.selectedCoachId);
+            textToCopy = `[UNDERDOG ESPORTS ACADEMY - COACH STRATEGY BRIEF]
 Coach: ${coach.name} (${coach.team} ${coach.flag})
 Official YouTube: ${coach.youtubeUrl}
 Official Instagram: ${coach.instaUrl}
@@ -9748,37 +10335,29 @@ STRATEGY: ${coach.strategyTitle}
 ${coach.summary}
 
 --- 4-STEP TACTICAL PROTOCOL ---
-${stepsText}
+${coach.tacticalSteps.map(s => `${s.step}. ${s.title}: ${s.desc}`).join('\n')}
 
---- WHY UNDERDOGS FAIL ---
+--- CRITICAL UNDERDOG MISTAKE ---
 ${coach.mistakesUnderdogsMake}
 
---- 60-MINUTE DAILY DRILL SCHEDULE ---
-${drillsText}`;
+--- 60-MINUTE PRACTICE SCHEDULE ---
+${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
+`;
+          }
 
-          navigator.clipboard.writeText(textToCopy).then(() => {
-            const btnText = document.getElementById('copyCoachStratBtnText');
-            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
-            setTimeout(() => {
-              if (btnText) btnText.innerText = 'Copy Strategy Checklist';
-            }, 2000);
-          }).catch(() => {
-            const ta = document.createElement('textarea');
-            ta.value = textToCopy;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            const btnText = document.getElementById('copyCoachStratBtnText');
-            if (btnText) btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
-            setTimeout(() => {
-              if (btnText) btnText.innerText = 'Copy Strategy Checklist';
-            }, 2000);
-          });
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+              const txt = document.getElementById('copyCoachStratBtnText');
+              if (txt) {
+                const original = txt.textContent;
+                txt.textContent = 'Copied to Clipboard! ✅';
+                setTimeout(() => { txt.textContent = original; }, 2000);
+              }
+            });
+          }
         });
       }
     }
-
 
     // --- SCRIMS TRACKER TAB (OFFICIAL FFWS & BGMI SCORING SYSTEMS) ---
     getFFPlacementPoints(rank) {
