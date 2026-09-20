@@ -16193,18 +16193,18 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
     getDefaultAccounts() {
       return [
         {
-          id: 'coach_duker',
-          email: 'coach@underdog.gg',
+          id: 'fragger_rishan',
+          email: 'rishan@underdog.gg',
           pin: '1234',
-          ign: "Coach Duker",
-          uid: '7770001',
-          tag: 'TITAN',
-          role: 'Head Coach & Analyst',
+          ign: 'Rishan',
+          uid: '10928415',
+          tag: 'UDG',
+          role: 'Star Entry Fragger',
           game: 'Free Fire',
-          tier: 'Tier-1 Master Coach',
-          avatar: '🧠',
-          scrims: 48,
-          winRate: '68%'
+          tier: 'Master Fragger',
+          avatar: '⚡',
+          scrims: 36,
+          winRate: '62%'
         },
         {
           id: 'igl_anurag',
@@ -16221,16 +16221,30 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           winRate: '54%'
         },
         {
+          id: 'coach_duker',
+          email: 'coach@underdog.gg',
+          pin: '1234',
+          ign: "Coach Duker",
+          uid: '7770001',
+          tag: 'TITAN',
+          role: 'Head Coach & Analyst',
+          game: 'Free Fire',
+          tier: 'Tier-1 Master Coach',
+          avatar: '🧠',
+          scrims: 48,
+          winRate: '68%'
+        },
+        {
           id: 'rusher_shadow',
           email: 'rusher@underdog.gg',
           pin: '1234',
           ign: 'Shadow',
           uid: '10098412',
           tag: 'UDG',
-          role: 'Rusher / Fragger',
+          role: 'Sniper Specialist',
           game: 'Free Fire',
           tier: 'Master Fragger',
-          avatar: '⚡',
+          avatar: '🎯',
           scrims: 28,
           winRate: '50%'
         }
@@ -16655,8 +16669,11 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
 
                 <!-- Email & Password -->
                 <div>
-                  <label class="block text-[10px] font-sub uppercase font-bold text-slate-300 mb-1">Esports Email / Login ID *</label>
-                  <input type="text" id="authEmailInput" required placeholder="player@underdog.gg" value="igl@underdog.gg" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono outline-none focus:border-cyan-400"/>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="block text-[10px] font-sub uppercase font-bold text-slate-300">Gamer Name or Email ID *</label>
+                    <span class="text-[9px] font-mono text-cyan-400">Auto-Resolves for Supabase ⚡</span>
+                  </div>
+                  <input type="text" id="authEmailInput" required placeholder="Enter username (e.g. rishan) or email" value="rishan@underdog.gg" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono outline-none focus:border-cyan-400"/>
                 </div>
 
                 <div>
@@ -16797,15 +16814,19 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
       });
 
       // Submit Form with Real Supabase Cloud Integration
+      // Submit Form with Real Supabase Cloud Integration
       document.getElementById('customAuthForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const email = emailInput?.value?.trim();
+        const rawEmailOrUser = emailInput?.value?.trim();
         const pin = pinInput?.value?.trim();
 
-        if (!email || !pin) return;
+        if (!rawEmailOrUser || !pin) return;
+
+        // Auto-normalize username to valid cloud email so Supabase always accepts it (e.g. 'rishan' -> 'rishan@underdog.gg')
+        const email = rawEmailOrUser.includes('@') ? rawEmailOrUser.toLowerCase() : (rawEmailOrUser.toLowerCase().replace(/[^a-z0-9._-]/g, '') + '@underdog.gg');
 
         // Check pre-configured logins
-        const preset = defaultAccounts.find(a => a.email.toLowerCase() === email.toLowerCase() && a.pin === pin);
+        const preset = defaultAccounts.find(a => (a.email.toLowerCase() === email.toLowerCase() || a.ign.toLowerCase() === rawEmailOrUser.toLowerCase()) && a.pin === pin);
         if (preset) {
           this.saveActiveUserSession(preset);
           modal.remove();
@@ -16813,30 +16834,45 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
           return;
         }
 
-        const ign = ignInput?.value?.trim() || email.split('@')[0];
-        const uid = uidInput?.value?.trim() || String(Math.floor(1000000 + Math.random() * 9000000));
+        const ign = ignInput?.value?.trim() || rawEmailOrUser.split('@')[0];
+        const uid = uidInput?.value?.trim() || String(Math.floor(10000000 + Math.random() * 90000000));
         const tag = tagInput?.value?.trim() || 'UDG';
-        const role = roleInput?.value || 'Rusher / Fragger';
+        const role = roleInput?.value || 'Star Entry Fragger';
 
-        // REAL SUPABASE AUTH CALL
+        if (alertBox) {
+          alertBox.className = 'p-2.5 rounded-xl text-xs font-mono bg-cyan-950/80 border border-cyan-500 text-cyan-300 block';
+          alertBox.innerText = 'Connecting to Supabase Cloud (' + email + ')...';
+        }
+
+        // REAL SUPABASE CALL (Passwords >= 6 chars)
         const safePassword = pin.length < 6 ? pin + '__udgpass' : pin;
+        let supabaseUserId = null;
+
         if (window.underdogSupabase && window.underdogSupabase.client) {
           try {
             const sb = window.underdogSupabase.client;
-            const { data: signInData, error: signInError } = await sb.auth.signInWithPassword({
+            
+            // Step 1: Call signUp first so user is immediately created in Supabase Auth Users table!
+            const { data: signUpData, error: signUpError } = await sb.auth.signUp({
               email,
-              password: safePassword
+              password: safePassword,
+              options: {
+                data: { ign, role, tag, uid, display_name: ign }
+              }
             });
 
-            if (signInError) {
-              // If user does not exist, create user in Supabase
-              await sb.auth.signUp({
+            if (!signUpError && signUpData?.user) {
+              supabaseUserId = signUpData.user.id;
+              console.log('✅ Supabase user created in cloud auth:', signUpData.user);
+            } else if (signUpError) {
+              // Step 2: If already registered, sign in with password
+              const { data: signInData, error: signInError } = await sb.auth.signInWithPassword({
                 email,
-                password: safePassword,
-                options: {
-                  data: { ign, role, tag, uid }
-                }
+                password: safePassword
               });
+              if (!signInError && signInData?.user) {
+                supabaseUserId = signInData.user.id;
+              }
             }
 
             try {
@@ -16848,30 +16884,37 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
                 role
               });
             } catch (err) {}
+
+            if (alertBox) {
+              alertBox.className = 'p-2.5 rounded-xl text-xs font-mono bg-emerald-950/80 border border-emerald-500 text-emerald-300 block';
+              alertBox.innerText = '✅ Saved in Supabase Cloud (' + email + ')';
+            }
           } catch (err) {
             console.warn('Supabase auth notice:', err);
           }
         }
 
         const newUser = {
-          id: 'usr_' + Date.now(),
+          id: supabaseUserId || ('usr_' + Date.now()),
+          supabaseId: supabaseUserId,
           email,
+          rawUsername: rawEmailOrUser,
           pin,
           ign,
           uid,
           tag,
           role,
-          tier: 'Registered Competitor',
-          avatar: role.includes('Coach') ? '👑' : role.includes('Captain') ? '⚔️' : role.includes('Sniper') ? '🎯' : '⚡'
+          tier: role.includes('Coach') ? 'Master Coach' : role.includes('Captain') ? 'Tier-1 Captain' : 'Master Fragger',
+          avatar: role.includes('Coach') ? '🧠' : role.includes('Captain') ? '⚔️' : role.includes('Sniper') ? '🎯' : '⚡'
         };
 
         this.saveActiveUserSession(newUser);
-        modal.remove();
-        this.renderUserAuthHeader();
+        setTimeout(() => {
+          modal.remove();
+          this.renderUserAuthHeader();
+        }, 500);
       });
     }
-
-
 
     showProfileModal() {
       if (!this.currentUser) return;

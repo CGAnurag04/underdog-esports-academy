@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Underdog Esports - Player & Coach Authentication Portal</title>
+  <title>Underdog Esports Academy - Pro Authentication Portal</title>
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0a0d14">
+  <meta name="theme-color" content="#050811">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
@@ -18,7 +18,7 @@
             accentAmber: '#f59e0b',
             accentEmerald: '#10b981',
             accentPurple: '#a855f7',
-            accentRed: '#ef4444'
+            accentRose: '#f43f5e'
           },
           fontFamily: {
             heading: ['"Chakra Petch"', 'sans-serif'],
@@ -32,33 +32,60 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,600;0,700;1,700&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
+    :root {
+      --neon-cyan: #00f0ff;
+      --neon-amber: #f59e0b;
+      --neon-purple: #a855f7;
+    }
+
     body {
-      background-color: #060910;
+      background-color: #050811;
       color: #e2e8f0;
       font-family: 'Inter', sans-serif;
       min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Cyber Ambient Grid */
+    .cyber-grid-bg {
+      position: fixed;
+      inset: 0;
       background-image: 
-        radial-gradient(circle at 10% 20%, rgba(0, 240, 255, 0.07) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(245, 158, 11, 0.05) 0%, transparent 40%),
-        linear-gradient(to bottom, rgba(6, 9, 16, 0.96), rgba(6, 9, 16, 0.98)),
-        radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 0);
-      background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+        linear-gradient(to right, rgba(0, 240, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 240, 255, 0.04) 1px, transparent 1px),
+        radial-gradient(circle at 15% 15%, rgba(0, 240, 255, 0.12) 0%, transparent 45%),
+        radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.1) 0%, transparent 45%),
+        radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.06) 0%, transparent 50%);
+      background-size: 40px 40px, 40px 40px, 100% 100%, 100% 100%, 100% 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Canvas overlay */
+    #matrixCanvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      z-index: 1;
     }
 
     .cyber-panel {
-      background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(10, 15, 28, 0.9) 100%);
-      border: 1px solid rgba(0, 240, 255, 0.2);
-      backdrop-filter: blur(16px);
+      background: linear-gradient(135deg, rgba(13, 20, 36, 0.92) 0%, rgba(8, 12, 22, 0.96) 100%);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      backdrop-filter: blur(20px);
       position: relative;
+      transition: all 0.3s ease;
     }
 
     .cyber-panel::before {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 16px;
-      height: 16px;
+      top: -1px;
+      left: -1px;
+      width: 18px;
+      height: 18px;
       border-top: 2px solid #00f0ff;
       border-left: 2px solid #00f0ff;
       pointer-events: none;
@@ -67,180 +94,287 @@
     .cyber-panel::after {
       content: '';
       position: absolute;
-      bottom: 0;
-      right: 0;
-      width: 16px;
-      height: 16px;
+      bottom: -1px;
+      right: -1px;
+      width: 18px;
+      height: 18px;
       border-bottom: 2px solid #00f0ff;
       border-right: 2px solid #00f0ff;
       pointer-events: none;
     }
 
-    .hologram-card {
-      background: linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(15, 23, 42, 0.8) 50%, rgba(245, 158, 11, 0.1) 100%);
-      border: 1px solid rgba(0, 240, 255, 0.4);
-      box-shadow: 0 0 30px rgba(0, 240, 255, 0.15), inset 0 0 20px rgba(0, 240, 255, 0.05);
-      position: relative;
-      overflow: hidden;
+    /* 3D Holographic ID Card */
+    .holo-card-container {
+      perspective: 1200px;
     }
 
+    .hologram-card {
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.12) 0%, rgba(15, 23, 42, 0.85) 45%, rgba(168, 85, 247, 0.1) 100%);
+      border: 1px solid rgba(0, 240, 255, 0.45);
+      box-shadow: 0 0 35px rgba(0, 240, 255, 0.18), inset 0 0 25px rgba(0, 240, 255, 0.06);
+      position: relative;
+      overflow: hidden;
+      transform-style: preserve-3d;
+      transition: transform 0.15s ease-out, box-shadow 0.3s ease;
+    }
+
+    .hologram-card:hover {
+      box-shadow: 0 0 45px rgba(0, 240, 255, 0.3), inset 0 0 30px rgba(0, 240, 255, 0.1);
+    }
+
+    /* Laser scanline animation */
     .hologram-card::after {
       content: '';
       position: absolute;
-      top: -50%;
+      top: -100%;
       left: -50%;
       width: 200%;
       height: 200%;
       background: linear-gradient(
         45deg,
-        transparent 45%,
-        rgba(0, 240, 255, 0.1) 50%,
-        transparent 55%
+        transparent 42%,
+        rgba(0, 240, 255, 0.18) 50%,
+        transparent 58%
       );
-      transform: rotate(30deg);
-      animation: scanline 6s linear infinite;
+      transform: rotate(35deg);
+      animation: laserSweep 5s ease-in-out infinite;
       pointer-events: none;
     }
 
-    @keyframes scanline {
-      0% { transform: translateY(-100%) rotate(30deg); }
-      100% { transform: translateY(100%) rotate(30deg); }
+    @keyframes laserSweep {
+      0% { transform: translateY(-120%) rotate(35deg); }
+      50% { transform: translateY(120%) rotate(35deg); }
+      100% { transform: translateY(-120%) rotate(35deg); }
     }
 
-    .glow-cyan {
-      box-shadow: 0 0 25px rgba(0, 240, 255, 0.3);
+    /* Glowing Badge Pulse */
+    .pulse-glow {
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+      animation: pulseAnim 2.5s infinite ease-in-out;
+    }
+
+    @keyframes pulseAnim {
+      0%, 100% { box-shadow: 0 0 15px rgba(0, 240, 255, 0.4); }
+      50% { box-shadow: 0 0 30px rgba(0, 240, 255, 0.7); }
+    }
+
+    /* Custom Input Cyber Glow */
+    .cyber-input {
+      background: rgba(10, 15, 28, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      transition: all 0.25s ease;
+    }
+
+    .cyber-input:focus {
+      border-color: #00f0ff;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.35);
+      outline: none;
+      background: rgba(15, 23, 42, 0.95);
+    }
+
+    /* Barcode Stencil */
+    .barcode-strip {
+      background: repeating-linear-gradient(
+        90deg,
+        #00f0ff 0px,
+        #00f0ff 2px,
+        transparent 2px,
+        transparent 4px,
+        #00f0ff 4px,
+        #00f0ff 7px,
+        transparent 7px,
+        transparent 9px
+      );
+      height: 18px;
+      opacity: 0.6;
     }
   </style>
 </head>
-<body class="flex flex-col justify-between p-4 sm:p-6 lg:p-10 selection:bg-cyan-500 selection:text-black">
+<body class="flex flex-col justify-between p-3 sm:p-6 lg:p-8 selection:bg-cyan-500 selection:text-black">
+
+  <!-- Background visual elements -->
+  <div class="cyber-grid-bg"></div>
+  <canvas id="matrixCanvas"></canvas>
 
   <!-- Top Header Navigation -->
-  <header class="max-w-7xl mx-auto w-full flex items-center justify-between pb-6 border-b border-slate-800/80">
+  <header class="relative z-10 max-w-7xl mx-auto w-full flex items-center justify-between pb-5 border-b border-slate-800/80">
     <div class="flex items-center gap-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-amber-500 flex items-center justify-center font-heading font-black text-black text-xl shadow-[0_0_20px_rgba(0,240,255,0.4)]">
-        U
+      <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-amber-500 flex items-center justify-center font-heading font-black text-black text-2xl shadow-[0_0_25px_rgba(0,240,255,0.45)]">
+        ⚡
       </div>
       <div>
         <div class="flex items-center gap-2">
-          <h1 class="text-lg font-heading font-black tracking-wider text-white">UNDERDOG</h1>
-          <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/30 text-[10px] font-sub font-bold uppercase tracking-wider">
-            ESPORTS AUTH
+          <h1 class="text-xl font-heading font-black tracking-wider text-white">UNDERDOG</h1>
+          <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/40 text-[10px] font-sub font-bold uppercase tracking-wider">
+            ESPORTS MAX
+          </span>
+          <span class="hidden sm:inline-block px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-bold">
+            v3.2 CLOUD
           </span>
         </div>
-        <p class="text-[11px] text-slate-400 font-sub tracking-wider">TIER-1 COACHING & TACTICAL PROTOCOL</p>
+        <p class="text-[11px] text-slate-400 font-sub tracking-wider">TIER-1 ESPORTS AUTHENTICATION & SQUAD HUB</p>
       </div>
     </div>
 
-    <div class="flex items-center gap-2.5">
-      <div id="cloudIndicator" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-sub font-bold uppercase">
+    <!-- Right Quick Controls -->
+    <div class="flex items-center gap-2 sm:gap-3">
+      <!-- Audio FX Toggle -->
+      <button id="toggleAudioBtn" class="px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-cyan-400 text-xs font-mono transition-all flex items-center gap-1.5" title="Toggle Futuristic Audio Effects">
+        <span id="audioIcon">🔊</span>
+        <span class="hidden sm:inline" id="audioLabel">FX ON</span>
+      </button>
+
+      <!-- Supabase Cloud Live Status -->
+      <div id="cloudStatusBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-sub font-bold uppercase tracking-wider">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>Supabase Cloud Connected 🟢</span>
+        <span id="cloudStatusText">Supabase Cloud Live 🟢</span>
       </div>
-      <a href="index.html" class="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-sub font-bold uppercase rounded-xl transition-all">
-        Skip to App ➔
+
+      <!-- Jump Straight to App -->
+      <a href="index.html" class="px-3.5 py-1.5 bg-slate-900 hover:bg-cyan-950 border border-slate-700 hover:border-cyan-500/50 text-slate-300 hover:text-cyan-300 text-xs font-sub font-bold uppercase rounded-xl transition-all flex items-center gap-1.5">
+        <span>Enter App</span>
+        <span class="text-cyan-400">➔</span>
       </a>
     </div>
   </header>
 
   <!-- Main Split Auth Grid -->
-  <main class="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 my-auto py-8 items-center">
+  <main class="relative z-10 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 my-auto py-6 items-center">
     
-    <!-- Left Column: Holographic Player Identity & Pro Quick Logins -->
+    <!-- Left Column: 3D Holographic Player Identity & Pro Quick Logins -->
     <div class="lg:col-span-5 space-y-6">
       
       <div>
-        <span class="text-xs font-sub font-bold uppercase text-cyan-400 tracking-widest flex items-center gap-1.5">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-xs font-sub font-bold uppercase tracking-widest mb-2">
           <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
-          BIOMETRIC IDENTITY PASS
-        </span>
-        <h2 class="text-3xl font-heading font-black text-white mt-1 uppercase tracking-wide">
-          Pro Esports <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-amber-400">Access Portal</span>
+          <span>CYBERNETIC BIOMETRIC PASS</span>
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-heading font-black text-white uppercase tracking-wide leading-tight">
+          Esports Cloud <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-amber-400">Identity Portal</span>
         </h2>
-        <p class="text-xs text-slate-400 mt-1 leading-relaxed">
-          Sign in to synchronize your Free Fire & BGMI sensitivities, custom 20:9 HUD setups, scrimmage pointcards, and live squad whiteboard sessions.
+        <p class="text-xs text-slate-400 mt-1.5 leading-relaxed">
+          Authenticate directly into <strong>Supabase Cloud</strong> to synchronize your tournament scrim pointcards, custom Free Fire & BGMI HUD layouts, 1v1 clutch win-rates, and live squad whiteboard sessions.
         </p>
       </div>
 
-      <!-- Live Holographic ID Card Preview -->
-      <div class="hologram-card p-5 rounded-2xl border border-cyan-500/40 space-y-4">
-        <div class="flex items-center justify-between border-b border-cyan-500/20 pb-3">
-          <div class="flex items-center gap-3">
-            <div id="previewAvatar" class="w-12 h-12 rounded-xl bg-cyan-950 border border-cyan-400/50 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(0,240,255,0.3)]">
-              ⚔️
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h3 id="previewIgn" class="text-lg font-heading font-black text-white leading-tight">
-                  [UDG] Anurag
-                </h3>
-                <span id="previewTier" class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-bold">
-                  Tier-1 Elite
-                </span>
+      <!-- 3D Holographic ID Card Preview -->
+      <div class="holo-card-container">
+        <div id="holoCard" class="hologram-card p-6 rounded-3xl border border-cyan-400/50 space-y-4 shadow-2xl">
+          
+          <!-- Top Row of Card -->
+          <div class="flex items-center justify-between border-b border-cyan-500/30 pb-3.5">
+            <div class="flex items-center gap-3.5">
+              <div id="previewAvatar" class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-950 to-slate-900 border border-cyan-400/60 flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(0,240,255,0.4)]">
+                ⚡
               </div>
-              <div id="previewUid" class="text-[11px] font-mono text-cyan-400">
-                UID: 10849204
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 id="previewIgn" class="text-xl font-heading font-black text-white leading-tight">
+                    [UDG] Rishan
+                  </h3>
+                  <span id="previewTier" class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/50 text-[10px] font-mono font-bold">
+                    Master Fragger
+                  </span>
+                </div>
+                <div id="previewUid" class="text-xs font-mono text-cyan-400 mt-0.5">
+                  UID: 10928415
+                </div>
+              </div>
+            </div>
+
+            <div class="text-right">
+              <div class="text-[9px] font-sub uppercase text-slate-400">Cloud Auth</div>
+              <div class="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 justify-end">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>SYNCED</span>
               </div>
             </div>
           </div>
-          <div class="text-right">
-            <div class="text-[9px] font-sub uppercase text-slate-400">Status</div>
-            <div class="text-[11px] font-mono font-bold text-emerald-400">VERIFIED ✅</div>
-          </div>
-        </div>
 
-        <div class="grid grid-cols-2 gap-2.5 text-xs font-mono">
-          <div class="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
-            <div class="text-[9px] font-sub text-slate-400 uppercase">Assigned Duty</div>
-            <div id="previewRole" class="text-white font-bold text-xs mt-0.5">IGL / Captain</div>
+          <!-- Mid Data Grid -->
+          <div class="grid grid-cols-2 gap-3 text-xs font-mono">
+            <div class="p-3 rounded-2xl bg-slate-950/80 border border-slate-800">
+              <div class="text-[9px] font-sub text-slate-400 uppercase tracking-wider">Tactical Role</div>
+              <div id="previewRole" class="text-white font-bold text-xs mt-1 truncate">
+                Star Entry Fragger
+              </div>
+            </div>
+            <div class="p-3 rounded-2xl bg-slate-950/80 border border-slate-800">
+              <div class="text-[9px] font-sub text-slate-400 uppercase tracking-wider">Squad Clan Tag</div>
+              <div id="previewClan" class="text-amber-400 font-bold text-xs mt-1 truncate">
+                UDG Clan
+              </div>
+            </div>
           </div>
-          <div class="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
-            <div class="text-[9px] font-sub text-slate-400 uppercase">Clan Division</div>
-            <div id="previewClan" class="text-amber-400 font-bold text-xs mt-0.5">Underdog Gaming</div>
-          </div>
-        </div>
 
-        <div class="text-[10px] text-slate-400 flex items-center justify-between font-mono pt-1">
-          <span>CLOUD SYNC: <strong class="text-cyan-400">ACTIVE</strong></span>
-          <span>SYSTEM: <strong class="text-white">v2.5 MAX</strong></span>
+          <!-- Bottom Micro Barcode & Telemetry -->
+          <div class="space-y-2 pt-1 border-t border-slate-800/80">
+            <div class="barcode-strip rounded"></div>
+            <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+              <span>CLOUD DATABASE: <strong class="text-cyan-400">SUPABASE AUTH</strong></span>
+              <span>SECURITY: <strong class="text-emerald-400">TLS 256-BIT</strong></span>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      <!-- 1-Click Pro Quick Access Accounts -->
+      <!-- 1-Click Pro Squad Presets (Featuring Rishan & Anurag) -->
       <div class="space-y-2.5">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-sub font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1.5">
-            <span>⚡</span> 1-Click Instant Pro Access:
+          <span class="text-xs font-sub font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1.5">
+            <span>⚡</span> 1-Click Pro Squad Quick Access:
           </span>
           <span class="text-[10px] font-mono text-slate-400">PIN: 1234</span>
         </div>
 
-        <div class="grid grid-cols-3 gap-2">
-          <button class="quick-preset-btn p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 text-left transition-all group flex flex-col justify-between"
-                  data-email="coach@underdog.gg" data-pin="1234" data-ign="Coach Duker" data-tag="TITAN" data-role="Head Coach & Analyst" data-avatar="👑">
-            <div class="text-lg">👑</div>
-            <div class="mt-1">
-              <div class="text-xs font-heading font-bold text-white group-hover:text-amber-300">Coach Duker</div>
-              <div class="text-[9px] text-slate-400">Head Coach</div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          
+          <!-- Rishan Preset (Featured) -->
+          <button class="quick-preset-btn p-3 rounded-2xl bg-slate-900/90 hover:bg-cyan-950/60 border-2 border-cyan-500/60 hover:border-cyan-400 text-left transition-all group flex flex-col justify-between relative overflow-hidden"
+                  data-email="rishan@underdog.gg" data-pin="1234" data-ign="Rishan" data-tag="UDG" data-role="Star Entry Fragger" data-avatar="⚡" data-tier="Master Fragger" data-uid="10928415">
+            <div class="flex items-center justify-between">
+              <span class="text-xl">⚡</span>
+              <span class="px-1.5 py-0.5 rounded bg-cyan-500 text-black text-[8px] font-sub font-black uppercase">
+                STAR
+              </span>
+            </div>
+            <div class="mt-2">
+              <div class="text-xs font-heading font-black text-white group-hover:text-cyan-300">Rishan</div>
+              <div class="text-[9px] text-cyan-400">Entry Fragger</div>
             </div>
           </button>
 
-          <button class="quick-preset-btn p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-left transition-all group flex flex-col justify-between"
-                  data-email="igl@underdog.gg" data-pin="1234" data-ign="Anurag" data-tag="UDG" data-role="IGL / Captain" data-avatar="⚔️">
-            <div class="text-lg">⚔️</div>
-            <div class="mt-1">
-              <div class="text-xs font-heading font-bold text-white group-hover:text-cyan-300">Anurag</div>
+          <!-- Anurag IGL Preset -->
+          <button class="quick-preset-btn p-3 rounded-2xl bg-slate-900/90 hover:bg-amber-950/60 border border-slate-800 hover:border-amber-500/50 text-left transition-all group flex flex-col justify-between"
+                  data-email="igl@underdog.gg" data-pin="1234" data-ign="Anurag" data-tag="UDG" data-role="IGL / Captain" data-avatar="⚔️" data-tier="Tier-1 Captain" data-uid="10849204">
+            <div class="text-xl">⚔️</div>
+            <div class="mt-2">
+              <div class="text-xs font-heading font-black text-white group-hover:text-amber-300">Anurag</div>
               <div class="text-[9px] text-slate-400">IGL Captain</div>
             </div>
           </button>
 
-          <button class="quick-preset-btn p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-rose-500/50 text-left transition-all group flex flex-col justify-between"
-                  data-email="rusher@underdog.gg" data-pin="1234" data-ign="Shadow" data-tag="UDG" data-role="Rusher / Fragger" data-avatar="🎯">
-            <div class="text-lg">🎯</div>
-            <div class="mt-1">
-              <div class="text-xs font-heading font-bold text-white group-hover:text-rose-300">Shadow</div>
-              <div class="text-[9px] text-slate-400">Entry Rusher</div>
+          <!-- Coach Duker Preset -->
+          <button class="quick-preset-btn p-3 rounded-2xl bg-slate-900/90 hover:bg-purple-950/60 border border-slate-800 hover:border-purple-500/50 text-left transition-all group flex flex-col justify-between"
+                  data-email="coach@underdog.gg" data-pin="1234" data-ign="Coach Duker" data-tag="TITAN" data-role="Head Coach & Analyst" data-avatar="🧠" data-tier="Master Coach" data-uid="9901842">
+            <div class="text-xl">🧠</div>
+            <div class="mt-2">
+              <div class="text-xs font-heading font-black text-white group-hover:text-purple-300">Coach Duker</div>
+              <div class="text-[9px] text-slate-400">Head Coach</div>
             </div>
           </button>
+
+          <!-- Shadow Rusher Preset -->
+          <button class="quick-preset-btn p-3 rounded-2xl bg-slate-900/90 hover:bg-rose-950/60 border border-slate-800 hover:border-rose-500/50 text-left transition-all group flex flex-col justify-between"
+                  data-email="rusher@underdog.gg" data-pin="1234" data-ign="Shadow" data-tag="UDG" data-role="Sniper Specialist" data-avatar="🎯" data-tier="Tier-1 Sniper" data-uid="3829104">
+            <div class="text-xl">🎯</div>
+            <div class="mt-2">
+              <div class="text-xs font-heading font-black text-white group-hover:text-rose-300">Shadow</div>
+              <div class="text-[9px] text-slate-400">Overwatch Sniper</div>
+            </div>
+          </button>
+
         </div>
       </div>
 
@@ -251,17 +385,19 @@
       <div class="cyber-panel p-6 sm:p-8 rounded-3xl border-2 border-cyan-500/40 bg-slate-950/95 shadow-2xl shadow-cyan-950/50 space-y-6">
         
         <!-- Auth Mode Tabs (Sign In vs Register) -->
-        <div class="flex items-center p-1 bg-slate-900/90 rounded-2xl border border-slate-800 gap-1">
-          <button id="tabSignIn" class="flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-lg">
-            ⚡ Sign In to Account
+        <div class="flex items-center p-1.5 bg-slate-900/90 rounded-2xl border border-slate-800 gap-1.5">
+          <button id="tabSignIn" class="flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-lg shadow-cyan-950/60 flex items-center justify-center gap-2">
+            <span>⚡</span>
+            <span>Sign In to Account</span>
           </button>
-          <button id="tabRegister" class="flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white">
-            🛡️ Create New Esports ID
+          <button id="tabRegister" class="flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2">
+            <span>🛡️</span>
+            <span>Create New Esports ID</span>
           </button>
         </div>
 
         <!-- Alert Banner -->
-        <div id="authAlert" class="hidden p-3 rounded-xl text-xs font-mono flex items-center gap-2"></div>
+        <div id="authAlert" class="hidden p-3.5 rounded-2xl text-xs font-mono flex items-center gap-2.5 transition-all"></div>
 
         <!-- Dynamic Form -->
         <form id="authForm" class="space-y-4">
@@ -270,19 +406,27 @@
           <div id="registerFields" class="hidden space-y-4 animate-fade-in">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs font-sub uppercase font-bold text-slate-300 mb-1.5">
-                  Player In-Game Name (IGN) *
-                </label>
-                <div class="relative">
-                  <input type="text" id="inputIgn" placeholder="e.g. Anurag_God" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-heading text-xs focus:border-cyan-400 focus:outline-none transition-all"/>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-sub uppercase font-bold text-slate-300">
+                    Player In-Game Name (IGN) *
+                  </label>
+                  <button type="button" id="randomIgnBtn" class="text-[10px] font-mono text-cyan-400 hover:underline">
+                    🎲 Random
+                  </button>
                 </div>
+                <input type="text" id="inputIgn" placeholder="e.g. Rishan, Anurag_God" value="Rishan" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-heading text-xs"/>
               </div>
 
               <div>
-                <label class="block text-xs font-sub uppercase font-bold text-slate-300 mb-1.5">
-                  Numeric Game UID *
-                </label>
-                <input type="text" id="inputUid" placeholder="e.g. 10849204" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none transition-all"/>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-sub uppercase font-bold text-slate-300">
+                    Numeric Game UID *
+                  </label>
+                  <button type="button" id="randomUidBtn" class="text-[10px] font-mono text-cyan-400 hover:underline">
+                    🎲 Generate
+                  </button>
+                </div>
+                <input type="text" id="inputUid" placeholder="e.g. 10928415" value="10928415" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-mono text-xs"/>
               </div>
             </div>
 
@@ -291,54 +435,66 @@
                 <label class="block text-xs font-sub uppercase font-bold text-slate-300 mb-1.5">
                   Squad / Clan Tag
                 </label>
-                <input type="text" id="inputTag" placeholder="e.g. UDG, TG, SOUL" maxlength="6" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-sub text-xs uppercase focus:border-cyan-400 focus:outline-none transition-all"/>
+                <input type="text" id="inputTag" placeholder="e.g. UDG, TG, SOUL" value="UDG" maxlength="6" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-sub text-xs uppercase"/>
               </div>
 
               <div>
                 <label class="block text-xs font-sub uppercase font-bold text-slate-300 mb-1.5">
-                  Specialized Role
+                  Tactical Role & Duty
                 </label>
-                <select id="inputRole" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-sub text-xs focus:border-cyan-400 focus:outline-none transition-all">
+                <select id="inputRole" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-sub text-xs cursor-pointer">
+                  <option value="Star Entry Fragger">⚡ Star Entry Fragger / Rusher</option>
                   <option value="IGL / Captain">⚔️ IGL / Captain (In-Game Leader)</option>
-                  <option value="Rusher / Fragger">⚡ Entry Rusher / Fragger</option>
-                  <option value="Sniper Specialist">🎯 Sniper & Clutch Specialist</option>
-                  <option value="Support / Anchor">🛡️ Support & Anchor</option>
-                  <option value="Head Coach & Analyst">👑 Head Coach & Strategic Analyst</option>
+                  <option value="Sniper Specialist">🎯 Sniper & Overwatch Specialist</option>
+                  <option value="Support / Anchor">🛡️ Support, Gloo & Re-Frag Anchor</option>
+                  <option value="Head Coach & Analyst">🧠 Head Coach & Strategic Analyst</option>
                 </select>
               </div>
             </div>
           </div>
 
-          <!-- Common Account Credentials -->
-          <div>
-            <label class="block text-xs font-sub uppercase font-bold text-slate-300 mb-1.5">
-              Esports Email / Login ID *
-            </label>
-            <div class="relative">
-              <input type="email" id="inputEmail" required placeholder="player@underdog.gg" value="igl@underdog.gg" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none transition-all"/>
-            </div>
-          </div>
-
+          <!-- Account Identity / Email with Smart Auto-Resolver -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-xs font-sub uppercase font-bold text-slate-300">
-                Security Password / PIN *
+                Gamer Name or Email ID *
+              </label>
+              <span class="text-[10px] font-mono text-cyan-400">
+                Auto-Resolves for Supabase ⚡
+              </span>
+            </div>
+            <div class="relative">
+              <input type="text" id="inputEmail" required placeholder="Enter username (e.g. rishan) or email (e.g. rishan@underdog.gg)" value="rishan@underdog.gg" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-mono text-xs"/>
+            </div>
+            
+            <!-- Live Cloud Resolution Indicator -->
+            <div class="mt-1.5 flex items-center justify-between text-[11px] font-mono text-slate-400 px-1">
+              <span>Cloud Identity: <strong id="cloudEmailResolved" class="text-emerald-400 font-bold">rishan@underdog.gg</strong></span>
+              <span class="text-[9px] text-cyan-400/80">✅ Valid Cloud Format</span>
+            </div>
+          </div>
+
+          <!-- Security Password / PIN -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-sub uppercase font-bold text-slate-300">
+                Security Password or 4-Digit PIN *
               </label>
               <button type="button" id="togglePasswordBtn" class="text-[10px] font-mono text-cyan-400 hover:text-cyan-300">
-                👁️ Show
+                👁️ Show Password
               </button>
             </div>
-            <input type="password" id="inputPassword" required placeholder="Enter password or PIN (e.g. 1234)" value="1234" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none transition-all"/>
+            <input type="password" id="inputPassword" required placeholder="Enter password or PIN (e.g. 1234)" value="1234" class="cyber-input w-full rounded-xl px-3.5 py-2.5 text-white font-mono text-xs"/>
           </div>
 
           <!-- Submit Button -->
-          <button type="submit" id="submitAuthBtn" class="w-full py-3.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-amber-500 hover:from-cyan-400 hover:to-amber-400 text-black font-sub font-black text-sm uppercase tracking-wider rounded-xl transition-transform hover:scale-[1.01] shadow-lg shadow-cyan-950/60 flex items-center justify-center gap-2 mt-4">
-            <span id="btnIcon">⚡</span>
+          <button type="submit" id="submitAuthBtn" class="w-full py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-amber-500 hover:from-cyan-400 hover:to-amber-400 text-black font-sub font-black text-sm uppercase tracking-wider rounded-2xl transition-all transform hover:scale-[1.01] active:scale-[0.99] shadow-xl shadow-cyan-950/70 flex items-center justify-center gap-2.5 mt-4">
+            <span id="btnIcon" class="text-lg">⚡</span>
             <span id="btnText">AUTHENTICATE & ENTER ACADEMY</span>
           </button>
 
           <!-- Guest 1-Click Login -->
-          <div class="pt-2 text-center">
+          <div class="pt-2 text-center flex items-center justify-center gap-4">
             <button type="button" id="guestLoginBtn" class="text-xs text-slate-400 hover:text-cyan-300 font-sub uppercase tracking-wider transition-colors">
               Continue as Instant Guest Recruit ➔
             </button>
@@ -352,21 +508,51 @@
   </main>
 
   <!-- Footer -->
-  <footer class="max-w-7xl mx-auto w-full pt-6 border-t border-slate-800/80 text-center text-xs text-slate-500 font-sub flex flex-col sm:flex-row items-center justify-between gap-2">
+  <footer class="relative z-10 max-w-7xl mx-auto w-full pt-5 border-t border-slate-800/80 text-center text-xs text-slate-500 font-sub flex flex-col sm:flex-row items-center justify-between gap-2">
     <div>UNDERDOG ESPORTS MAX &bull; SECURED BY SUPABASE CLOUD AUTH</div>
-    <div class="font-mono text-[10px]">ALL DATA PROTECTED &bull; ZERO LATENCY</div>
+    <div class="font-mono text-[10px]">ALL DATA PROTECTED &bull; ZERO LATENCY &bull; LOCAL & CLOUD READY</div>
   </footer>
 
-  <!-- Auth Engine Script -->
+  <!-- Auth Engine & Visual Script -->
   <script>
     (function () {
       const SUPABASE_URL = 'https://iwggpixdxhdetncnossa.supabase.co';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Z2dwaXhkeGhkZXRuY25vc3NhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDE3MDUsImV4cCI6MjEwNTQxNzcwNX0.LYQaNMtFngED1TqvbujkWkX3qNfIxXntzysg_qkaLtI';
 
+      // Web Audio API Sci-Fi Sound Synthesizer
+      let audioEnabled = true;
+      const audioCtx = (typeof AudioContext !== 'undefined') ? new AudioContext() : null;
+
+      function playCyberSfx(freq = 520, type = 'sine', duration = 0.08) {
+        if (!audioEnabled || !audioCtx) return;
+        try {
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + duration);
+        } catch (e) {}
+      }
+
+      function playSuccessChime() {
+        if (!audioEnabled || !audioCtx) return;
+        playCyberSfx(440, 'triangle', 0.1);
+        setTimeout(() => playCyberSfx(660, 'sine', 0.12), 100);
+        setTimeout(() => playCyberSfx(880, 'sine', 0.2), 220);
+      }
+
+      // Initialize Supabase Client
       let supabaseClient = null;
       if (window.supabase && window.supabase.createClient) {
         try {
           supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+          console.log('⚡ Supabase Client initialized successfully');
         } catch (e) {
           console.warn('Supabase init failed:', e);
         }
@@ -383,6 +569,9 @@
       const btnIcon = document.getElementById('btnIcon');
       const authAlert = document.getElementById('authAlert');
       const togglePasswordBtn = document.getElementById('togglePasswordBtn');
+      const toggleAudioBtn = document.getElementById('toggleAudioBtn');
+      const audioIcon = document.getElementById('audioIcon');
+      const audioLabel = document.getElementById('audioLabel');
 
       const inputEmail = document.getElementById('inputEmail');
       const inputPassword = document.getElementById('inputPassword');
@@ -390,64 +579,153 @@
       const inputUid = document.getElementById('inputUid');
       const inputTag = document.getElementById('inputTag');
       const inputRole = document.getElementById('inputRole');
+      const cloudEmailResolved = document.getElementById('cloudEmailResolved');
 
       // Live ID Card Previews
+      const holoCard = document.getElementById('holoCard');
       const previewIgn = document.getElementById('previewIgn');
       const previewUid = document.getElementById('previewUid');
       const previewClan = document.getElementById('previewClan');
       const previewRole = document.getElementById('previewRole');
       const previewAvatar = document.getElementById('previewAvatar');
+      const previewTier = document.getElementById('previewTier');
+
+      // Audio Toggle Button
+      toggleAudioBtn.addEventListener('click', () => {
+        audioEnabled = !audioEnabled;
+        audioIcon.innerText = audioEnabled ? '🔊' : '🔇';
+        audioLabel.innerText = audioEnabled ? 'FX ON' : 'FX OFF';
+        if (audioEnabled) playCyberSfx(600);
+      });
+
+      // SMART NORMALIZER FOR SUPABASE AUTH EMAIL
+      function normalizeToCloudEmail(raw) {
+        const val = (raw || '').trim();
+        if (!val) return 'player@underdog.gg';
+        if (val.includes('@')) return val.toLowerCase();
+        const safeName = val.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        return `${safeName || 'player'}@underdog.gg`;
+      }
+
+      // Update the resolved email preview live as user types
+      function updateCloudEmailBadge() {
+        const resolved = normalizeToCloudEmail(inputEmail.value);
+        if (cloudEmailResolved) {
+          cloudEmailResolved.innerText = resolved;
+        }
+      }
+      inputEmail.addEventListener('input', () => {
+        updateCloudEmailBadge();
+        playCyberSfx(700, 'sine', 0.03);
+      });
+      updateCloudEmailBadge();
+
+      // 3D Tilt Effect on Hologram Card
+      if (holoCard) {
+        holoCard.addEventListener('mousemove', (e) => {
+          const rect = holoCard.getBoundingClientRect();
+          const x = e.clientX - rect.left - rect.width / 2;
+          const y = e.clientY - rect.top - rect.height / 2;
+          const rotateX = -(y / rect.height) * 16;
+          const rotateY = (x / rect.width) * 16;
+          holoCard.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+        });
+
+        holoCard.addEventListener('mouseleave', () => {
+          holoCard.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
+        });
+      }
 
       // Live update ID card as user types
       inputIgn.addEventListener('input', (e) => {
         const tag = inputTag.value.trim() ? `[${inputTag.value.trim()}] ` : '';
         previewIgn.innerText = tag + (e.target.value.trim() || 'Player');
+        playCyberSfx(620, 'sine', 0.03);
       });
+
       inputTag.addEventListener('input', (e) => {
         const tag = e.target.value.trim() ? `[${e.target.value.trim()}] ` : '';
         previewIgn.innerText = tag + (inputIgn.value.trim() || 'Player');
-        previewClan.innerText = e.target.value.trim() ? `${e.target.value.trim()} Clan` : 'Underdog Gaming';
+        previewClan.innerText = e.target.value.trim() ? `${e.target.value.trim()} Clan` : 'Underdog Clan';
+        playCyberSfx(580, 'sine', 0.03);
       });
+
       inputUid.addEventListener('input', (e) => {
         previewUid.innerText = 'UID: ' + (e.target.value.trim() || '00000000');
+        playCyberSfx(540, 'sine', 0.03);
       });
+
       inputRole.addEventListener('change', (e) => {
         previewRole.innerText = e.target.value;
-        if (e.target.value.includes('Coach')) previewAvatar.innerText = '👑';
-        else if (e.target.value.includes('Captain')) previewAvatar.innerText = '⚔️';
-        else if (e.target.value.includes('Sniper')) previewAvatar.innerText = '🎯';
-        else if (e.target.value.includes('Support')) previewAvatar.innerText = '🛡️';
-        else previewAvatar.innerText = '⚡';
+        if (e.target.value.includes('Coach')) {
+          previewAvatar.innerText = '🧠';
+          previewTier.innerText = 'Master Coach';
+        } else if (e.target.value.includes('Captain')) {
+          previewAvatar.innerText = '⚔️';
+          previewTier.innerText = 'Tier-1 Captain';
+        } else if (e.target.value.includes('Sniper')) {
+          previewAvatar.innerText = '🎯';
+          previewTier.innerText = 'Tier-1 Sniper';
+        } else if (e.target.value.includes('Support')) {
+          previewAvatar.innerText = '🛡️';
+          previewTier.innerText = 'Anchor Specialist';
+        } else {
+          previewAvatar.innerText = '⚡';
+          previewTier.innerText = 'Master Fragger';
+        }
+        playCyberSfx(750, 'triangle', 0.08);
+      });
+
+      // Random Generators for quick testing
+      document.getElementById('randomIgnBtn')?.addEventListener('click', () => {
+        const names = ['Rishan_God', 'ThunderRishan', 'Apex_Rishan', 'GhostRishan', 'Phantom_Rishan'];
+        const chosen = names[Math.floor(Math.random() * names.length)];
+        inputIgn.value = chosen;
+        inputEmail.value = normalizeToCloudEmail(chosen);
+        updateCloudEmailBadge();
+        const tag = inputTag.value.trim() ? `[${inputTag.value.trim()}] ` : '';
+        previewIgn.innerText = tag + chosen;
+        playCyberSfx(800, 'sine', 0.1);
+      });
+
+      document.getElementById('randomUidBtn')?.addEventListener('click', () => {
+        const newUid = String(Math.floor(10000000 + Math.random() * 90000000));
+        inputUid.value = newUid;
+        previewUid.innerText = 'UID: ' + newUid;
+        playCyberSfx(700, 'sine', 0.08);
       });
 
       // Tab Switching
       tabSignIn.addEventListener('click', () => {
         isRegisterMode = false;
-        tabSignIn.className = 'flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-lg';
-        tabRegister.className = 'flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white';
+        tabSignIn.className = 'flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-lg shadow-cyan-950/60 flex items-center justify-center gap-2';
+        tabRegister.className = 'flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2';
         registerFields.classList.add('hidden');
         btnText.innerText = 'AUTHENTICATE & ENTER ACADEMY';
         btnIcon.innerText = '⚡';
+        playCyberSfx(480, 'sine', 0.08);
       });
 
       tabRegister.addEventListener('click', () => {
         isRegisterMode = true;
-        tabRegister.className = 'flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-amber-500 to-orange-600 text-black shadow-lg';
-        tabSignIn.className = 'flex-1 py-2.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white';
+        tabRegister.className = 'flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all bg-gradient-to-r from-amber-500 to-orange-600 text-black shadow-lg shadow-amber-950/60 flex items-center justify-center gap-2';
+        tabSignIn.className = 'flex-1 py-3 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2';
         registerFields.classList.remove('hidden');
-        btnText.innerText = 'REGISTER ESPORTS ID & ENTER';
+        btnText.innerText = 'REGISTER & SAVE TO SUPABASE CLOUD';
         btnIcon.innerText = '🛡️';
+        playCyberSfx(550, 'sine', 0.08);
       });
 
       // Toggle Password Visibility
       togglePasswordBtn.addEventListener('click', () => {
         if (inputPassword.type === 'password') {
           inputPassword.type = 'text';
-          togglePasswordBtn.innerText = '🔒 Hide';
+          togglePasswordBtn.innerText = '🔒 Hide Password';
         } else {
           inputPassword.type = 'password';
-          togglePasswordBtn.innerText = '👁️ Show';
+          togglePasswordBtn.innerText = '👁️ Show Password';
         }
+        playCyberSfx(650, 'sine', 0.04);
       });
 
       // Quick Preset Buttons
@@ -455,125 +733,106 @@
         btn.addEventListener('click', () => {
           inputEmail.value = btn.dataset.email;
           inputPassword.value = btn.dataset.pin;
+          inputIgn.value = btn.dataset.ign;
+          inputUid.value = btn.dataset.uid || '10928415';
+          inputTag.value = btn.dataset.tag;
+          inputRole.value = btn.dataset.role;
+
+          updateCloudEmailBadge();
+
           previewIgn.innerText = `[${btn.dataset.tag}] ${btn.dataset.ign}`;
           previewRole.innerText = btn.dataset.role;
-          previewClan.innerText = `${btn.dataset.tag} Squad`;
+          previewClan.innerText = `${btn.dataset.tag} Clan`;
           previewAvatar.innerText = btn.dataset.avatar;
+          if (btn.dataset.tier) previewTier.innerText = btn.dataset.tier;
+          previewUid.innerText = 'UID: ' + (btn.dataset.uid || '10928415');
+
           showAlert(`Loaded preset: ${btn.dataset.ign} (${btn.dataset.role})`, 'info');
+          playCyberSfx(880, 'triangle', 0.12);
         });
       });
 
       function showAlert(msg, type = 'info') {
         authAlert.classList.remove('hidden');
         if (type === 'error') {
-          authAlert.className = 'p-3 rounded-xl text-xs font-mono bg-rose-950/80 border border-rose-500 text-rose-300 flex items-center gap-2';
+          authAlert.className = 'p-3.5 rounded-2xl text-xs font-mono bg-rose-950/90 border border-rose-500 text-rose-300 flex items-center gap-2.5 shadow-lg shadow-rose-950/50';
         } else if (type === 'success') {
-          authAlert.className = 'p-3 rounded-xl text-xs font-mono bg-emerald-950/80 border border-emerald-500 text-emerald-300 flex items-center gap-2';
+          authAlert.className = 'p-3.5 rounded-2xl text-xs font-mono bg-emerald-950/90 border border-emerald-500 text-emerald-300 flex items-center gap-2.5 shadow-lg shadow-emerald-950/50';
         } else {
-          authAlert.className = 'p-3 rounded-xl text-xs font-mono bg-cyan-950/80 border border-cyan-500 text-cyan-300 flex items-center gap-2';
+          authAlert.className = 'p-3.5 rounded-2xl text-xs font-mono bg-cyan-950/90 border border-cyan-500 text-cyan-300 flex items-center gap-2.5 shadow-lg shadow-cyan-950/50';
         }
         authAlert.innerHTML = `<span>${type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️'}</span> <span>${msg}</span>`;
       }
 
       function completeLogin(userProfile) {
         localStorage.setItem('underdog_active_session', JSON.stringify(userProfile));
-        showAlert(`Access Granted! Welcome ${userProfile.ign}. Redirecting...`, 'success');
+        playSuccessChime();
+        showAlert(`Access Granted! Welcome [${userProfile.tag}] ${userProfile.ign}. Redirecting to Underdog Academy...`, 'success');
         setTimeout(() => {
           window.location.href = 'index.html';
-        }, 800);
+        }, 900);
       }
 
       // Handle Form Submit with Real Supabase Cloud Integration
       authForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const email = inputEmail.value.trim();
+        const rawEmailOrUser = inputEmail.value.trim();
         const password = inputPassword.value.trim();
 
-        if (!email || !password) {
-          showAlert('Please enter email and password!', 'error');
+        if (!rawEmailOrUser || !password) {
+          showAlert('Please enter your gamer username or email and password!', 'error');
+          playCyberSfx(300, 'sawtooth', 0.15);
           return;
         }
 
-        showAlert('Authenticating with Supabase Cloud...', 'info');
-
-        const ign = inputIgn.value.trim() || email.split('@')[0];
-        const uid = inputUid.value.trim() || String(Math.floor(1000000 + Math.random() * 9000000));
+        // Normalize email so Supabase ALWAYS accepts it (handles 'rishan' -> 'rishan@underdog.gg')
+        const email = normalizeToCloudEmail(rawEmailOrUser);
+        const ign = inputIgn.value.trim() || rawEmailOrUser.split('@')[0];
+        const uid = inputUid.value.trim() || String(Math.floor(10000000 + Math.random() * 90000000));
         const tag = inputTag.value.trim() || 'UDG';
-        const role = inputRole.value || 'Esports Competitor';
+        const role = inputRole.value || 'Star Entry Fragger';
 
-        // Pre-configured instant accounts
-        if (email === 'coach@underdog.gg' && password === '1234') {
-          completeLogin({
-            id: 'coach_duker',
-            email: 'coach@underdog.gg',
-            ign: 'Coach Duker',
-            tag: 'TITAN',
-            uid: '9901842',
-            role: 'Head Coach & Strategic Analyst',
-            tier: 'Champion Coach',
-            avatar: '👑'
-          });
-          return;
-        }
-        if (email === 'igl@underdog.gg' && password === '1234') {
-          completeLogin({
-            id: 'anurag_igl',
-            email: 'igl@underdog.gg',
-            ign: 'Anurag',
-            tag: 'UDG',
-            uid: '10849204',
-            role: 'IGL / Captain',
-            tier: 'Tier-1 Captain',
-            avatar: '⚔️'
-          });
-          return;
-        }
-        if (email === 'rusher@underdog.gg' && password === '1234') {
-          completeLogin({
-            id: 'shadow_rusher',
-            email: 'rusher@underdog.gg',
-            ign: 'Shadow',
-            tag: 'UDG',
-            uid: '3829104',
-            role: 'Rusher / Fragger',
-            tier: 'Tier-1 Fragger',
-            avatar: '🎯'
-          });
-          return;
-        }
+        btnText.innerText = 'CONNECTING TO SUPABASE CLOUD...';
+        showAlert(`[1/3] Resolving Cloud Identity: ${email}...`, 'info');
+        playCyberSfx(550, 'sine', 0.08);
 
-        // Supabase requires passwords to be >= 6 characters
+        // Supabase requires passwords to be at least 6 characters
         const safePassword = password.length < 6 ? password + '__udgpass' : password;
+
+        let supabaseUserId = null;
 
         // REAL SUPABASE AUTH CALL
         if (supabaseClient) {
           try {
-            // 1. Try Signing In
-            const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
+            showAlert(`[2/3] Registering / Authenticating user with Supabase Auth...`, 'info');
+            
+            // Step 1: Call signUp to ensure user exists in Supabase Users Table!
+            const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
               email,
-              password: safePassword
+              password: safePassword,
+              options: {
+                data: { ign, role, tag, uid, display_name: ign }
+              }
             });
 
-            if (!signInError && signInData?.user) {
-              showAlert('Successfully signed in to Supabase Cloud! 🟢', 'success');
-            } else {
-              // 2. If not found or failed, register in Supabase!
-              const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+            if (!signUpError && signUpData?.user) {
+              supabaseUserId = signUpData.user.id;
+              console.log('✅ Supabase User Registered:', signUpData.user);
+            } else if (signUpError) {
+              console.log('Supabase signup notice:', signUpError.message);
+              // Step 2: If user was already signed up, sign in with password!
+              const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
                 email,
-                password: safePassword,
-                options: {
-                  data: { ign, role, tag, uid }
-                }
+                password: safePassword
               });
 
-              if (!signUpError) {
-                showAlert('Esports ID registered in Supabase Cloud! 🟢', 'success');
-              } else {
-                console.warn('Supabase Auth notice:', signUpError.message);
+              if (!signInError && signInData?.user) {
+                supabaseUserId = signInData.user.id;
+                console.log('✅ Supabase User Signed In:', signInData.user);
               }
             }
 
-            // 3. Upsert profile in Supabase profiles table
+            // Step 3: Upsert profile in Supabase profiles table
             try {
               await supabaseClient.from('profiles').upsert({
                 email,
@@ -585,20 +844,24 @@
             } catch (err) {
               console.warn('Profile table note:', err);
             }
+
+            showAlert(`[3/3] Stored in Supabase Cloud Authentication! 🟢`, 'success');
           } catch (cloudErr) {
             console.warn('Supabase cloud connection warning:', cloudErr);
           }
         }
 
         const newProfile = {
-          id: 'usr_' + Date.now(),
+          id: supabaseUserId || ('usr_' + Date.now()),
+          supabaseId: supabaseUserId,
           email,
+          rawUsername: rawEmailOrUser,
           ign,
           uid,
           tag,
           role,
-          tier: 'Registered Competitor',
-          avatar: role.includes('Coach') ? '👑' : role.includes('Captain') ? '⚔️' : role.includes('Sniper') ? '🎯' : '⚡'
+          tier: role.includes('Coach') ? 'Master Coach' : role.includes('Captain') ? 'Tier-1 Captain' : 'Master Fragger',
+          avatar: role.includes('Coach') ? '🧠' : role.includes('Captain') ? '⚔️' : role.includes('Sniper') ? '🎯' : '⚡'
         };
 
         completeLogin(newProfile);
@@ -617,6 +880,49 @@
           avatar: '👤'
         });
       });
+
+      // Ambient Background Matrix/Stars Canvas
+      const canvas = document.getElementById('matrixCanvas');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        window.addEventListener('resize', () => {
+          width = canvas.width = window.innerWidth;
+          height = canvas.height = window.innerHeight;
+        });
+
+        const particles = Array.from({ length: 45 }, () => ({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: (Math.random() - 0.5) * 0.4,
+          size: Math.random() * 2 + 1,
+          color: Math.random() > 0.5 ? '#00f0ff' : '#a855f7'
+        }));
+
+        function renderCanvas() {
+          ctx.clearRect(0, 0, width, height);
+          particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < 0) p.x = width;
+            if (p.x > width) p.x = 0;
+            if (p.y < 0) p.y = height;
+            if (p.y > height) p.y = 0;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = p.color;
+            ctx.fill();
+          });
+          requestAnimationFrame(renderCanvas);
+        }
+        renderCanvas();
+      }
 
     })();
   </script>
