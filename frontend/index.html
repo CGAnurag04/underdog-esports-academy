@@ -6090,6 +6090,37 @@ class ReflexTrainer {
       };
       this.selectedFlightPath = 'nw_se';
       this.selectedFlightPoi = 'peak';
+      this.activePlaybookView = 'warmup'; // 'warmup' | 'callouts' | 'mindset'
+      this.calloutActiveCard = 'blue_double';
+      this.calloutActiveFilter = 'all';
+      this.warmupTimer = {
+        active: false,
+        currentStage: 0,
+        timeLeft: 180,
+        interval: null,
+        completed: false,
+        streak: parseInt(localStorage.getItem('underdog_warmup_streak') || '0', 10),
+        stages: [
+          { id: 'mobility', title: 'Hand & Finger Mobility', icon: '🕷️', duration: 180, completed: false, desc: 'Spider taps on flat surface, wrist extensor stretches, and warm water nerve activation.', proTip: 'Cold hands (<20°C) increase nerve conduction latency by 25ms. Warm hands move 15% faster.' },
+          { id: 'calibration', title: 'Drag Headshot Calibration', icon: '🎯', duration: 300, completed: false, desc: 'Shotgun flick headshots, SMG recoil drag consistency, and 30m / 50m range testing in Training Ground.', proTip: 'Keep crosshair at upper-chest height before dragging fire button. Smooth drag beats violent jerk.' },
+          { id: 'gloo_drill', title: '360° Gloo Wall Muscle Memory', icon: '🛡️', duration: 240, completed: false, desc: 'Sit-down gloo placement, jump-shoot-wall combo, and double-wall perimeter sealing in 0.15s rhythm.', proTip: 'Never look up when placing gloo walls. Drag joystick down and pull crosshair to your feet.' },
+          { id: 'clutch_test', title: '1v1 Lone Wolf Clutch Test', icon: '⚔️', duration: 180, completed: false, desc: 'Real opponent duel: practice movement baiting, high-pressure trade knocks, and reset pacing.', proTip: 'Commit 100% to first shot advantage. If you whiff your shotgun shot, instantly deploy gloo and reset.' }
+        ]
+      };
+      this.zoneClockState = {
+        active: false,
+        currentPhase: 1,
+        timeLeft: 210,
+        interval: null,
+        strategyMode: 'early', // 'early' | 'late'
+        phases: [
+          { phase: 1, name: 'Phase 1: Initial Drop & Outer Loot Boundary', duration: 210, dps: 1, zoneSize: '1000m → 650m', earlyAdvice: 'Crash forward compound before bridges and main choke points are occupied.', lateAdvice: 'Loot outer perimeter undisturbed; use the blue edge as rear security.' },
+          { phase: 2, name: 'Phase 2: Mid-Game Territory Claim', duration: 150, dps: 2, zoneSize: '650m → 420m', earlyAdvice: 'Take central 2-story compound or high ridge with vehicles. Set up 360° perimeter.', lateAdvice: 'Hug weak side of zone (fewer plane drops). Let center teams battle and trade knocks.' },
+          { phase: 3, name: 'Phase 3: Critical Hard-Shift Phase', duration: 120, dps: 4, zoneSize: '420m → 240m', earlyAdvice: 'If zone pulls onto open fields, commit 100% vehicle crash into nearest hard cover.', lateAdvice: 'Do NOT run into open. Hold edge until 0:20, follow blue line in, vulture knocked players.' },
+          { phase: 4, name: 'Phase 4: Late Circle Collapse', duration: 90, dps: 8, zoneSize: '240m → 110m', earlyAdvice: 'Gatekeep the edge! Any late-rotating team must cross your crosshair in open ground.', lateAdvice: 'Deploy double-stacked gloo walls along blue line. Move only when blue zone pushes your back.' },
+          { phase: 5, name: 'Phase 5: End-Game Heal-Off & Showdown', duration: 60, dps: 15, zoneSize: '110m → 0m (Full Closure)', earlyAdvice: 'High-ground crossfire and grenade barrage into lower compounds.', lateAdvice: 'Heal-off protocol: Prep Super Medkits, Inhalers, and Luqueta HP boost for final collapse.' }
+        ]
+      };
       this.ffActiveHudPreset = 'ff_default_2finger';
       this.ffSelectedHudButton = 'fire_right';
       this.ffCustomSens = null;
@@ -9946,6 +9977,54 @@ ${curPreset.proTip}`;
     }
 
     // --- PLAY SYNTHESIZED RADIO BEEP ---
+    playChimeSound(type) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        if (type === 'stage_complete') {
+          const o1 = ctx.createOscillator();
+          const g1 = ctx.createGain();
+          o1.type = 'triangle';
+          o1.frequency.setValueAtTime(523.25, ctx.currentTime);
+          o1.frequency.setValueAtTime(783.99, ctx.currentTime + 0.15);
+          g1.gain.setValueAtTime(0.25, ctx.currentTime);
+          g1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+          o1.connect(g1);
+          g1.connect(ctx.destination);
+          o1.start();
+          o1.stop(ctx.currentTime + 0.4);
+        } else if (type === 'warning_30s') {
+          for (let i = 0; i < 2; i++) {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sawtooth';
+            o.frequency.setValueAtTime(880, ctx.currentTime + i * 0.16);
+            g.gain.setValueAtTime(0.2, ctx.currentTime + i * 0.16);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + i * 0.16 + 0.13);
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.start(ctx.currentTime + i * 0.16);
+            o.stop(ctx.currentTime + i * 0.16 + 0.13);
+          }
+        } else if (type === 'warmup_finish') {
+          const freqs = [523.25, 659.25, 783.99, 1046.50];
+          freqs.forEach((f, idx) => {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(f, ctx.currentTime + idx * 0.12);
+            g.gain.setValueAtTime(0.25, ctx.currentTime + idx * 0.12);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.12 + 0.25);
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.start(ctx.currentTime + idx * 0.12);
+            o.stop(ctx.currentTime + idx * 0.12 + 0.25);
+          });
+        }
+      } catch (e) {}
+    }
+
     playRadioBeep() {
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -9963,6 +10042,460 @@ ${curPreset.proTip}`;
         osc.start();
         osc.stop(ctx.currentTime + 0.08);
       } catch (e) {}
+    }
+
+    
+    // --- SAFE ZONE MATCH CLOCK & ROTATION METHODS ---
+    startZoneClock() {
+      if (this.zoneClockState.active) return;
+      this.zoneClockState.active = true;
+      clearInterval(this.zoneClockState.interval);
+      this.zoneClockState.interval = setInterval(() => {
+        if (this.zoneClockState.timeLeft > 0) {
+          this.zoneClockState.timeLeft--;
+          if (this.zoneClockState.timeLeft === 30) {
+            this.playChimeSound('warning_30s');
+          }
+          this.updateZoneClockUI();
+        } else {
+          // Phase finished, auto advance or chime
+          this.playChimeSound('stage_complete');
+          if (this.zoneClockState.currentPhase < 5) {
+            this.setZonePhase(this.zoneClockState.currentPhase + 1);
+          } else {
+            this.pauseZoneClock();
+          }
+        }
+      }, 1000);
+      this.updateZoneClockUI();
+    }
+
+    pauseZoneClock() {
+      this.zoneClockState.active = false;
+      clearInterval(this.zoneClockState.interval);
+      this.updateZoneClockUI();
+    }
+
+    resetZoneClock() {
+      this.pauseZoneClock();
+      const current = this.zoneClockState.phases.find(p => p.phase === this.zoneClockState.currentPhase);
+      this.zoneClockState.timeLeft = current ? current.duration : 210;
+      this.updateZoneClockUI();
+    }
+
+    setZonePhase(phaseNum) {
+      this.zoneClockState.currentPhase = phaseNum;
+      const phaseData = this.zoneClockState.phases.find(p => p.phase === phaseNum);
+      if (phaseData) {
+        this.zoneClockState.timeLeft = phaseData.duration;
+      }
+      this.renderTabContent();
+    }
+
+    toggleZoneStrategyMode(mode) {
+      this.zoneClockState.strategyMode = mode;
+      this.renderTabContent();
+    }
+
+    formatClockTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    updateZoneClockUI() {
+      const timeDisplay = document.getElementById('zoneClockTimeDisplay');
+      const toggleBtn = document.getElementById('zoneClockToggleBtn');
+      const warningBox = document.getElementById('zoneClockWarningBox');
+      const warningSeconds = document.getElementById('zoneWarningSeconds');
+
+      if (timeDisplay) {
+        timeDisplay.textContent = this.formatClockTime(this.zoneClockState.timeLeft);
+      }
+      if (toggleBtn) {
+        toggleBtn.innerHTML = this.zoneClockState.active
+          ? '<span>⏸️</span> Pause Clock'
+          : '<span>▶️</span> Start Match Clock';
+        toggleBtn.className = this.zoneClockState.active
+          ? 'px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all'
+          : 'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all';
+      }
+      if (warningBox) {
+        if (this.zoneClockState.timeLeft <= 30 && this.zoneClockState.timeLeft > 0) {
+          warningBox.classList.remove('hidden');
+          if (warningSeconds) warningSeconds.textContent = this.zoneClockState.timeLeft;
+        } else {
+          warningBox.classList.add('hidden');
+        }
+      }
+    }
+
+    renderZoneClockView() {
+      const currentPhaseData = this.zoneClockState.phases.find(p => p.phase === this.zoneClockState.currentPhase) || this.zoneClockState.phases[0];
+      const isEarly = this.zoneClockState.strategyMode === 'early';
+
+      return `
+        <div class="space-y-6 animate-fade-in">
+          <!-- LIVE SAFE ZONE COUNTDOWN HUD -->
+          <div class="cyber-panel p-6 rounded-2xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#130b22] to-slate-950 shadow-2xl relative overflow-hidden">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-slate-800 pb-6">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full ${this.zoneClockState.active ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}"></span>
+                  <span class="text-xs font-sub font-bold text-purple-400 uppercase tracking-widest">
+                    ${this.zoneClockState.active ? 'MATCH IN PROGRESS • LIVE ZONE TELEMETRY' : 'SCRIM CLOCK READY • WAITING FOR PLANE DROP'}
+                  </span>
+                </div>
+                <h4 class="text-xl font-heading font-black text-white uppercase tracking-wider mt-1 flex items-center gap-3">
+                  ⏱️ Tournament Safe Zone & Rotation Clock
+                  <span class="cyber-badge bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px]">
+                    PHASE ${currentPhaseData.phase} OF 5
+                  </span>
+                </h4>
+                <p class="text-xs text-slate-400 mt-1 max-w-2xl">
+                  Run this clock during your scrims. Automatically provides audio countdown warnings and dictates whether your squad must execute an <strong>Early Center Crash</strong> or a <strong>Late Edge Snake</strong>.
+                </p>
+              </div>
+
+              <!-- Main Clock Display -->
+              <div class="flex items-center gap-4">
+                <div class="bg-slate-950 px-6 py-3 rounded-2xl border-2 ${this.zoneClockState.timeLeft <= 30 && this.zoneClockState.timeLeft > 0 ? 'border-rose-500 animate-pulse bg-rose-950/30' : 'border-purple-500/40'} text-center shadow-xl">
+                  <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Zone Shrink Timer</div>
+                  <div id="zoneClockTimeDisplay" class="text-3xl lg:text-4xl font-mono font-black text-white tracking-widest mt-0.5">
+                    ${this.formatClockTime(this.zoneClockState.timeLeft)}
+                  </div>
+                  <div class="text-[10px] font-sub text-rose-400 font-bold mt-0.5">DPS: ${currentPhaseData.dps} HP / sec</div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="flex flex-col gap-2">
+                  <button id="zoneClockToggleBtn" class="px-4 py-2 rounded-xl ${this.zoneClockState.active ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all">
+                    ${this.zoneClockState.active ? '<span>⏸️</span> Pause Clock' : '<span>▶️</span> Start Match Clock'}
+                  </button>
+                  <div class="flex items-center gap-2">
+                    <button id="zoneClockPrevBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Previous Phase">
+                      ⏮️ Prev
+                    </button>
+                    <button id="zoneClockNextBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Next Phase">
+                      Next ⏭️
+                    </button>
+                    <button id="zoneClockResetBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Reset Clock">
+                      🔄 Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 30-SECOND DANGER ALERT (Dynamic) -->
+            <div id="zoneClockWarningBox" class="${this.zoneClockState.timeLeft <= 30 && this.zoneClockState.timeLeft > 0 ? '' : 'hidden'} mt-4 p-3.5 rounded-xl bg-rose-500/20 border-2 border-rose-500 text-rose-300 flex items-center justify-between gap-4 animate-pulse">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">🚨</span>
+                <div>
+                  <div class="text-xs font-black uppercase tracking-wider font-heading text-white">
+                    CRITICAL 30-SECOND ROTATION ALERT: ZONE COLLAPSING IN <span id="zoneWarningSeconds">${this.zoneClockState.timeLeft}</span> SECONDS!
+                  </div>
+                  <div class="text-[11px] text-rose-200 mt-0.5">
+                    Disengage from poke fights immediately! Any squad caught in the open during this phase takes ${currentPhaseData.dps} HP/s lethal blue damage.
+                  </div>
+                </div>
+              </div>
+              <span class="px-3 py-1 rounded-full bg-rose-950 border border-rose-400 text-rose-200 text-[10px] font-sub font-bold uppercase shrink-0">
+                COMMIT NOW
+              </span>
+            </div>
+
+            <!-- 5-Phase Interactive Stepper Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-5">
+              ${this.zoneClockState.phases.map(p => `
+                <button class="zone-phase-btn p-3 rounded-xl text-left border transition-all ${p.phase === this.zoneClockState.currentPhase ? 'bg-purple-950/90 border-purple-400 text-white shadow-lg ring-1 ring-purple-400' : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'}" data-phase="${p.phase}">
+                  <div class="flex items-center justify-between text-[10px] font-sub uppercase font-bold">
+                    <span>Phase ${p.phase}</span>
+                    <span class="text-rose-400 font-mono">${p.dps} HP/s</span>
+                  </div>
+                  <div class="text-xs font-bold text-white mt-1 truncate">${p.name.split(':')[1] || p.name}</div>
+                  <div class="text-[10px] text-slate-500 font-mono mt-0.5">${p.duration}s (${Math.floor(p.duration/60)}:${p.duration%60 === 0 ? '00' : p.duration%60})</div>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- IN-GAME SITUATION MATRIX: EARLY SHRINK VS LATE SHRINK -->
+          <div class="cyber-panel p-6 rounded-2xl border border-cyan-500/40 bg-gradient-to-b from-slate-950 via-[#071324] to-slate-950 space-y-6">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+                  <h4 class="text-base font-heading font-black text-white uppercase tracking-wider">
+                    🧭 In-Game Situation Matrix: Early Shrink vs. Late Shrink Tactics
+                  </h4>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">
+                  How does a tournament IGL know whether to rotate immediately or wait for the blue zone to push? Match your live match condition:
+                </p>
+              </div>
+
+              <!-- Strategy Mode Toggle -->
+              <div class="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+                <button class="zone-strategy-btn ${isEarly ? 'active bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'} px-4 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all flex items-center gap-1.5" data-mode="early">
+                  <span>⚡</span> Early Shrink (Center Crash)
+                </button>
+                <button class="zone-strategy-btn ${!isEarly ? 'active bg-gradient-to-r from-purple-600 to-rose-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'} px-4 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all flex items-center gap-1.5" data-mode="late">
+                  <span>⏱️</span> Late Shrink (Edge Snaking)
+                </button>
+              </div>
+            </div>
+
+            <!-- Strategy Detail Box -->
+            ${isEarly ? `
+              <div class="space-y-6 animate-fade-in">
+                <!-- Overview Header -->
+                <div class="p-4 rounded-xl bg-cyan-950/30 border border-cyan-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="cyber-badge bg-cyan-900 text-cyan-200 border border-cyan-400/50 text-[10px] font-bold">
+                        FAST CENTER CRASH
+                      </span>
+                      <span class="text-xs font-heading font-black text-white uppercase">Philosophy: Claim the King's Throne Before Anyone Else Arrives</span>
+                    </div>
+                    <p class="text-xs text-slate-300 mt-1">
+                      Executing an early rotation means moving <strong>2 to 3 minutes before the zone closes</strong>. You willingly sacrifice extra looting time to capture the most defensible fortress in the center of the next zone.
+                    </p>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <span class="text-[11px] font-sub text-cyan-400 font-bold">Recommended for:</span>
+                    <div class="text-xs font-bold text-white">Full 4-Man Squads with 2+ Vehicles</div>
+                  </div>
+                </div>
+
+                <!-- 4 In-Game Situations That Dictate Early Rotation -->
+                <div>
+                  <h5 class="text-xs font-sub uppercase font-bold text-cyan-400 tracking-wider mb-3">
+                    4 Specific In-Game Scenarios That Trigger Early Rotation:
+                  </h5>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-cyan-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🚗</span> Situation 1: Vehicle Superiority (2+ Cars / Pickups)
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/30">High Speed Mobility</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        If your squad secured 2 cars or Jeeps from drop, do NOT stay on foot. Rotate immediately at the start of Phase 2 or 3. You can cover 400m in 15 seconds, bypass roadside ambushes, and use vehicles as indestructible metal shields.
+                      </p>
+                      <div class="text-[11px] text-cyan-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Drive in convoy 30m apart. Park vehicles perpendicular to compound doors to seal entrances.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-cyan-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🌊</span> Situation 2: River Crossing / Wide Flat Plain Ahead
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold border border-rose-500/30">Choke Point Death Trap</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        If the new zone pulls across the river (e.g. Bullseye/Cemetery or Rim Nam bridge) or an open plain with zero natural rocks, <strong>you must cross instantly</strong>. Waiting late means 3 squads will gatekeep the shoreline and eliminate you in the water.
+                      </p>
+                      <div class="text-[11px] text-cyan-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Drop smoke lines across bridge, cross immediately, and set up your own gatekeep on the opposite bank.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-cyan-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🛡️</span> Situation 3: Heavy Gloo Economy Surplus (12+ Walls)
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/30">Utility Fortified</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Holding a central compound attracts pressure from multiple angles. When your squad has 12 to 18 gloo walls, you have the defense to withstand grenade cluster spam, repair destroyed walls, and establish 360° crossfire boxes.
+                      </p>
+                      <div class="text-[11px] text-cyan-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Deploy 2-2 V-wall wedges around compound perimeter. Keep 4 gloos in reserve for emergency revives.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-cyan-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🔭</span> Situation 4: 3-1 Scout Confirms Compound is Unoccupied
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 font-bold border border-purple-500/30">Information Advantage</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Your forward scout rides ahead and confirms that a prime compound (e.g. Peak Central Mansion or Pochinok Double Door) is 100% empty. You must crash before neighboring edge teams spot the vacancy.
+                      </p>
+                      <div class="text-[11px] text-cyan-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> 15-second reinforcement countdown! Full squad crashes simultaneously to fortify all windows.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3-Step Execution & Voice Comms -->
+                <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col md:flex-row justify-between gap-4">
+                  <div class="space-y-1.5">
+                    <div class="text-xs font-sub font-bold text-cyan-400 uppercase">Early Shrink IGL Voice Comms Script:</div>
+                    <div class="text-xs italic text-cyan-200 bg-slate-950 p-2.5 rounded border border-cyan-500/30">
+                      "Mount up vehicles now! Do not finish looting that house! Peak mansion is clear. Drive the north ditch line, crash the compound, park cars at the door, and set up 360° crossfire! Move now!"
+                    </div>
+                  </div>
+                  <div class="space-y-1 shrink-0">
+                    <div class="text-[11px] font-sub font-bold text-slate-400 uppercase">Tier-1 Team Reference:</div>
+                    <div class="text-xs font-bold text-white">EVOS Phoenix & Total Gaming</div>
+                    <div class="text-[11px] text-slate-400">Pioneers of the 90-second early vehicle compound crash.</div>
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <div class="space-y-6 animate-fade-in">
+                <!-- Overview Header -->
+                <div class="p-4 rounded-xl bg-rose-950/30 border border-rose-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="cyber-badge bg-rose-900 text-rose-200 border border-rose-400/50 text-[10px] font-bold">
+                        BLUE LINE EDGE SNAKING
+                      </span>
+                      <span class="text-xs font-heading font-black text-white uppercase">Philosophy: Let Other Teams Kill Each Other, Then Steal Their Points</span>
+                    </div>
+                    <p class="text-xs text-slate-300 mt-1">
+                      Executing a late rotation means <strong>holding the perimeter until the zone timer reaches 0:20 or starts moving</strong>. The blue zone acts as your 100% bulletproof rear armor, ensuring nobody can flank your squad from behind.
+                    </p>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <span class="text-[11px] font-sub text-rose-400 font-bold">Recommended for:</span>
+                    <div class="text-xs font-bold text-white">Low Gloo Economy, Shorthanded Squads (Duo/Solo)</div>
+                  </div>
+                </div>
+
+                <!-- 4 In-Game Situations That Dictate Late Rotation -->
+                <div>
+                  <h5 class="text-xs font-sub uppercase font-bold text-rose-400 tracking-wider mb-3">
+                    4 Specific In-Game Scenarios That Trigger Late Rotation:
+                  </h5>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-rose-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>📉</span> Situation 1: Starved Gloo Economy (< 6 Walls Total)
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold border border-rose-500/30">High Vulnerability</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        If your whole squad only has 3 to 5 gloo walls combined, driving into the center is instant suicide. Center compounds face crossfire from 3-4 teams. Staying on the edge lets natural terrain (rocks, dips, trees) serve as your cover.
+                      </p>
+                      <div class="text-[11px] text-rose-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Hug the slow-moving edge of the zone (weak side). Save your few gloo walls strictly for endgame heal-offs.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-rose-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>💀</span> Situation 2: Shorthanded Squad (Duo or Solo Rat)
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-bold border border-amber-500/30">Survival Priority</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        When 2 teammates are knocked out early, holding a building is impossible against aggressive 4-man squads who will grenade and breach you. A duo must snake the blue edge, stay prone, and extract placement points.
+                      </p>
+                      <div class="text-[11px] text-rose-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Equip silencers or marksman rifles. Never initiate fights; only shoot when an enemy is running through the open away from the zone.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-rose-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🔥</span> Situation 3: Active Heavy Gunfire Directly on Rotation Path
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/30">Third-Party Opportunity</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        Two Tier-1 squads are fighting on the crest ahead of you. If you push early, both squads will turn and shoot you. Hold your position until the blue zone forces both teams to break cover, then third-party the wounded survivors.
+                      </p>
+                      <div class="text-[11px] text-rose-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Wait for killfeed knocks. The moment 2 players are eliminated, push the flank and sweep their loot boxes.
+                      </div>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-rose-500/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>🏔️</span> Situation 4: Enemy Squad Holding Mountain Ridge Gatekeep
+                        </span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 font-bold border border-purple-500/30">High Ground Disadvantage</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">
+                        An enemy squad is positioned on top of the mountain ridge looking straight down into your path. Never push uphill into their crosshairs. Wait late, wrap 200m horizontally along the blue zone line, and approach from their blind flank.
+                      </p>
+                      <div class="text-[11px] text-rose-300 font-mono bg-slate-950 p-2 rounded border border-slate-800">
+                        <strong>IGL Action:</strong> Smoke the base of the hill to bait their attention, then wrap wide along the blue perimeter to equal elevation.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3-Step Execution & Voice Comms -->
+                <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col md:flex-row justify-between gap-4">
+                  <div class="space-y-1.5">
+                    <div class="text-xs font-sub font-bold text-rose-400 uppercase">Late Shrink IGL Voice Comms Script:</div>
+                    <div class="text-xs italic text-rose-200 bg-slate-950 p-2.5 rounded border border-rose-500/30">
+                      "Hold fire! Do not shoot! Let Team Soul and Orangutan fight on the hill! We stay on the blue edge. When the blue zone ticks them at 0:15, they have to run downhill. We take the third-party kills and loot their gloos!"
+                    </div>
+                  </div>
+                  <div class="space-y-1 shrink-0">
+                    <div class="text-[11px] font-sub font-bold text-slate-400 uppercase">Tier-1 Team Reference:</div>
+                    <div class="text-xs font-bold text-white">Fluxo & WJB Esports</div>
+                    <div class="text-[11px] text-slate-400">Masters of the weak-side blue line perimeter wrap and third-party vulture plays.</div>
+                  </div>
+                </div>
+              </div>
+            `}
+
+            <!-- END-GAME HEAL-OFF CONSUMABLE CALCULATOR (PHASE 5 HUD) -->
+            <div class="p-4 rounded-xl bg-slate-950/80 border border-purple-500/30">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">💊</span>
+                  <span class="text-xs font-sub uppercase font-bold text-purple-400">Phase 5 Final Circle Heal-Off Consumables Math</span>
+                </div>
+                <span class="text-[10px] text-slate-400 font-mono">Final Zone DPS: 15 HP/sec</span>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div class="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="font-bold text-white flex items-center justify-between">
+                    <span>Super Medkit</span>
+                    <span class="text-emerald-400">+200 HP</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-1">Cast Time: <strong>4.0s</strong> (Cannot move). Pop at <strong>120 HP</strong> to finish cast before zero HP.</div>
+                </div>
+
+                <div class="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="font-bold text-white flex items-center justify-between">
+                    <span>Standard Medkit</span>
+                    <span class="text-cyan-400">+75 HP</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-1">Cast Time: <strong>4.0s</strong>. In Phase 5, 15 DPS drains 60 HP during cast. Net gain: +15 HP only.</div>
+                </div>
+
+                <div class="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="font-bold text-white flex items-center justify-between">
+                    <span>Inhaler / EP Boost</span>
+                    <span class="text-amber-400">+20 HP / +20 EP</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-1">Cast Time: <strong>Instant (0.0s)</strong>. Can pop while sprinting or sliding. Crucial buffer while moving.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     renderCoachingTab(container) {
@@ -10014,6 +10547,9 @@ ${curPreset.proTip}`;
             <div class="flex flex-wrap items-center gap-2">
               <button class="coaching-nav-btn ${this.coachingActiveView === 'decision_making' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="decision_making">
                 🧠 IGL Decision Making & Drop Planner
+              </button>
+              <button class="coaching-nav-btn ${this.coachingActiveView === 'zone_clock' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="zone_clock">
+                🧭 Safe Zone Clock & Early/Late Shrink Advisor
               </button>
               <button class="coaching-nav-btn ${this.coachingActiveView === 'coaches' ? 'active bg-purple-600 text-white shadow ring-2 ring-purple-400/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'} px-3.5 py-1.5 rounded-xl text-xs font-sub font-bold uppercase tracking-wider transition-all" data-view="coaches">
                 🎓 Pro Coaches & Masterclass Dossiers
@@ -10551,6 +11087,7 @@ ${curPreset.proTip}`;
           <!-- ============================================================= -->
           <!-- VIEW 3: IGL VOICE COMMS & AUDIO SOUNDBOARD -->
           <!-- ============================================================= -->
+          ${this.coachingActiveView === 'zone_clock' ? this.renderZoneClockView() : ''}
           ${this.coachingActiveView === 'comms' ? `
             <div class="space-y-6 animate-fade-in">
               <!-- Golden Laws Banner -->
@@ -10718,6 +11255,56 @@ ${curPreset.proTip}`;
       }
 
       // 4. Comms Soundboard Buttons
+      
+      // Zone Clock Controls
+      const toggleBtn = document.getElementById('zoneClockToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          if (this.zoneClockState.active) {
+            this.pauseZoneClock();
+          } else {
+            this.startZoneClock();
+          }
+        });
+      }
+
+      const resetBtn = document.getElementById('zoneClockResetBtn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => this.resetZoneClock());
+      }
+
+      const prevBtn = document.getElementById('zoneClockPrevBtn');
+      if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+          if (this.zoneClockState.currentPhase > 1) {
+            this.setZonePhase(this.zoneClockState.currentPhase - 1);
+          }
+        });
+      }
+
+      const nextBtn = document.getElementById('zoneClockNextBtn');
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+          if (this.zoneClockState.currentPhase < 5) {
+            this.setZonePhase(this.zoneClockState.currentPhase + 1);
+          }
+        });
+      }
+
+      document.querySelectorAll('.zone-phase-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const phase = parseInt(btn.getAttribute('data-phase'), 10);
+          if (phase) this.setZonePhase(phase);
+        });
+      });
+
+      document.querySelectorAll('.zone-strategy-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-mode');
+          if (mode) this.toggleZoneStrategyMode(mode);
+        });
+      });
+
       document.querySelectorAll('.comms-sound-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           this.playRadioBeep();
@@ -14579,42 +15166,800 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
     }
 
     // --- PLAYBOOK TAB ---
+    
+    // --- PLAYBOOK & WARMUP PROTOCOLS (15-MIN WARMUP & BUILDING CALLOUTS) ---
+    startWarmupTimer() {
+      if (this.warmupTimer.active) return;
+      this.warmupTimer.active = true;
+      clearInterval(this.warmupTimer.interval);
+      this.warmupTimer.interval = setInterval(() => {
+        if (this.warmupTimer.timeLeft > 0) {
+          this.warmupTimer.timeLeft--;
+          this.updateWarmupUI();
+        } else {
+          // Current stage finished
+          const currentStage = this.warmupTimer.stages[this.warmupTimer.currentStage];
+          if (currentStage) currentStage.completed = true;
+
+          this.playChimeSound('stage_complete');
+
+          if (this.warmupTimer.currentStage < this.warmupTimer.stages.length - 1) {
+            this.skipWarmupStage(1);
+          } else {
+            this.pauseWarmupTimer();
+            this.warmupTimer.completed = true;
+            this.claimWarmupStreak();
+            this.playChimeSound('warmup_finish');
+          }
+          this.renderTabContent();
+        }
+      }, 1000);
+      this.updateWarmupUI();
+    }
+
+    pauseWarmupTimer() {
+      this.warmupTimer.active = false;
+      clearInterval(this.warmupTimer.interval);
+      this.updateWarmupUI();
+    }
+
+    resetWarmupTimer() {
+      this.pauseWarmupTimer();
+      const current = this.warmupTimer.stages[this.warmupTimer.currentStage];
+      this.warmupTimer.timeLeft = current ? current.duration : 180;
+      this.updateWarmupUI();
+    }
+
+    skipWarmupStage(direction) {
+      let newIdx = this.warmupTimer.currentStage + direction;
+      if (newIdx < 0) newIdx = 0;
+      if (newIdx >= this.warmupTimer.stages.length) newIdx = this.warmupTimer.stages.length - 1;
+
+      this.warmupTimer.currentStage = newIdx;
+      this.warmupTimer.timeLeft = this.warmupTimer.stages[newIdx].duration;
+      this.renderTabContent();
+    }
+
+    toggleWarmupStageComplete(idx) {
+      if (this.warmupTimer.stages[idx]) {
+        this.warmupTimer.stages[idx].completed = !this.warmupTimer.stages[idx].completed;
+        const allDone = this.warmupTimer.stages.every(s => s.completed);
+        if (allDone && !this.warmupTimer.completed) {
+          this.claimWarmupStreak();
+          this.playChimeSound('warmup_finish');
+        }
+        this.renderTabContent();
+      }
+    }
+
+    claimWarmupStreak() {
+      this.warmupTimer.completed = true;
+      this.warmupTimer.streak = (this.warmupTimer.streak || 0) + 1;
+      localStorage.setItem('underdog_warmup_streak', this.warmupTimer.streak.toString());
+      this.renderTabContent();
+    }
+
+    resetWarmupStreak() {
+      this.warmupTimer.streak = 0;
+      localStorage.setItem('underdog_warmup_streak', '0');
+      this.warmupTimer.completed = false;
+      this.warmupTimer.stages.forEach(s => s.completed = false);
+      this.renderTabContent();
+    }
+
+    updateWarmupUI() {
+      const timeDisplay = document.getElementById('warmupTimeDisplay');
+      const toggleBtn = document.getElementById('warmupToggleBtn');
+
+      if (timeDisplay) {
+        timeDisplay.textContent = this.formatClockTime(this.warmupTimer.timeLeft);
+      }
+      if (toggleBtn) {
+        toggleBtn.innerHTML = this.warmupTimer.active
+          ? '<span>⏸️</span> Pause Warmup'
+          : '<span>▶️</span> Start Stage Timer';
+        toggleBtn.className = this.warmupTimer.active
+          ? 'px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all'
+          : 'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all';
+      }
+    }
+
+    getBuildingCalloutsData() {
+      return [
+        {
+          id: 'blue_double',
+          category: 'classics',
+          name: 'Blue Double-Door (Do-Manzil / Balcony House)',
+          regional: 'Do-Manzil, Nil Ghor, Balcony Building',
+          icon: '🏢',
+          accent: 'cyan',
+          hotspots: 'Pochinok, Peak, Mars Electric, Brasilia, Central',
+          layout: 'Ground floor kitchen & living area with narrow 90° L-staircase choke point. 2nd floor features an open front balcony, rear escape window, and corner bedroom.',
+          grenade: {
+            cookTime: '2.2 Seconds',
+            angle: 'Throw through 2nd floor East window from 35m outside.',
+            trajectory: 'Direct wall-ricochet off bedroom back wall onto the staircase top landing.',
+            impact: 'Guaranteed 180+ explosive damage to players waiting on staircase with shotguns.'
+          },
+          breach: [
+            { step: '1', role: 'Support / Smoker', desc: 'Throw smoke grenade directly onto staircase choke to blind stairway campers.' },
+            { step: '2', role: 'Rusher 1 & 2', desc: 'Use pickup truck roof or double gloo wall to boost directly onto 2nd floor balcony railing, bypassing the staircase.' },
+            { step: '3', role: 'Rusher 3', desc: 'Simultaneous breach through ground entrance with MP40 / Shotgun.' },
+            { step: '4', role: 'Sniper / Overwatch', desc: 'Hold 50m rear angle to eliminate players attempting to jump out the rear window.' }
+          ],
+          defensiveHold: [
+            'Player 1 (Anchor): Prone behind 2nd floor bedroom bed with Woodpecker/AC80 covering doorway.',
+            'Player 2 (Shotgun Rusher): Crouched on upper staircase corner with M1887/Charge Buster.',
+            'Player 3 (Balcony Guard): Holding right-hand peek on balcony door; ready to drop gloo if grenade sound heard.',
+            'Player 4 (Flex): Ground floor rotation or secondary crossfire watching rear window.'
+          ],
+          commsScript: 'Enemy squad in Blue Double! Do not push the stairs! Smoker smoke the staircase now! Rushers boost balcony! Sniper hold the rear jump-out!'
+        },
+        {
+          id: 'l_shape',
+          category: 'classics',
+          name: 'L-Shape / Broken Roof House',
+          regional: 'Broken L, Khula Chhat House, L-Mansion',
+          icon: '🏚️',
+          accent: 'amber',
+          hotspots: 'Bimasakti Strip, Peak Ridge, Purgatory Fields, Moathouse',
+          layout: 'L-shaped ground corridor with single straight wooden staircase. Upper floor has open damaged roof section with natural brick half-wall cover.',
+          grenade: {
+            cookTime: '1.8 Seconds',
+            angle: 'Stand at outside 45° angle corner behind brick wall.',
+            trajectory: 'High-arc bounce off the broken roof chimney directly into the roof peek corner.',
+            impact: 'Flushes out roof snipers who are head-glitching the open sky ledge.'
+          },
+          breach: [
+            { step: '1', role: 'Sniper', desc: 'Wall-bang through exterior wooden door/partitions with M82B to knock campers behind cover.' },
+            { step: '2', role: 'Rusher 1', desc: 'Tatsuya dash through front entrance, deploy 0.15s sit-down gloo wall at bottom of stairs.' },
+            { step: '3', role: 'Rusher 2', desc: 'Simultaneous flank from outside wooden ladder or side window.' },
+            { step: '4', role: 'Anchor', desc: 'Lobs flashbang up stairwell right before rushers advance.' }
+          ],
+          defensiveHold: [
+            'Player 1 (Roof Marksman): Head-glitch broken roof ridge with Marksman rifle covering 200m field.',
+            'Player 2 (Close-Quarter Rusher): Crouched under staircase crevice with shotgun to catch blind sprinters.',
+            'Player 3 (Second Floor Window): Watches side ladder and perimeter approach.',
+            'Player 4 (Support): Drops landmine on 3rd stair step and holds 2nd floor hallway.'
+          ],
+          commsScript: 'L-Shape roof tagged 140! Wall-bang the wooden door with M82B! Two-man breach now, flash the stairs!'
+        },
+        {
+          id: 'god_compound',
+          category: 'multi_story',
+          name: 'God Compound / Central Fortress',
+          regional: 'Bermuda Mansion, Big House, Central Fortress',
+          icon: '🏰',
+          accent: 'purple',
+          hotspots: 'Peak Center, Pochinok Crossroads, Sentosa Villa, Brasilia Heights',
+          layout: 'High perimeter concrete wall with 2 metal gates, central 2-story luxury mansion, detached private vehicle garage, and open inner courtyard.',
+          grenade: {
+            cookTime: '2.5 Seconds',
+            angle: 'Lob over perimeter wall corner at 60° elevation.',
+            trajectory: 'Air-burst grenade detonates 2 meters above front door courtyard.',
+            impact: 'Clears gloo walls and destroys parked vehicles holding the courtyard.'
+          },
+          breach: [
+            { step: '1', role: 'Convoy Driver', desc: 'Ram pickup truck / Jeep into perimeter gloo wall for instant barricade breach.' },
+            { step: '2', role: 'Assaulter 1 & 2', desc: '2-Man entry through side garage door while deploying horizontal gloo tunnel.' },
+            { step: '3', role: 'Assaulter 3 & 4', desc: 'Breach main entrance under cover of cluster flashbangs.' },
+            { step: '4', role: 'Overwatch', desc: 'Climb garage roof to secure high ground over the inner compound.' }
+          ],
+          defensiveHold: [
+            '2-2 Split Structure: 2 players in main mansion upper floor, 2 players holding garage roof.',
+            'Vehicle Barrier: Park Jeep sideways across courtyard doorway as indestructible bullet shield.',
+            'Crossfire Lines: Garage roof and mansion 2nd floor create a 90° lethal kill zone across the courtyard.'
+          ],
+          commsScript: 'Convoy ramming God Compound east gate! Pop two gloos, 2-2 split push! Clear the garage first, then push the main house!'
+        },
+        {
+          id: 'three_story',
+          category: 'multi_story',
+          name: 'Three-Story Sniper Tower / Water Tower',
+          regional: 'Tin-Manzil, Sniper Tower, Pochinok Tower',
+          icon: '🗼',
+          accent: 'rose',
+          hotspots: 'Pochinok, Clock Tower, Katulistiwa, Cape Town',
+          layout: 'Ultra-narrow vertical spiral staircase spanning 3 levels with 360° panoramic viewing slits on the 3rd level.',
+          grenade: {
+            cookTime: '3.0 Seconds',
+            angle: 'Vertical upward lob through top floor window slit or 60m grenade launcher.',
+            trajectory: 'Direct detonation inside the tight 3rd floor compartment.',
+            impact: '100% squad wipe if multiple enemies are crammed in the small top room.'
+          },
+          breach: [
+            { step: '1', role: 'GOLDEN RULE', desc: 'NEVER rush up the spiral staircase! A single shotgun player can wipe 4 players in single file.' },
+            { step: '2', role: 'Gatekeep Hold', desc: 'Deploy 2 gloo walls blocking the bottom doorway. Trap the squad inside.' },
+            { step: '3', role: 'Long-Range Sniping', desc: 'Step back 60m with Marksman/Sniper rifles and pick their heads through the window slits.' },
+            { step: '4', role: 'Zone Pressure', desc: 'Wait for the zone to shrink; they will be forced to jump down and take 70+ fall damage.' }
+          ],
+          defensiveHold: [
+            'Player 1 (Top Sniper): 360° Marksman reconnaissance covering all rotations.',
+            'Player 2 (Shotgun Guard): Stationed on 2nd landing aiming directly down the spiral stairs with M1887.',
+            'Emergency Exit: Keep 1 gloo wall ready to drop on ground when leaping from 3rd floor during zone shifts.'
+          ],
+          commsScript: 'Do not push the tower stairs! Trap the bottom door with gloo walls! Step back 50m and sniper pick the windows!'
+        },
+        {
+          id: 'garage_barn',
+          category: 'industrial',
+          name: 'Garage House / Red Barn / Octagon',
+          regional: 'Garage Ghor, Lal Barn, Octagon Bay',
+          icon: '🚜',
+          accent: 'emerald',
+          hotspots: 'Mill Lower Dip, Rim Nam Village, Moathouse, Crossroads',
+          layout: 'Wide open double garage bay with ground vehicle lift and a steep wooden ramp leading to a narrow 2nd-floor catwalk railing.',
+          grenade: {
+            cookTime: '2.0 Seconds',
+            angle: 'Bank off the rear corrugated steel wall at 30° angle.',
+            trajectory: 'Ricochets off steel plate directly onto the elevated catwalk floor.',
+            impact: 'Knocks catwalk defenders head-glitching the upper railing.'
+          },
+          breach: [
+            { step: '1', role: 'Smoker', desc: 'Smoke the wide ground entrance to obscure lines of sight from catwalk.' },
+            { step: '2', role: 'Double Gloo Tunnel', desc: 'Deploy 2 horizontal gloo walls in tandem to create a safe corridor up the wooden ramp.' },
+            { step: '3', role: 'Flash Rush', desc: 'Throw flashbang onto catwalk railing before sprinting up ramp.' },
+            { step: '4', role: 'Rear Cut-off', desc: '1 player holds outside rear corner to intercept enemies dropping through back window.' }
+          ],
+          defensiveHold: [
+            'Catwalk Head-Glitch: Railing provides 80% body concealment while giving full vision of ground entrance.',
+            'Crossfire: 1 player on catwalk, 1 player behind ground vehicle stack creating vertical crossfire.',
+            'Drop-Down Flank: Defender can jump off catwalk behind attackers as they push the ramp.'
+          ],
+          commsScript: 'Garage catwalk occupied! Smoke the bay, drop horizontal gloos, flash the ramp, and push the head-glitch!'
+        },
+        {
+          id: 'cement_warehouse',
+          category: 'industrial',
+          name: 'Cement Warehouse / Mill Hangar',
+          regional: 'Godown, Factory Bay, Mill Hangar',
+          icon: '🏭',
+          accent: 'blue',
+          hotspots: 'Mill, Shipyard, Factory, Hangar, Lumber Mill',
+          layout: 'Massive cavernous industrial hangar filled with multi-stacked steel shipping containers, high iron catwalk beams, and 4 large sliding vehicle doors.',
+          grenade: {
+            cookTime: '2.4 Seconds',
+            angle: 'Bounce off steel shipping container corner into container gaps.',
+            trajectory: 'Ricochets into the 2m blind gap between stacked containers.',
+            impact: 'Wipes players healing or ratting in the narrow container alleys.'
+          },
+          breach: [
+            { step: '1', role: 'Container Overwatch', desc: '1 player climbs container ladder to establish high-altitude angle over the whole floor.' },
+            { step: '2', role: 'Pre-Fire Aisle Sweep', desc: 'Pre-fire shotgun/SMG around container corners at head level before peeking.' },
+            { step: '3', role: 'Pincer Entry', desc: 'Enter simultaneously through North and South sliding doors to catch defenders in crossfire.' },
+            { step: '4', role: 'Airborne Leap', desc: 'Leap from container tops with shotgun to shoot defenders over their gloo walls.' }
+          ],
+          defensiveHold: [
+            'High-Ground Container Hold: Prone on top of 3-stack containers with Sniper/Marksman rifle.',
+            'Doorway Crossfire: Position players behind container corners covering all 4 sliding door entries.',
+            'Over-the-Wall Spray: Jump from container edges to shoot down into enemy gloo walls.'
+          ],
+          commsScript: 'Warehouse entry! Watch the high container tops! Pre-fire container corners, pincer from both sliding doors!'
+        }
+      ];
+    }
+
     renderPlaybookTab(container) {
+      if (!this.activePlaybookView) this.activePlaybookView = 'warmup';
+      if (!this.calloutActiveCard) this.calloutActiveCard = 'blue_double';
+      if (!this.calloutActiveFilter) this.calloutActiveFilter = 'all';
+
+      const allBuildings = this.getBuildingCalloutsData();
+      const filteredBuildings = this.calloutActiveFilter === 'all'
+        ? allBuildings
+        : allBuildings.filter(b => b.category === this.calloutActiveFilter);
+
+      const activeBuilding = allBuildings.find(b => b.id === this.calloutActiveCard) || allBuildings[0];
+
+      const currentStage = this.warmupTimer.stages[this.warmupTimer.currentStage] || this.warmupTimer.stages[0];
+      const completedCount = this.warmupTimer.stages.filter(s => s.completed).length;
+
       container.innerHTML = `
         <div class="space-y-6 animate-fade-in">
-          <div class="cyber-panel p-4 rounded-xl border border-amber-500/30">
-            <h3 class="text-base font-heading font-bold text-white uppercase">Pre-Scrim Warm-Up Protocols</h3>
-            <p class="text-xs text-slate-400">Never play an official tournament match cold.</p>
+          <!-- TOP PLAYBOOK CYBER BANNER -->
+          <div class="cyber-panel p-5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#1e1308] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">📜</span>
+                <h3 class="text-lg font-heading font-black text-white uppercase tracking-wider">
+                  Pre-Scrim Warmup Station & Pro Callouts Dictionary
+                </h3>
+                <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/50 text-[10px] font-bold">
+                  TOURNAMENT PRIMED
+                </span>
+              </div>
+              <p class="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                Championship performance is built 15 minutes before the match starts. Activate your neuromuscular reflexes, calibrate your drag flicks, and master pro compound breach protocols.
+              </p>
+            </div>
+
+            <!-- View Switcher Tabs -->
+            <div class="flex items-center gap-2 bg-slate-950/90 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              <button class="pb-nav-btn ${this.activePlaybookView === 'warmup' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="warmup">
+                <span>⏱️</span> 15-Min Warmup Station
+              </button>
+              <button class="pb-nav-btn ${this.activePlaybookView === 'callouts' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="callouts">
+                <span>🏢</span> Building Callouts (6)
+              </button>
+              <button class="pb-nav-btn ${this.activePlaybookView === 'mindset' ? 'active bg-amber-600 text-black font-black shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white'} px-3.5 py-2 rounded-lg text-xs font-sub font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all" data-view="mindset">
+                <span>🧠</span> Anti-Tilt Protocol
+              </button>
+            </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
-              <div class="text-amber-400 font-sub font-bold text-xs uppercase mb-1">15-Min Quick Activation</div>
-              <ul class="space-y-2 text-slate-300 list-disc list-inside">
-                <li>0:00 - 4:00: Hand & wrist stretches.</li>
-                <li>4:00 - 9:00: Training ground 50m recoil sprays.</li>
-                <li>9:00 - 15:00: 1 Fast TDM match.</li>
-              </ul>
+          <!-- ========================================================= -->
+          <!-- VIEW 1: 15-MINUTE PRE-SCRIM WARMUP STATION -->
+          <!-- ========================================================= -->
+          ${this.activePlaybookView === 'warmup' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- LIVE MULTI-STAGE WARMUP TIMER -->
+              <div class="cyber-panel p-6 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#181005] to-slate-950 shadow-2xl relative overflow-hidden">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-slate-800 pb-6">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="w-3 h-3 rounded-full ${this.warmupTimer.active ? 'bg-amber-400 animate-ping' : 'bg-slate-500'}"></span>
+                      <span class="text-xs font-sub font-bold text-amber-400 uppercase tracking-widest">
+                        ${this.warmupTimer.active ? 'WARMUP IN PROGRESS • MUSCLE ACTIVATION' : 'STANDBY • READY TO ACTIVATE'}
+                      </span>
+                    </div>
+                    <h4 class="text-xl font-heading font-black text-white uppercase tracking-wider mt-1 flex items-center gap-2">
+                      <span>${currentStage.icon}</span> ${currentStage.title}
+                      <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">
+                        STAGE ${this.warmupTimer.currentStage + 1} OF 4
+                      </span>
+                    </h4>
+                    <p class="text-xs text-slate-300 mt-1 max-w-xl">
+                      ${currentStage.desc}
+                    </p>
+                  </div>
+
+                  <!-- Timer & Action Buttons -->
+                  <div class="flex items-center gap-4">
+                    <div class="bg-slate-950 px-6 py-3 rounded-2xl border-2 ${this.warmupTimer.active ? 'border-amber-400 shadow-amber-500/20' : 'border-slate-800'} text-center shadow-xl">
+                      <div class="text-[10px] font-sub uppercase font-bold text-slate-400">Stage Countdown</div>
+                      <div id="warmupTimeDisplay" class="text-3xl lg:text-4xl font-mono font-black text-white tracking-widest mt-0.5">
+                        ${this.formatClockTime(this.warmupTimer.timeLeft)}
+                      </div>
+                      <div class="text-[10px] font-sub text-amber-400 font-bold mt-0.5">Target: ${Math.floor(currentStage.duration/60)} Minutes</div>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                      <button id="warmupToggleBtn" class="px-4 py-2 rounded-xl ${this.warmupTimer.active ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'} text-white font-sub font-bold uppercase text-xs tracking-wider shadow-lg flex items-center gap-1.5 transition-all">
+                        ${this.warmupTimer.active ? '<span>⏸️</span> Pause Warmup' : '<span>▶️</span> Start Stage Timer'}
+                      </button>
+                      <div class="flex items-center gap-2">
+                        <button id="warmupPrevBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Previous Stage">
+                          ⏮️ Prev
+                        </button>
+                        <button id="warmupNextBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Next Stage">
+                          Next ⏭️
+                        </button>
+                        <button id="warmupResetBtn" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-sub font-bold transition-all" title="Reset Stage Timer">
+                          🔄 Reset
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 4-Stage Progress Bar -->
+                <div class="mt-5 space-y-2">
+                  <div class="flex justify-between items-center text-xs font-sub">
+                    <span class="text-slate-400 uppercase font-bold">Overall Activation Progress:</span>
+                    <span class="text-amber-400 font-mono font-bold">${completedCount} / 4 Stages Done (${Math.round((completedCount/4)*100)}%)</span>
+                  </div>
+                  <div class="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden flex border border-slate-800">
+                    ${this.warmupTimer.stages.map((s, idx) => `
+                      <div class="h-full transition-all duration-300 ${s.completed ? 'bg-amber-400' : idx === this.warmupTimer.currentStage ? 'bg-amber-600 animate-pulse' : 'bg-slate-800'}" style="width: 25%"></div>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4 GUIDED STAGE CHECKLIST CARDS -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${this.warmupTimer.stages.map((stage, idx) => `
+                  <div class="p-5 rounded-2xl border transition-all cursor-pointer ${idx === this.warmupTimer.currentStage ? 'bg-amber-950/20 border-amber-500/50 shadow-lg ring-1 ring-amber-400/40' : stage.completed ? 'bg-slate-900/90 border-emerald-500/40' : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'}" data-stage-idx="${idx}">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="flex items-center gap-3">
+                        <button class="stage-check-btn w-6 h-6 rounded-lg border flex items-center justify-center text-xs transition-all ${stage.completed ? 'bg-emerald-500 border-emerald-400 text-black font-black' : 'border-slate-700 bg-slate-900 text-transparent hover:border-slate-500'}" data-check-idx="${idx}">
+                          ✓
+                        </button>
+                        <div>
+                          <div class="text-[10px] font-sub uppercase font-bold ${idx === this.warmupTimer.currentStage ? 'text-amber-400' : 'text-slate-500'}">
+                            Stage ${idx + 1} • ${Math.floor(stage.duration / 60)} Minutes
+                          </div>
+                          <h5 class="text-sm font-heading font-black text-white flex items-center gap-1.5 mt-0.5">
+                            <span>${stage.icon}</span> ${stage.title}
+                          </h5>
+                        </div>
+                      </div>
+
+                      <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold ${stage.completed ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : idx === this.warmupTimer.currentStage ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'bg-slate-900 text-slate-500'}">
+                        ${stage.completed ? 'COMPLETED ✅' : idx === this.warmupTimer.currentStage ? 'ACTIVE 🔥' : 'UPCOMING'}
+                      </span>
+                    </div>
+
+                    <p class="text-xs text-slate-300 mt-3 leading-relaxed">
+                      ${stage.desc}
+                    </p>
+
+                    <div class="mt-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] text-amber-300/90 flex items-start gap-2">
+                      <span class="text-xs shrink-0">💡</span>
+                      <div><strong>Pro Tip:</strong> ${stage.proTip}</div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+
+              <!-- TOURNAMENT PRIMED ACHIEVEMENT TROPHY CARD -->
+              <div class="cyber-panel p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-slate-950 via-[#1b1206] to-slate-950 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl shadow-lg shadow-amber-950">
+                    🏆
+                  </div>
+                  <div>
+                    <h5 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      Tournament Primed Discipline Tracker
+                      <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">
+                        STREAK: ${this.warmupTimer.streak} DAYS
+                      </span>
+                    </h5>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Never enter Discord scrims cold. Complete all 4 stages daily to build automatic muscle memory.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                  <button id="claimWarmupStreakBtn" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-sub font-black uppercase text-xs rounded-xl tracking-wider shadow-lg transition-transform hover:scale-105">
+                    Mark All Done & Claim Streak 🔥
+                  </button>
+                  <button id="resetWarmupStreakBtn" class="px-3 py-2 bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white font-sub text-xs rounded-xl transition-all" title="Reset Daily Streak">
+                    Reset
+                  </button>
+                </div>
+              </div>
             </div>
-            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
-              <div class="text-primary font-sub font-bold text-xs uppercase mb-1">30-Min Pro Standard</div>
-              <ul class="space-y-2 text-slate-300 list-disc list-inside">
-                <li>0:00 - 10:00: Jiggle & crouch-fire muscle memory.</li>
-                <li>10:00 - 20:00: Sit-down gloo wall / combo drills.</li>
-                <li>20:00 - 30:00: IGL map & drop-spot alignment.</li>
-              </ul>
+          ` : ''}
+
+          <!-- ========================================================= -->
+          <!-- VIEW 2: PRO BUILDING & COMPOUND CALLOUT FLASHCARDS -->
+          <!-- ========================================================= -->
+          ${this.activePlaybookView === 'callouts' ? `
+            <div class="space-y-6 animate-fade-in">
+              <!-- Sub-header & Category Filters -->
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                <div>
+                  <h4 class="text-base font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    🏢 Pro Compound & Building Callouts Directory
+                  </h4>
+                  <p class="text-xs text-slate-400 mt-0.5">
+                    Select a building to view official pro callouts, high-risk grenade trajectories, and anti-staircase breach protocols:
+                  </p>
+                </div>
+
+                <!-- Category Filters -->
+                <div class="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button class="callout-filter-btn ${this.calloutActiveFilter === 'all' ? 'active bg-amber-500 text-black font-black' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase transition-all" data-filter="all">
+                    All (6)
+                  </button>
+                  <button class="callout-filter-btn ${this.calloutActiveFilter === 'classics' ? 'active bg-amber-500 text-black font-black' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase transition-all" data-filter="classics">
+                    Bermuda Classics
+                  </button>
+                  <button class="callout-filter-btn ${this.calloutActiveFilter === 'multi_story' ? 'active bg-amber-500 text-black font-black' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase transition-all" data-filter="multi_story">
+                    Multi-Story
+                  </button>
+                  <button class="callout-filter-btn ${this.calloutActiveFilter === 'industrial' ? 'active bg-amber-500 text-black font-black' : 'text-slate-400 hover:text-white'} px-3 py-1.5 rounded-lg text-[11px] font-sub font-bold uppercase transition-all" data-filter="industrial">
+                    Industrial
+                  </button>
+                </div>
+              </div>
+
+              <!-- 6 Building Selectable Cards Grid -->
+              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                ${filteredBuildings.map(b => `
+                  <button class="callout-card-btn p-3.5 rounded-xl border text-left transition-all ${b.id === activeBuilding.id ? 'bg-amber-950/40 border-amber-400 ring-2 ring-amber-400/50 shadow-xl' : 'bg-slate-900/80 border-slate-800 hover:border-slate-600'}" data-card-id="${b.id}">
+                    <div class="text-2xl mb-1.5">${b.icon}</div>
+                    <div class="text-xs font-heading font-black text-white truncate">${b.name.split('(')[0]}</div>
+                    <div class="text-[10px] text-amber-400 font-sub truncate mt-0.5">${b.regional.split(',')[0]}</div>
+                  </button>
+                `).join('')}
+              </div>
+
+              <!-- ACTIVE BUILDING DETAILED BLUEPRINT DOSSIER -->
+              <div class="cyber-panel p-6 rounded-2xl border border-amber-500/40 bg-gradient-to-b from-slate-950 via-[#150d03] to-slate-950 space-y-6 shadow-2xl">
+                <!-- Dossier Header -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+                  <div class="flex items-center gap-3">
+                    <div class="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl shadow-lg">
+                      ${activeBuilding.icon}
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h4 class="text-xl font-heading font-black text-white uppercase tracking-wide">
+                          ${activeBuilding.name}
+                        </h4>
+                        <span class="cyber-badge bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px]">
+                          PRO CALLOUT
+                        </span>
+                      </div>
+                      <div class="text-xs text-amber-400 font-sub font-bold mt-0.5">
+                        Regional Names: <span class="text-slate-300">${activeBuilding.regional}</span>
+                      </div>
+                      <div class="text-[11px] text-slate-400 font-sub mt-0.5">
+                        Primary Map POIs: <span class="text-slate-200 font-bold">${activeBuilding.hotspots}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 max-w-md text-xs text-slate-300 leading-relaxed">
+                    <strong>Structure Layout:</strong> ${activeBuilding.layout}
+                  </div>
+                </div>
+
+                <!-- 2-Column Tactics: High-Risk Grenade vs 4-Man Breach -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <!-- Column 1: Grenade Trajectory -->
+                  <div class="p-5 rounded-xl bg-slate-900/90 border border-rose-500/30 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div class="flex items-center gap-2">
+                        <span class="text-lg">💣</span>
+                        <h5 class="text-xs font-heading font-black text-rose-400 uppercase tracking-wider">
+                          High-Risk Grenade Trajectory & Wipe Angle
+                        </h5>
+                      </div>
+                      <span class="px-2.5 py-0.5 rounded bg-rose-950 border border-rose-500/40 text-rose-300 text-[10px] font-mono font-bold">
+                        Cook: ${activeBuilding.grenade.cookTime}
+                      </span>
+                    </div>
+
+                    <div class="space-y-2 text-xs">
+                      <div>
+                        <span class="text-slate-400 font-sub uppercase font-bold text-[10px]">Throw Angle & Position:</span>
+                        <div class="text-white font-bold mt-0.5">${activeBuilding.grenade.angle}</div>
+                      </div>
+                      <div>
+                        <span class="text-slate-400 font-sub uppercase font-bold text-[10px]">Bounce Trajectory:</span>
+                        <div class="text-slate-300 mt-0.5 leading-relaxed">${activeBuilding.grenade.trajectory}</div>
+                      </div>
+                      <div class="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-200 text-[11px] leading-relaxed">
+                        <strong>Lethal Impact:</strong> ${activeBuilding.grenade.impact}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Column 2: 4-Man Breach Protocol -->
+                  <div class="p-5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div class="flex items-center gap-2">
+                        <span class="text-lg">⚡</span>
+                        <h5 class="text-xs font-heading font-black text-cyan-400 uppercase tracking-wider">
+                          4-Man Anti-Staircase Breach Protocol
+                        </h5>
+                      </div>
+                      <span class="px-2.5 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono font-bold">
+                        Synchronized
+                      </span>
+                    </div>
+
+                    <div class="space-y-2">
+                      ${activeBuilding.breach.map(b => `
+                        <div class="flex items-start gap-2.5 text-xs bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
+                          <span class="w-5 h-5 rounded bg-cyan-500/20 text-cyan-400 font-mono font-bold flex items-center justify-center shrink-0 text-[10px]">
+                            ${b.step}
+                          </span>
+                          <div>
+                            <strong class="text-white">${b.role}:</strong>
+                            <span class="text-slate-300"> ${b.desc}</span>
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 360° Defensive Hold & Voice Comms -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <!-- Defensive Hold List -->
+                  <div class="lg:col-span-2 p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-base">🛡️</span>
+                      <h5 class="text-xs font-heading font-bold text-amber-400 uppercase tracking-wider">
+                        360° Interior Defensive Hold & Crossfire Lines
+                      </h5>
+                    </div>
+                    <ul class="space-y-1.5 text-xs text-slate-300">
+                      ${activeBuilding.defensiveHold.map(h => `
+                        <li class="flex items-start gap-2 border-b border-slate-800/60 pb-1 last:border-0">
+                          <span class="text-amber-400">▹</span>
+                          <span>${h}</span>
+                        </li>
+                      `).join('')}
+                    </ul>
+                  </div>
+
+                  <!-- IGL Voice Comms Script -->
+                  <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between space-y-3">
+                    <div>
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-base">🎙️</span>
+                        <h5 class="text-xs font-heading font-bold text-purple-400 uppercase tracking-wider">
+                          IGL Comms Voice Script
+                        </h5>
+                      </div>
+                      <div class="text-xs italic text-purple-200 bg-slate-950 p-2.5 rounded border border-purple-500/30 leading-relaxed">
+                        "${activeBuilding.commsScript}"
+                      </div>
+                    </div>
+                    <button class="copy-building-comms-btn px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-sub font-bold uppercase transition-all" data-comms="${activeBuilding.commsScript}">
+                      Copy Comms Script 📋
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="cyber-panel p-4 rounded-xl border border-slate-800">
-              <div class="text-rose-400 font-sub font-bold text-xs uppercase mb-1">45-Min Tournament Boot Camp</div>
-              <ul class="space-y-2 text-slate-300 list-disc list-inside">
-                <li>Full sensitivity calibration & reflex gym test.</li>
-                <li>Nade bounce cooking & smoke wall paths.</li>
-                <li>2 Custom room scrims against friendly clans.</li>
-              </ul>
+          ` : ''}
+
+          <!-- ========================================================= -->
+          <!-- VIEW 3: ESPORTS MINDSET & ANTI-TILT PROTOCOLS -->
+          <!-- ========================================================= -->
+          ${this.activePlaybookView === 'mindset' ? `
+            <div class="space-y-6 animate-fade-in">
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="cyber-panel p-5 rounded-xl border border-slate-800 space-y-3">
+                  <div class="text-2xl">🧘</div>
+                  <h4 class="text-sm font-heading font-black text-white uppercase">The 5-Second Reset Rule</h4>
+                  <p class="text-xs text-slate-300 leading-relaxed">
+                    When you make a mistake or get knocked, you have exactly 5 seconds to call out enemy location and HP. Zero shrieking, zero complaining. The round is not over.
+                  </p>
+                  <div class="text-[11px] text-amber-400 font-mono">Rule: Complain in VOD review, not during the round.</div>
+                </div>
+
+                <div class="cyber-panel p-5 rounded-xl border border-slate-800 space-y-3">
+                  <div class="text-2xl">🔄</div>
+                  <h4 class="text-sm font-heading font-black text-white uppercase">Next Game Mentality</h4>
+                  <p class="text-xs text-slate-300 leading-relaxed">
+                    Tournaments are 6 matches long. Scoring zero points in Match 1 does not mean you cannot win. EVOS Phoenix scored 4 points in Match 1 and still took the World Championship trophy.
+                  </p>
+                  <div class="text-[11px] text-cyan-400 font-mono">Rule: Clean slate every 20 minutes.</div>
+                </div>
+
+                <div class="cyber-panel p-5 rounded-xl border border-slate-800 space-y-3">
+                  <div class="text-2xl">🤫</div>
+                  <h4 class="text-sm font-heading font-black text-white uppercase">Post-Knock Silence</h4>
+                  <p class="text-xs text-slate-300 leading-relaxed">
+                    If you die, mute your mic unless called upon. Audio priority belongs to the survivors listening for directional footstep frequencies and reload sounds.
+                  </p>
+                  <div class="text-[11px] text-rose-400 font-mono">Rule: Dead players do not IGL.</div>
+                </div>
+
+                <div class="cyber-panel p-5 rounded-xl border border-slate-800 space-y-3">
+                  <div class="text-2xl">🫁</div>
+                  <h4 class="text-sm font-heading font-black text-white uppercase">Box Breathing Clutch</h4>
+                  <p class="text-xs text-slate-300 leading-relaxed">
+                    Adrenaline causes finger micro-tremors in 1v1 situations. Inhale 4s, hold 4s, exhale 4s. Lowers heart rate by 12 BPM in 30 seconds and restores drag accuracy.
+                  </p>
+                  <div class="text-[11px] text-emerald-400 font-mono">Rule: Calm hands win 1v1 clutches.</div>
+                </div>
+              </div>
             </div>
-          </div>
+          ` : ''}
         </div>
       `;
+
+      this.bindPlaybookEvents(container);
+    }
+
+    bindPlaybookEvents(container) {
+      // 1. Playbook View Switcher (Warmup / Callouts / Mindset)
+      container.querySelectorAll('.pb-nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const view = btn.getAttribute('data-view');
+          if (view) {
+            this.activePlaybookView = view;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 2. Warmup Timer Controls
+      const toggleBtn = container.querySelector('#warmupToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          if (this.warmupTimer.active) {
+            this.pauseWarmupTimer();
+          } else {
+            this.startWarmupTimer();
+          }
+        });
+      }
+
+      const prevBtn = container.querySelector('#warmupPrevBtn');
+      if (prevBtn) {
+        prevBtn.addEventListener('click', () => this.skipWarmupStage(-1));
+      }
+
+      const nextBtn = container.querySelector('#warmupNextBtn');
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => this.skipWarmupStage(1));
+      }
+
+      const resetBtn = container.querySelector('#warmupResetBtn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => this.resetWarmupTimer());
+      }
+
+      // 3. Stage Checklist & Cards
+      container.querySelectorAll('.stage-check-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.getAttribute('data-check-idx'), 10);
+          if (!isNaN(idx)) this.toggleWarmupStageComplete(idx);
+        });
+      });
+
+      container.querySelectorAll('[data-stage-idx]').forEach(card => {
+        card.addEventListener('click', () => {
+          const idx = parseInt(card.getAttribute('data-stage-idx'), 10);
+          if (!isNaN(idx)) {
+            this.warmupTimer.currentStage = idx;
+            this.warmupTimer.timeLeft = this.warmupTimer.stages[idx].duration;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 4. Claim Warmup Streak Button
+      const claimBtn = container.querySelector('#claimWarmupStreakBtn');
+      if (claimBtn) {
+        claimBtn.addEventListener('click', () => this.claimWarmupStreak());
+      }
+
+      const resetStreakBtn = container.querySelector('#resetWarmupStreakBtn');
+      if (resetStreakBtn) {
+        resetStreakBtn.addEventListener('click', () => {
+          if (confirm('Reset your daily warmup streak to 0?')) {
+            this.resetWarmupStreak();
+          }
+        });
+      }
+
+      // 5. Building Callouts Filter Buttons
+      container.querySelectorAll('.callout-filter-btn').forEach(fBtn => {
+        fBtn.addEventListener('click', () => {
+          const filter = fBtn.getAttribute('data-filter');
+          if (filter) {
+            this.calloutActiveFilter = filter;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 6. Building Callouts Card Selection
+      container.querySelectorAll('.callout-card-btn').forEach(cBtn => {
+        cBtn.addEventListener('click', () => {
+          const cardId = cBtn.getAttribute('data-card-id');
+          if (cardId) {
+            this.calloutActiveCard = cardId;
+            this.renderTabContent();
+          }
+        });
+      });
+
+      // 7. Copy Building Comms Script Button
+      container.querySelectorAll('.copy-building-comms-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const comms = btn.getAttribute('data-comms');
+          if (comms && navigator.clipboard) {
+            navigator.clipboard.writeText(comms).then(() => {
+              const orig = btn.textContent;
+              btn.textContent = 'Copied Comms! ✅';
+              setTimeout(() => { btn.textContent = orig; }, 1500);
+            });
+          }
+        });
+      });
     }
 
 
