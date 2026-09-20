@@ -13109,9 +13109,14 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                       <span class="text-[10px] font-sub uppercase font-bold text-slate-400">Match Map</span>
                       <div class="text-xl font-mono font-black text-emerald-300 mt-1">${this.roomDispatcher.map}</div>
                     </div>
-                    <button id="copySquadForwardBtn" class="mt-3 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-sub text-xs font-bold uppercase transition-all">
-                      Forward to Squad 📱
-                    </button>
+                    <div class="mt-3 flex flex-col gap-1.5">
+                      <button id="copySquadForwardBtn" class="w-full px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-sub text-xs font-bold uppercase transition-all flex items-center justify-center gap-1">
+                        <span>Copy Broadcast 📋</span>
+                      </button>
+                      <button id="shareWhatsAppRoomBtn" class="w-full px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white font-sub text-xs font-bold uppercase transition-all flex items-center justify-center gap-1 shadow">
+                        <span>WhatsApp Direct 💬</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -13525,10 +13530,20 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           const msg = `🚨 *SCRIM ROOM IS LIVE!*\n🔑 Room ID: *${this.roomDispatcher.roomId}*\n🔒 Pass: *${this.roomDispatcher.pass}*\n📍 Our Slot: *Slot ${this.roomDispatcher.slot}*\n🗺️ Map: *${this.roomDispatcher.map}*\n⚠️ Enter immediately before 2-minute room lock!`;
           if (navigator.clipboard) {
             navigator.clipboard.writeText(msg).then(() => {
-              copyForwardBtn.textContent = 'Forward Copied! 📱';
-              setTimeout(() => { copyForwardBtn.textContent = 'Forward to Squad 📱'; }, 1500);
+              copyForwardBtn.textContent = 'Forward Copied! 📋';
+              setTimeout(() => { copyForwardBtn.textContent = 'Copy Broadcast 📋'; }, 1500);
             });
           }
+        });
+      }
+
+      const shareWhatsAppBtn = container.querySelector('#shareWhatsAppRoomBtn');
+      if (shareWhatsAppBtn) {
+        shareWhatsAppBtn.addEventListener('click', () => {
+          const msg = `🚨 *UNDERDOG SCRIMS ROOM PASS ALERT* 🚨\n\n🔑 *Room ID:* ${this.roomDispatcher.roomId}\n🔒 *Password:* ${this.roomDispatcher.pass}\n🎯 *Our Slot:* Slot #${this.roomDispatcher.slot}\n🗺️ *Map:* ${this.roomDispatcher.map}\n⏳ *Time Remaining:* 2 MINUTES ONLY! ENTER NOW!`;
+          const waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(msg);
+          window.open(waUrl, '_blank');
+          this.playRadioBeep();
         });
       }
 
@@ -17295,6 +17310,134 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
       });
     }
 
+    generateHolographicCardPNG(user) {
+      if (!user) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1200;
+      canvas.height = 675;
+      const ctx = canvas.getContext('2d');
+
+      // Background Titanium Gradient
+      const grad = ctx.createLinearGradient(0, 0, 1200, 675);
+      grad.addColorStop(0, '#040711');
+      grad.addColorStop(0.5, '#0a1224');
+      grad.addColorStop(1, '#050a16');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 1200, 675);
+
+      // Cyber Grid Lines
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 1200; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 675); ctx.stroke();
+      }
+      for (let y = 0; y < 675; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1200, y); ctx.stroke();
+      }
+
+      // Card Outer Neon Border
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 25;
+      ctx.strokeRect(40, 40, 1120, 595);
+      ctx.shadowBlur = 0;
+
+      // Header Banner
+      ctx.fillStyle = '#00f0ff';
+      ctx.font = '900 26px "Chakra Petch", sans-serif';
+      ctx.fillText('⚡ UNDERDOG ESPORTS ACADEMY // TIER-1 COMPETITOR PASS', 70, 95);
+
+      ctx.fillStyle = '#10b981';
+      ctx.font = '700 16px "Rajdhani", sans-serif';
+      ctx.fillText('VERIFIED CLOUD IDENTITY 🟢 • ZERO LATENCY CERTIFIED', 70, 125);
+
+      // Avatar Frame
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.6)';
+      ctx.lineWidth = 3;
+      ctx.fillRect(70, 160, 200, 200);
+      ctx.strokeRect(70, 160, 200, 200);
+
+      // Emoji Avatar
+      ctx.font = '100px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(user.avatar || '⚡', 170, 295);
+      ctx.textAlign = 'left';
+
+      // Player IGN & Clan Tag
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 52px "Chakra Petch", sans-serif';
+      ctx.fillText(`[${user.tag || 'UDG'}] ${user.ign || 'Competitor'}`, 310, 220);
+
+      // Player UID
+      ctx.fillStyle = '#00f0ff';
+      ctx.font = '700 24px "Rajdhani", sans-serif';
+      ctx.fillText(`UID: ${user.uid || '10928415'} • ${user.tier || 'Master Fragger'}`, 310, 260);
+
+      // Role Pill
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.fillRect(310, 285, 340, 50);
+      ctx.strokeRect(310, 285, 340, 50);
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '800 22px "Rajdhani", sans-serif';
+      ctx.fillText(`DUTY: ${(user.role || 'Rusher / Fragger').toUpperCase()}`, 330, 318);
+
+      // Barcode & Telemetry Strip
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(70, 400, 1060, 2);
+
+      // Data Grid
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 16px "Rajdhani", sans-serif';
+      ctx.fillText('ACCOUNT EMAIL ID', 70, 440);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 20px "Courier New", monospace';
+      ctx.fillText(user.email || 'player@underdog.gg', 70, 470);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 16px "Rajdhani", sans-serif';
+      ctx.fillText('TOURNAMENT FORMAT', 450, 440);
+      ctx.fillStyle = '#00f0ff';
+      ctx.font = '700 20px "Courier New", monospace';
+      ctx.fillText('FFWS 12-PT / BGIS TIER-1', 450, 470);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 16px "Rajdhani", sans-serif';
+      ctx.fillText('CERTIFIED BY', 820, 440);
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '700 20px "Chakra Petch", sans-serif';
+      ctx.fillText('HEAD COACH DUKER 👑', 820, 470);
+
+      // Micro Barcode at bottom
+      for (let i = 0; i < 60; i++) {
+        const x = 70 + i * 18;
+        const w = (i % 3 === 0) ? 6 : (i % 2 === 0) ? 3 : 1;
+        ctx.fillStyle = '#00f0ff';
+        ctx.fillRect(x, 525, w, 45);
+      }
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = '600 14px "Rajdhani", sans-serif';
+      ctx.fillText('UDG-OFFICIAL-TOURNAMENT-ID-SECURED-BY-SUPABASE-CLOUD • ' + new Date().toLocaleDateString(), 70, 600);
+
+      // Download Trigger
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `${user.ign || 'Player'}_Underdog_Esports_Pass.png`;
+      a.click();
+
+      const btnText = document.getElementById('downloadHoloCardBtnText');
+      if (btnText) {
+        btnText.textContent = 'PASS DOWNLOADED! 🎨✅';
+        setTimeout(() => { btnText.textContent = 'Download Holographic Gamer Pass (.PNG)'; }, 2500);
+      }
+      this.playRadioBeep();
+    }
+
     showProfileModal() {
       if (!this.currentUser) return;
 
@@ -17349,6 +17492,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
 
           <!-- Actions -->
           <div class="space-y-2 pt-2">
+            <button id="downloadHoloCardBtn" class="w-full py-2.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-amber-500 hover:from-cyan-400 hover:to-amber-400 text-black font-sub font-black text-xs uppercase rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-cyan-950/50 transform hover:scale-[1.01]">
+              <span>🎨</span>
+              <span id="downloadHoloCardBtnText">Download Holographic Gamer Pass (.PNG)</span>
+            </button>
             <button id="exportUserDataBtn" class="w-full py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-sub font-bold text-xs uppercase rounded-xl flex items-center justify-center gap-1.5 transition-colors">
               <span>💾</span>
               <span id="exportUserDataBtnText">Export My User Data (.JSON)</span>
@@ -17363,6 +17510,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
 
       document.getElementById('closeProfileModalBtn')?.addEventListener('click', () => {
         modal.remove();
+      });
+
+      document.getElementById('downloadHoloCardBtn')?.addEventListener('click', () => {
+        this.generateHolographicCardPNG(this.currentUser);
       });
 
       document.getElementById('exportUserDataBtn')?.addEventListener('click', () => {
