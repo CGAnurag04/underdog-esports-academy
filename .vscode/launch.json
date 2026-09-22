@@ -2,25 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "⚡ Launch Underdog Academy (Your Normal Chrome Profile)",
-      "type": "chrome",
-      "request": "launch",
-      "file": "${workspaceFolder}/frontend/index.html",
-      "userDataDir": false
-    },
-    {
-      "name": "🔑 Launch Cyberpunk Login (Your Normal Chrome Profile)",
-      "type": "chrome",
-      "request": "launch",
-      "file": "${workspaceFolder}/frontend/login.html",
-      "userDataDir": false
-    },
-    {
-      "name": "🌐 Run Backend Node.js Server",
+      "name": "⚡ Run Underdog Esports Academy (Starts Server & Opens Chrome)",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/backend/server.js",
-      "cwd": "${workspaceFolder}/backend"
+      "cwd": "${workspaceFolder}/backend",
+      "console": "integratedTerminal"
     }
   ]
 }

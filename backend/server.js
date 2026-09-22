@@ -86,4 +86,11 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📱 Mobile Phone (Same Wi-Fi): http://${ips[0]}:${PORT}`);
   }
   console.log('================================================================');
+
+  // Auto-launch default browser on developer machine
+  if (process.env.NO_AUTO_OPEN !== 'true') {
+    const { exec } = require('child_process');
+    const startCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+    exec(`${startCmd} http://localhost:${PORT}`);
+  }
 });
