@@ -6064,6 +6064,7 @@ this.ffSelectedLoadout = {
     }
 
     renderGameContext() {
+      this.syncGameButtons();
       const data = GAMES_DATA[this.activeGame] || GAMES_DATA.bgmi;
       const titleEl = document.getElementById('gameBannerTitle');
       const subEl = document.getElementById('gameBannerSubtitle');
