@@ -84,15 +84,63 @@
       }
     }
 
-    // --- REALTIME SQUAD TACTICAL ROOM ---
-    joinTacticalRoom(roomCode, onActionReceived) {
-      if (!this.client) return null;
+    // --- REALTIME SQUAD TACTICAL ROOM (COLLABORATIVE MULTIPLAYER) ---
+    async joinTacticalRoom(roomCode, onActionReceived, onRoomLoaded) {
+      if (!this.client) {
+        console.warn('Supabase client not connected. Running in offline room mode.');
+        return null;
+      }
+      const code = (roomCode || 'UDG1').trim().toUpperCase();
+      this.activeTacticalRoomCode = code;
+
       if (this.activeChannel) {
-        this.client.removeChannel(this.activeChannel);
+        try { this.client.removeChannel(this.activeChannel); } catch (e) {}
       }
 
-      const channelName = `squad_room_${roomCode.toUpperCase()}`;
-      console.log(`Connecting to Tactical Room: ${channelName}`);
+      // 1. Query public.tactical_rooms from cloud to restore existing briefing
+      try {
+        const { data, error } = await this.client
+          .from('tactical_rooms')
+          .select('*')
+          .eq('room_code', code)
+          .single();
+
+        if (!error && data) {
+          console.log('✅ Loaded tactical room from Supabase cloud:', data.room_code);
+          if (typeof onRoomLoaded === 'function') {
+            onRoomLoaded(data);
+          }
+        } else if (error && (error.code === 'PGRST116' || error.status === 406)) {
+          // Room row does not exist yet; initialize it
+          const wb = window.app?.whiteboard;
+          await this.client.from('tactical_rooms').upsert({
+            room_code: code,
+            room_name: 'Squad Briefing (' + code + ')',
+            map_name: wb?.currentMap || 'bermuda',
+            zone_phase: wb?.safeZone?.phase || 1,
+            safe_zone: {
+              cx: wb?.safeZone?.cx ?? 0.5,
+              cy: wb?.safeZone?.cy ?? 0.5,
+              r: wb?.safeZone?.r ?? 0.32
+            },
+            blue_zone: {
+              cx: wb?.safeZone?.blueCx ?? 0.5,
+              cy: wb?.safeZone?.blueCy ?? 0.5,
+              r: wb?.safeZone?.blueR ?? 0.44
+            },
+            tokens: [],
+            strokes: [],
+            last_action: 'room_created',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'room_code' });
+        }
+      } catch (err) {
+        console.warn('Tactical room cloud fetch note:', err.message);
+      }
+
+      // 2. Subscribe to Supabase Realtime Broadcast Channel
+      const channelName = `squad_room_${code}`;
+      console.log(`⚡ Connecting to Supabase Realtime Channel: ${channelName}`);
 
       this.activeChannel = this.client.channel(channelName, {
         config: { broadcast: { self: false } }
@@ -104,8 +152,32 @@
             onActionReceived(payload.payload);
           }
         })
+        .on('broadcast', { event: 'peer_joined' }, (payload) => {
+          const peer = payload.payload || {};
+          console.log('👤 Teammate connected to tactical briefing:', peer);
+          const ticker = document.getElementById('tacticalRoomActivityTicker');
+          if (ticker) {
+            ticker.textContent = `🟢 [${peer.role || 'Squad'}] ${peer.ign || 'Teammate'} connected!`;
+            ticker.className = 'text-[11px] font-mono text-emerald-300 animate-pulse';
+          }
+          if (window.app && typeof window.app.playRadioBeep === 'function') {
+            window.app.playRadioBeep();
+          }
+        })
         .subscribe((status) => {
-          console.log(`Tactical room [${roomCode}] status:`, status);
+          console.log(`Tactical room [${code}] subscription status:`, status);
+          if (status === 'SUBSCRIBED') {
+            const user = window.app?.currentUser || {};
+            this.activeChannel.send({
+              type: 'broadcast',
+              event: 'peer_joined',
+              payload: {
+                ign: user.ign || user.username || 'Recruit',
+                role: user.role || 'Player',
+                timestamp: Date.now()
+              }
+            }).catch(() => {});
+          }
         });
 
       return this.activeChannel;
@@ -113,23 +185,66 @@
 
     broadcastTacticalAction(actionType, data) {
       if (!this.activeChannel) return;
+      const user = window.app?.currentUser || {};
+      const payload = {
+        action: actionType,
+        data: data,
+        sender: user.ign || user.username || 'IGL / Teammate',
+        role: user.role || 'Operator',
+        timestamp: Date.now()
+      };
+
       this.activeChannel.send({
         type: 'broadcast',
         event: 'tactical_action',
-        payload: {
-          action: actionType,
-          data: data,
-          sender: window.app?.currentUser?.ign || 'Teammate',
-          timestamp: Date.now()
+        payload: payload
+      }).catch(err => console.warn('Tactical broadcast notice:', err.message));
+    }
+
+    saveTacticalRoomToCloud(roomCode, state) {
+      if (!this.client || !roomCode) return;
+      const code = roomCode.trim().toUpperCase();
+
+      if (this._roomSaveDebounce) clearTimeout(this._roomSaveDebounce);
+      this._roomSaveDebounce = setTimeout(async () => {
+        try {
+          const payload = {
+            room_code: code,
+            map_name: state.map || 'bermuda',
+            zone_phase: state.zonePhase || 1,
+            safe_zone: state.safeZone || { cx: 0.5, cy: 0.5, r: 0.32 },
+            blue_zone: state.blueZone || { cx: 0.5, cy: 0.5, r: 0.44 },
+            tokens: state.tokens || [],
+            strokes: state.strokes || [],
+            last_action: state.lastAction || 'update',
+            updated_at: new Date().toISOString()
+          };
+
+          const { error } = await this.client
+            .from('tactical_rooms')
+            .upsert(payload, { onConflict: 'room_code' });
+
+          if (!error) {
+            const dot = document.getElementById('tacticalCloudSyncDot');
+            if (dot) {
+              dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+              setTimeout(() => {
+                if (dot) dot.className = 'w-2 h-2 rounded-full bg-emerald-400/40';
+              }, 1200);
+            }
+          }
+        } catch (e) {
+          console.warn('Cloud save debounce warning:', e.message);
         }
-      }).catch(err => console.error('Broadcast tactical action error:', err));
+      }, 1000);
     }
 
     leaveTacticalRoom() {
       if (this.activeChannel && this.client) {
-        this.client.removeChannel(this.activeChannel);
+        try { this.client.removeChannel(this.activeChannel); } catch (e) {}
         this.activeChannel = null;
       }
+      this.activeTacticalRoomCode = null;
     }
 
     // --- REALTIME SCRIM LOBBY ---
@@ -1310,6 +1425,8 @@
       this.proOverlays = null;
       this.mapImages = {};
       this.mapStyle = 'satellite';
+      this.laserPings = [];
+      this._laserAnimReq = null;
       this.loadMapImages();
 
       this.initCanvasSize();
@@ -1376,11 +1493,14 @@
       }
     }
 
-    setMap(mapName) {
+    setMap(mapName, broadcast = true) {
       this.currentMap = mapName;
       this.activePreset = null;
       this.proOverlays = null;
-      this.clearAll();
+      this.clearAll(broadcast);
+      if (broadcast) {
+        this.broadcastLocalAction('map_change', { map: mapName });
+      }
     }
 
     setTool(tool) {
@@ -1415,6 +1535,236 @@
 
     renderPresetCard(preset) {
       // Bottom card removed from map section as requested by user
+    }
+
+    // --- REALTIME COLLABORATIVE ACTIONS (SUPABASE MULTIPLAYER) ---
+    broadcastLocalAction(actionType, data) {
+      const roomCode = window.underdogSupabase?.activeTacticalRoomCode;
+      if (!roomCode || !window.underdogSupabase) return;
+
+      window.underdogSupabase.broadcastTacticalAction(actionType, data);
+      window.underdogSupabase.saveTacticalRoomToCloud(roomCode, {
+        map: this.currentMap,
+        zonePhase: this.safeZone.phase,
+        safeZone: { cx: this.safeZone.cx, cy: this.safeZone.cy, r: this.safeZone.r },
+        blueZone: { cx: this.safeZone.blueCx, cy: this.safeZone.blueCy, r: this.safeZone.blueR },
+        tokens: this.userElements.filter(e => e.type === 'token'),
+        strokes: this.userElements,
+        lastAction: actionType
+      });
+    }
+
+    applyRemoteAction(payload) {
+      if (!payload || !payload.action) return;
+      const action = payload.action;
+      const data = payload.data;
+      const sender = payload.sender || 'Squad Mate';
+      const role = payload.role || 'Operator';
+
+      // Update live activity ticker in UI
+      const ticker = document.getElementById('tacticalRoomActivityTicker');
+      if (ticker) {
+        let desc = action;
+        if (action === 'stroke') desc = 'drew a tactical rotation path';
+        else if (action === 'token') desc = `deployed ${data.label || 'Player'} token`;
+        else if (action === 'utility') desc = `deployed ${data.utilityType || 'utility'} cover`;
+        else if (action === 'text') desc = `marked note: "${data.text || ''}"`;
+        else if (action === 'zone_shift') desc = `shifted safe zone (Phase ${data.phase || this.safeZone.phase})`;
+        else if (action === 'map_change') desc = `switched briefing map to ${data.map || ''}`;
+        else if (action === 'laser_ping') desc = 'pinged tactical objective 🎯';
+        else if (action === 'undo') desc = 'undid previous stroke';
+        else if (action === 'clear') desc = 'cleared whiteboard';
+
+        ticker.textContent = `⚡ [${role}] ${sender}: ${desc}`;
+        ticker.className = 'text-[11px] font-mono text-cyan-300 animate-pulse';
+      }
+
+      if (action === 'stroke') {
+        if (data && (data.points || data.fromNormX !== undefined)) {
+          this.userElements.push(data);
+          this.saveState(false);
+          this.redrawAll();
+        }
+      } else if (action === 'token') {
+        if (data) {
+          this.userElements.push(data);
+          this.saveState(false);
+          this.redrawAll();
+        }
+      } else if (action === 'utility') {
+        if (data) {
+          this.userElements.push(data);
+          this.saveState(false);
+          this.redrawAll();
+        }
+      } else if (action === 'text') {
+        if (data) {
+          this.userElements.push(data);
+          this.saveState(false);
+          this.redrawAll();
+        }
+      } else if (action === 'zone_shift') {
+        if (data) {
+          this.safeZone.phase = data.phase ?? this.safeZone.phase;
+          this.safeZone.cx = data.cx ?? this.safeZone.cx;
+          this.safeZone.cy = data.cy ?? this.safeZone.cy;
+          this.safeZone.r = data.r ?? this.safeZone.r;
+          this.safeZone.blueCx = data.blueCx ?? this.safeZone.blueCx;
+          this.safeZone.blueCy = data.blueCy ?? this.safeZone.blueCy;
+          this.safeZone.blueR = data.blueR ?? this.safeZone.blueR;
+          this.redrawAll();
+          this.syncZonePhaseUI(this.safeZone.phase);
+        }
+      } else if (action === 'map_change') {
+        if (data && data.map && data.map !== this.currentMap) {
+          this.currentMap = data.map;
+          this.userElements = [];
+          this.proOverlays = null;
+          this.redrawAll();
+          const mapSelect = document.getElementById('mapSelect');
+          if (mapSelect) mapSelect.value = data.map;
+          document.querySelectorAll('.wb-map-pill').forEach(p => {
+            if (p.getAttribute('data-map') === data.map) p.classList.add('active');
+            else p.classList.remove('active');
+          });
+        }
+      } else if (action === 'undo') {
+        this.undo(false);
+      } else if (action === 'clear') {
+        this.clearAll(false);
+      } else if (action === 'laser_ping') {
+        if (data && typeof data.nx === 'number' && typeof data.ny === 'number') {
+          this.laserPings.push({
+            nx: data.nx,
+            ny: data.ny,
+            sender,
+            role,
+            color: data.color || '#00f0ff',
+            expiresAt: Date.now() + 3200
+          });
+          this.playLaserAudioChirp();
+          this.redrawAll();
+        }
+      } else if (action === 'full_sync') {
+        if (data) {
+          if (data.map_name) this.currentMap = data.map_name;
+          if (Array.isArray(data.strokes)) this.userElements = data.strokes;
+          if (data.safe_zone) {
+            this.safeZone.cx = data.safe_zone.cx ?? 0.5;
+            this.safeZone.cy = data.safe_zone.cy ?? 0.5;
+            this.safeZone.r = data.safe_zone.r ?? 0.32;
+          }
+          if (data.zone_phase) {
+            this.safeZone.phase = data.zone_phase;
+            this.syncZonePhaseUI(data.zone_phase);
+          }
+          this.redrawAll();
+        }
+      }
+    }
+
+    playLaserAudioChirp() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.18);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      } catch (e) {}
+    }
+
+    renderLaserPings() {
+      const now = Date.now();
+      this.laserPings = this.laserPings.filter(p => p.expiresAt > now);
+      if (this.laserPings.length === 0) return;
+
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+
+      this.laserPings.forEach(p => {
+        const px = p.nx * w;
+        const py = p.ny * h;
+        const remaining = (p.expiresAt - now) / 3200; // 1 to 0
+        const progress = 1 - remaining;
+
+        this.ctx.save();
+        // Expanding radar rings
+        const maxR = 45;
+        const ringR = 10 + progress * maxR;
+        this.ctx.strokeStyle = p.color || '#00f0ff';
+        this.ctx.lineWidth = 2.5;
+        this.ctx.globalAlpha = Math.max(0, remaining);
+        this.ctx.beginPath();
+        this.ctx.arc(px, py, ringR, 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        // Second outer ring
+        if (progress > 0.3) {
+          const r2 = 10 + (progress - 0.3) * maxR * 1.2;
+          this.ctx.lineWidth = 1.5;
+          this.ctx.beginPath();
+          this.ctx.arc(px, py, r2, 0, Math.PI * 2);
+          this.ctx.stroke();
+        }
+
+        // Center beacon pin
+        this.ctx.fillStyle = p.color || '#00f0ff';
+        this.ctx.beginPath();
+        this.ctx.arc(px, py, 5, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Crosshairs
+        this.ctx.beginPath();
+        this.ctx.moveTo(px - 14, py); this.ctx.lineTo(px + 14, py);
+        this.ctx.moveTo(px, py - 14); this.ctx.lineTo(px, py + 14);
+        this.ctx.stroke();
+
+        // Holographic Nameplate Badge
+        const tag = `🎯 ${p.sender || 'Squad'} [${p.role || 'CALLOUT'}]`;
+        this.ctx.font = 'bold 11px Rajdhani, monospace';
+        const tw = this.ctx.measureText(tag).width;
+        this.ctx.fillStyle = 'rgba(10, 15, 26, 0.92)';
+        this.ctx.strokeStyle = p.color || '#00f0ff';
+        this.ctx.lineWidth = 1.2;
+        this.ctx.roundRect(px - tw / 2 - 8, py - 32, tw + 16, 20, 6);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(tag, px, py - 18);
+        this.ctx.restore();
+      });
+
+      // Maintain live requestAnimationFrame loop while pings are active
+      if (this.laserPings.length > 0 && !this._laserAnimReq) {
+        this._laserAnimReq = requestAnimationFrame(() => {
+          this._laserAnimReq = null;
+          this.redrawAll();
+        });
+      }
+    }
+
+    syncZonePhaseUI(phase) {
+      document.querySelectorAll('.wb-zone-phase-btn').forEach(btn => {
+        const p = parseInt(btn.getAttribute('data-phase'), 10);
+        if (p === phase) {
+          btn.classList.add('bg-blue-600', 'text-white', 'shadow');
+          btn.classList.remove('bg-slate-900', 'text-slate-300');
+        } else {
+          btn.classList.remove('bg-blue-600', 'text-white', 'shadow');
+          btn.classList.add('bg-slate-900', 'text-slate-300');
+        }
+      });
     }
 
     // --- SAFE ZONE SIMULATOR CONTROLS (FEATURE 2) ---
@@ -1452,7 +1802,15 @@
       });
 
       this.redrawAll();
-      this.broadcastAction('zone_update', { phase, safeZone: this.safeZone });
+      this.broadcastLocalAction('zone_shift', {
+        phase: this.safeZone.phase,
+        cx: this.safeZone.cx,
+        cy: this.safeZone.cy,
+        r: this.safeZone.r,
+        blueCx: this.safeZone.blueCx,
+        blueCy: this.safeZone.blueCy,
+        blueR: this.safeZone.blueR
+      });
     }
 
     applyHardShift(dir) {
@@ -1479,6 +1837,15 @@
         this.safeZone.blueCy = 0.5;
       }
       this.redrawAll();
+      this.broadcastLocalAction('zone_shift', {
+        phase: this.safeZone.phase,
+        cx: this.safeZone.cx,
+        cy: this.safeZone.cy,
+        r: this.safeZone.r,
+        blueCx: this.safeZone.blueCx,
+        blueCy: this.safeZone.blueCy,
+        blueR: this.safeZone.blueR
+      });
     }
 
     simulateZoneShrink() {
@@ -1780,46 +2147,71 @@
           return;
         }
 
+        // Laser Ping / Objective Beacon Tool
+        if (this.currentTool === 'laser') {
+          const nx = pos.x / w;
+          const ny = pos.y / h;
+          const user = window.app?.currentUser || {};
+          const pingObj = {
+            nx, ny,
+            sender: user.ign || user.username || 'You',
+            role: user.role || this.selectedPinRole || 'IGL',
+            color: this.currentColor || '#00f0ff',
+            expiresAt: Date.now() + 3200
+          };
+          this.laserPings.push(pingObj);
+          this.playLaserAudioChirp();
+          this.redrawAll();
+          this.broadcastLocalAction('laser_ping', { nx, ny, color: this.currentColor || '#00f0ff' });
+          return;
+        }
+
         if (this.currentTool === 'token') {
           const role = this.selectedPinRole || this.pinRoles[this.currentPinRoleIndex % this.pinRoles.length];
           this.currentPinRoleIndex++;
-          this.userElements.push({
+          const tokenElem = {
             type: 'token',
             normX: pos.x / w,
             normY: pos.y / h,
             label: role,
             color: this.currentColor
-          });
+          };
+          this.userElements.push(tokenElem);
           this.saveState();
           this.redrawAll();
+          this.broadcastLocalAction('token', tokenElem);
           return;
         }
 
         if (this.currentTool === 'utility' || this.currentTool === 'gloo') {
-          this.userElements.push({
+          const utilElem = {
             type: 'utility',
             utilityType: this.currentTool === 'gloo' ? 'GLOO' : 'SMOKE',
             normX: pos.x / w,
             normY: pos.y / h,
             color: this.currentTool === 'gloo' ? '#f59e0b' : '#38bdf8'
-          });
+          };
+          this.userElements.push(utilElem);
           this.saveState();
           this.redrawAll();
+          this.broadcastLocalAction('utility', utilElem);
           return;
         }
 
         if (this.currentTool === 'text') {
           const note = prompt("Enter tactical callout (e.g. 'Hold Ridge', 'Nade Stack', 'Bridge Ambush'):", "Hold Ridge");
           if (note && note.trim()) {
-            this.userElements.push({
+            const textElem = {
               type: 'text',
               normX: pos.x / w,
               normY: pos.y / h,
               text: note.trim(),
               color: this.currentColor
-            });
+            };
+            this.userElements.push(textElem);
             this.saveState();
             this.redrawAll();
+            this.broadcastLocalAction('text', textElem);
           }
           return;
         }
@@ -1907,6 +2299,15 @@
           this.safeZone.isDragging = false;
           this.safeZone.isResizing = false;
           this.safeZone.dragMode = null;
+          this.broadcastLocalAction('zone_shift', {
+            phase: this.safeZone.phase,
+            cx: this.safeZone.cx,
+            cy: this.safeZone.cy,
+            r: this.safeZone.r,
+            blueCx: this.safeZone.blueCx,
+            blueCy: this.safeZone.blueCy,
+            blueR: this.safeZone.blueR
+          });
           return;
         }
 
@@ -1918,19 +2319,28 @@
 
         if (this.currentTool === 'eraser') {
           this.saveState();
+          this.broadcastLocalAction('full_sync', {
+            strokes: this.userElements,
+            map_name: this.currentMap,
+            safe_zone: this.safeZone,
+            zone_phase: this.safeZone.phase
+          });
           return;
         }
 
+        let newElem = null;
+
         if (this.currentTool === 'freedraw' && this.currentStroke) {
           if (this.currentStroke.points.length > 1) {
-            this.userElements.push(this.currentStroke);
+            newElem = this.currentStroke;
+            this.userElements.push(newElem);
             this.saveState();
           }
           this.currentStroke = null;
         } else if (this.currentTool === 'arrow' && this.currentPos) {
           const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
           if (dist > 5) {
-            this.userElements.push({
+            newElem = {
               type: 'arrow',
               fromNormX: this.startX / w,
               fromNormY: this.startY / h,
@@ -1938,13 +2348,14 @@
               toNormY: this.currentPos.y / h,
               color: this.currentColor,
               width: this.brushSize
-            });
+            };
+            this.userElements.push(newElem);
             this.saveState();
           }
         } else if (this.currentTool === 'line' && this.currentPos) {
           const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
           if (dist > 5) {
-            this.userElements.push({
+            newElem = {
               type: 'line',
               fromNormX: this.startX / w,
               fromNormY: this.startY / h,
@@ -1952,13 +2363,14 @@
               toNormY: this.currentPos.y / h,
               color: this.currentColor,
               width: this.brushSize
-            });
+            };
+            this.userElements.push(newElem);
             this.saveState();
           }
         } else if (this.currentTool === 'rot_arrow' && this.currentPos) {
           const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
           if (dist > 5) {
-            this.userElements.push({
+            newElem = {
               type: 'rot_arrow',
               fromNormX: this.startX / w,
               fromNormY: this.startY / h,
@@ -1966,13 +2378,14 @@
               toNormY: this.currentPos.y / h,
               color: this.currentColor,
               width: this.brushSize + 1
-            });
+            };
+            this.userElements.push(newElem);
             this.saveState();
           }
         } else if (this.currentTool === 'circle' && this.currentPos) {
           const dist = Math.hypot(this.currentPos.x - this.startX, this.currentPos.y - this.startY);
           if (dist > 4) {
-            this.userElements.push({
+            newElem = {
               type: 'circle',
               fromNormX: this.startX / w,
               fromNormY: this.startY / h,
@@ -1980,10 +2393,16 @@
               toNormY: this.currentPos.y / h,
               color: this.currentColor,
               width: this.brushSize
-            });
+            };
+            this.userElements.push(newElem);
             this.saveState();
           }
         }
+
+        if (newElem) {
+          this.broadcastLocalAction('stroke', newElem);
+        }
+
         this.redrawAll();
       };
 
@@ -2672,7 +3091,7 @@
       this.history.push(JSON.parse(JSON.stringify(this.userElements)));
     }
 
-    undo() {
+    undo(broadcast = true) {
       if (this.historyStep > 0) {
         this.historyStep--;
         this.userElements = JSON.parse(JSON.stringify(this.history[this.historyStep]));
@@ -2682,9 +3101,12 @@
         this.userElements = [];
         this.redrawAll();
       }
+      if (broadcast) {
+        this.broadcastLocalAction('undo', {});
+      }
     }
 
-    clearAll() {
+    clearAll(broadcast = true) {
       this.userElements = [];
       this.proOverlays = null;
       this.history = [];
@@ -2693,6 +3115,9 @@
       this.saveState();
       const cardContainer = document.getElementById('proRotationCardContainer');
       if (cardContainer) cardContainer.innerHTML = '';
+      if (broadcast) {
+        this.broadcastLocalAction('clear', {});
+      }
     }
 
     redrawAll() {
@@ -2700,6 +3125,7 @@
       this.renderSafeZoneOverlay();
       this.renderProOverlays();
       this.renderUserElements();
+      this.renderLaserPings();
     }
 
     exportPlan() {
@@ -8404,26 +8830,35 @@ this.ffSelectedLoadout = {
 
       container.innerHTML = `
         <div class="space-y-4 animate-fade-in">
-          <!-- SQUAD LIVE SYNC ROOM BAR (SUPABASE REALTIME) -->
-          <div class="cyber-panel p-3 rounded-xl border border-emerald-500/40 bg-gradient-to-r from-slate-950 via-[#0a1e1b] to-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg shadow-emerald-950/20 mb-3">
-            <div class="flex items-center gap-2">
-              <span id="tacticalRoomLiveDot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+          <!-- SQUAD LIVE SYNC ROOM BAR (SUPABASE REALTIME MULTIPLAYER) -->
+          <div class="cyber-panel p-3 rounded-xl border border-emerald-500/40 bg-gradient-to-r from-slate-950 via-[#0a1e1b] to-slate-950 flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-lg shadow-emerald-950/20 mb-3">
+            <div class="flex items-center gap-3">
+              <span id="tacticalRoomLiveDot" class="w-3 h-3 rounded-full bg-slate-600 transition-all"></span>
               <div>
-                <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span>📡</span>
-                  <span>Squad Live Sync Room:</span>
-                </span>
-                <div id="activeTacticalRoomLabel" class="text-[10px] font-mono text-slate-400">Status: Standalone / Offline</div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span>📡</span>
+                    <span>Squad Live Briefing Room:</span>
+                  </span>
+                  <div id="activeTacticalRoomLabel" class="text-[10px] font-mono text-slate-400 font-bold">Status: Standalone / Offline</div>
+                </div>
+                <div id="tacticalRoomActivityTicker" class="text-[11px] font-mono text-slate-400 mt-0.5 truncate max-w-sm">Ready for collaborative squad briefing...</div>
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
-              <input type="text" id="tacticalRoomCodeInput" placeholder="ROOM (e.g. UDG7)" maxlength="8" class="bg-slate-900 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-emerald-300 font-mono uppercase focus:outline-none w-28 text-center" />
-              <button id="joinTacticalRoomBtn" class="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-bold text-xs rounded-lg uppercase tracking-wider shadow">
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" id="tacticalRoomCodeInput" placeholder="ROOM (e.g. UDG7)" maxlength="8" class="bg-slate-900 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-emerald-300 font-mono uppercase focus:outline-none w-28 text-center shadow-inner" />
+              <button id="joinTacticalRoomBtn" class="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-bold text-xs rounded-lg uppercase tracking-wider shadow transition-all">
                 Join Room
               </button>
-              <button id="createTacticalRoomBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs rounded-lg uppercase">
+              <button id="createTacticalRoomBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs rounded-lg uppercase transition-all" title="Generate New Room Code">
                 ⚡ Code
+              </button>
+              <button id="shareTacticalRoomBtn" class="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Share Room Code on WhatsApp">
+                <span>📲</span> WhatsApp
+              </button>
+              <button id="manualSyncCloudBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Persist Briefing to Supabase Cloud">
+                <span id="tacticalCloudSyncDot" class="w-2 h-2 rounded-full bg-emerald-400/40"></span> Cloud Sync
               </button>
             </div>
           </div>
@@ -8574,6 +9009,7 @@ this.ffSelectedLoadout = {
                 <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-amber-300" data-tool="rot_arrow">Shift Arrow</button>
                 <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-cyan-300" data-tool="safezone">Move Zone</button>
                 <button class="wb-tool-btn px-2.5 py-1 bg-slate-900 border border-rose-600/60 rounded text-xs text-rose-300" data-tool="eraser">🧹 Eraser</button>
+                <button class="wb-tool-btn px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-400/60 rounded text-xs text-cyan-300 font-bold flex items-center gap-1 shadow-sm transition-all" data-tool="laser" title="Radar Laser Ping: Tap map to drop an animated objective beacon for your squad!"><span>⚡</span> Ping</button>
               </div>
 
               <!-- Pin Role selector -->
@@ -8748,30 +9184,94 @@ this.ffSelectedLoadout = {
       });
 
       // Squad Live Sync Realtime Room Bindings
+      const handleRoomConnection = async (roomCode, isHost = false) => {
+        const code = (roomCode || 'UDG1').trim().toUpperCase();
+        if (!code || !this.supabase || !this.whiteboard) return;
+
+        const lbl = document.getElementById('activeTacticalRoomLabel');
+        const dot = document.getElementById('tacticalRoomLiveDot');
+        const ticker = document.getElementById('tacticalRoomActivityTicker');
+
+        if (lbl) lbl.textContent = `Room: ${code} (Connecting...)`;
+        if (dot) dot.className = 'w-3 h-3 rounded-full bg-amber-400 animate-ping';
+        if (ticker) ticker.textContent = `Syncing with Supabase Cloud for room ${code}...`;
+
+        await this.supabase.joinTacticalRoom(
+          code,
+          // Remote action callback
+          (payload) => this.whiteboard.applyRemoteAction?.(payload),
+          // Initial cloud state restored callback
+          (roomData) => {
+            console.log('Restoring cloud room briefing:', roomData);
+            if (this.whiteboard) {
+              this.whiteboard.applyRemoteAction?.({ action: 'full_sync', data: roomData });
+            }
+          }
+        );
+
+        if (lbl) lbl.textContent = `Room: ${code} (${isHost ? 'Hosting' : 'Connected'})`;
+        if (dot) dot.className = 'w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981]';
+        if (ticker) {
+          ticker.textContent = `🟢 Live Collaborative Session Active: Room ${code}. Drawings sync live across all squad screens!`;
+          ticker.className = 'text-[11px] font-mono text-emerald-300';
+        }
+      };
+
       document.getElementById('createTacticalRoomBtn')?.addEventListener('click', () => {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let code = '';
         for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
         const input = document.getElementById('tacticalRoomCodeInput');
         if (input) input.value = code;
-        if (this.supabase && this.whiteboard) {
-          this.supabase.joinTacticalRoom(code, (action) => this.whiteboard.applyRemoteAction?.(action));
-          const lbl = document.getElementById('activeTacticalRoomLabel');
-          if (lbl) lbl.textContent = `Room: ${code} (Hosting)`;
-          const dot = document.getElementById('tacticalRoomLiveDot');
-          if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
-        }
+        handleRoomConnection(code, true);
       });
 
       document.getElementById('joinTacticalRoomBtn')?.addEventListener('click', () => {
         const input = document.getElementById('tacticalRoomCodeInput');
         const code = input ? input.value.trim().toUpperCase() : '';
-        if (code && this.supabase && this.whiteboard) {
-          this.supabase.joinTacticalRoom(code, (action) => this.whiteboard.applyRemoteAction?.(action));
-          const lbl = document.getElementById('activeTacticalRoomLabel');
-          if (lbl) lbl.textContent = `Room: ${code} (Connected)`;
-          const dot = document.getElementById('tacticalRoomLiveDot');
-          if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        if (code) {
+          handleRoomConnection(code, false);
+        } else {
+          alert('Please enter a room code (e.g. UDG7) or click "⚡ Code" to generate one!');
+        }
+      });
+
+      // 1-Click WhatsApp Room Dispatch
+      document.getElementById('shareTacticalRoomBtn')?.addEventListener('click', () => {
+        const input = document.getElementById('tacticalRoomCodeInput');
+        const code = (input?.value || this.supabase?.activeTacticalRoomCode || 'UDG1').trim().toUpperCase();
+        const map = this.whiteboard?.currentMap?.toUpperCase() || 'BERMUDA';
+        const user = this.currentUser || {};
+        const ign = user.ign || 'Captain';
+
+        const shareText = `🚨 *UNDERDOG ESPORTS TACTICAL BRIEFING* 🎯\n\n👑 *Coach / IGL:* ${ign}\n📡 *Room Code:* ${code}\n🗺️ *Briefing Map:* ${map}\n\n👉 *Join Live Briefing:* Open http://localhost:3000 (or on Wi-Fi: http://10.0.13.63:3000), go to Tactical Whiteboard, and enter Room Code: *${code}*\n\n⚡ All rotations, safe zone shifts, and gloo wall callouts update live in real-time!`;
+
+        const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+        window.open(waUrl, '_blank');
+      });
+
+      // Manual Cloud Save Flush
+      document.getElementById('manualSyncCloudBtn')?.addEventListener('click', () => {
+        const code = this.supabase?.activeTacticalRoomCode || document.getElementById('tacticalRoomCodeInput')?.value?.trim().toUpperCase();
+        if (!code) {
+          alert('Connect to a room first before syncing to cloud!');
+          return;
+        }
+        if (this.whiteboard && this.supabase) {
+          this.supabase.saveTacticalRoomToCloud(code, {
+            map: this.whiteboard.currentMap,
+            zonePhase: this.whiteboard.safeZone.phase,
+            safeZone: { cx: this.whiteboard.safeZone.cx, cy: this.whiteboard.safeZone.cy, r: this.whiteboard.safeZone.r },
+            blueZone: { cx: this.whiteboard.safeZone.blueCx, cy: this.whiteboard.safeZone.blueCy, r: this.whiteboard.safeZone.blueR },
+            tokens: this.whiteboard.userElements.filter(e => e.type === 'token'),
+            strokes: this.whiteboard.userElements,
+            lastAction: 'manual_flush'
+          });
+          const ticker = document.getElementById('tacticalRoomActivityTicker');
+          if (ticker) {
+            ticker.textContent = `💾 Briefing state saved to Supabase Cloud (${code}) at ${new Date().toLocaleTimeString()}!`;
+            ticker.className = 'text-[11px] font-mono text-cyan-300';
+          }
         }
       });
     }
