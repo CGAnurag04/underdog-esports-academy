@@ -209,6 +209,149 @@
         return null;
       }
     }
+
+    // --- SCHEMA HEALTH & TELEMETRY CHECK ---
+    async checkCloudSchemaHealth() {
+      if (!this.client || !this.isConnected) {
+        return {
+          connected: false,
+          tables: {},
+          allLive: false,
+          liveCount: 0,
+          totalTables: 5,
+          message: 'Supabase client not connected'
+        };
+      }
+
+      const tables = ['profiles', 'scrim_matches', 'user_cloud_data', 'scrim_lobbies', 'tactical_rooms'];
+      const results = {};
+      let liveCount = 0;
+
+      for (const table of tables) {
+        try {
+          const { error, status } = await this.client
+            .from(table)
+            .select('count', { count: 'exact', head: true });
+
+          if (!error || status === 200 || status === 206) {
+            results[table] = { live: true, status: status || 200 };
+            liveCount++;
+          } else if (status === 404 || error?.code === 'PGRST205') {
+            results[table] = { live: false, status: 404, error: 'Table not found in schema' };
+          } else {
+            results[table] = { live: false, status: status || 500, error: error?.message || 'Error' };
+          }
+        } catch (e) {
+          results[table] = { live: false, status: 500, error: e.message };
+        }
+      }
+
+      return {
+        connected: true,
+        tables: results,
+        liveCount,
+        totalTables: tables.length,
+        allLive: liveCount === tables.length
+      };
+    }
+
+    // --- PROFILES MANAGEMENT ---
+    async syncUserProfile(user) {
+      if (!this.client || !user || !user.id) return false;
+      try {
+        const { error } = await this.client
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            ign: user.ign || user.username || 'Recruit',
+            player_uid: user.uid || user.player_uid || '',
+            clan_tag: user.clan || user.clan_tag || 'UDG',
+            role: user.role || 'Rusher',
+            avatar_url: user.avatar || '',
+            updated_at: new Date().toISOString()
+          });
+        if (error) throw error;
+        console.log('✅ Player profile synced to Supabase public.profiles table');
+        return true;
+      } catch (e) {
+        console.warn('Profile sync warning:', e.message);
+        return false;
+      }
+    }
+
+    async fetchUserProfile(userId) {
+      if (!this.client || !userId) return null;
+      try {
+        const { data, error } = await this.client
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (error) return null;
+        return data;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // --- SCRIM MATCHES & MISTAKE DEBRIEFS CLOUD SYNC ---
+    async syncScrimMatchesToCloud(matches, userId) {
+      if (!this.client || !matches || !Array.isArray(matches)) return false;
+      try {
+        if (userId) {
+          await this.saveUserDataToCloud(userId, 'scrims', matches);
+          const rows = matches.map(m => ({
+            user_id: userId,
+            match_num: m.matchNum || 1,
+            map: m.map || 'Bermuda',
+            placement: m.placement || 1,
+            kills: m.kills || 0,
+            placement_pts: m.placementPts || 0,
+            total_pts: m.totalPts || 0,
+            mistake_id: m.mistakeId || 'clean',
+            fatal_mistake: m.fatalMistake || 'None',
+            vod_url: m.vodUrl || '',
+            debrief_notes: m.debriefNotes || ''
+          }));
+          await this.client.from('scrim_matches').upsert(rows);
+        }
+        return true;
+      } catch (e) {
+        console.warn('Scrim match cloud sync warning:', e.message);
+        return false;
+      }
+    }
+
+    async loadScrimMatchesFromCloud(userId) {
+      if (!this.client || !userId) return null;
+      try {
+        const { data, error } = await this.client
+          .from('scrim_matches')
+          .select('*')
+          .eq('user_id', userId)
+          .order('match_num', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          return data.map(r => ({
+            id: r.id,
+            matchNum: r.match_num,
+            map: r.map,
+            placement: r.placement,
+            kills: r.kills,
+            placementPts: r.placement_pts,
+            totalPts: r.total_pts,
+            mistakeId: r.mistake_id,
+            fatalMistake: r.fatal_mistake,
+            vodUrl: r.vod_url,
+            debriefNotes: r.debrief_notes
+          }));
+        }
+        return await this.loadUserDataFromCloud(userId, 'scrims');
+      } catch (e) {
+        return null;
+      }
+    }
   }
 
   // Expose globally
@@ -17125,7 +17268,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       document.getElementById('headerLoginBtn')?.addEventListener('click', () => this.showAuthModal());
     }
 
-    showSupabaseSetupModal() {
+        showSupabaseSetupModal() {
       let modal = document.getElementById('supabaseSetupModal');
       if (!modal) {
         modal = document.createElement('div');
@@ -17135,10 +17278,12 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
 
       const currentConfig = window.underdogSupabase ? window.underdogSupabase.config : { url: '', anonKey: '' };
       const isConnected = window.underdogSupabase ? window.underdogSupabase.isConnected : false;
+      const projectId = currentConfig.url ? currentConfig.url.replace('https://', '').split('.')[0] : 'iwggpixdxhdetncnossa';
+      const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectId}/sql`;
 
       modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in';
       modal.innerHTML = `
-        <div class="cyber-panel max-w-lg w-full p-6 rounded-2xl border-2 border-emerald-500/60 bg-slate-950 shadow-2xl shadow-emerald-950/60 space-y-4 relative max-h-[90vh] overflow-y-auto">
+        <div class="cyber-panel max-w-xl w-full p-6 rounded-2xl border-2 border-emerald-500/60 bg-slate-950 shadow-2xl shadow-emerald-950/60 space-y-4 relative max-h-[92vh] overflow-y-auto">
           <!-- Close Button -->
           <button id="closeSupabaseModalBtn" class="absolute top-4 right-4 text-slate-400 hover:text-white font-mono text-sm">✕</button>
 
@@ -17151,20 +17296,78 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
               <h3 class="text-base font-heading font-black text-white uppercase tracking-wider">
                 Supabase Cloud & Realtime Setup
               </h3>
-              <p class="text-xs text-slate-400 font-sub">Cross-Device Cloud Sync & Live Multiplayer Squad Rooms</p>
+              <p class="text-xs text-slate-400 font-sub">Cross-Device Cloud Sync, Scrim Tables & Realtime Rooms</p>
             </div>
           </div>
 
-          <!-- Current Status -->
+          <!-- Current Connection Status -->
           <div class="p-3 rounded-xl ${isConnected ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300' : 'bg-amber-950/40 border border-amber-500/40 text-amber-300'} flex items-center justify-between text-xs">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}"></span>
-              <span>Status: <strong>${isConnected ? 'Connected to Supabase Cloud 🟢' : 'Local Storage Mode (Offline) 🟡'}</strong></span>
+              <span>Cloud Status: <strong>${isConnected ? 'Connected to Supabase Cloud 🟢' : 'Local Storage Mode (Offline) 🟡'}</strong></span>
             </div>
             <span class="font-mono text-[10px]">${isConnected ? 'Realtime Active' : 'Unlinked'}</span>
           </div>
 
-          <!-- Form -->
+          <!-- Live Schema Health Dashboard -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5 text-xs font-sub font-bold uppercase text-white">
+                <span>🗄️</span> Cloud Database Tables Telemetry
+              </div>
+              <button id="checkSchemaHealthBtn" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-bold flex items-center gap-1 transition-all">
+                <span>⚡</span> Run Health Check
+              </button>
+            </div>
+
+            <!-- Table Badges Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]" id="schemaTablesStatusGrid">
+              <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between" id="status_profiles">
+                <span class="font-mono text-slate-300">profiles</span>
+                <span class="status-indicator text-[10px] font-bold text-slate-500">Checking...</span>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between" id="status_scrim_matches">
+                <span class="font-mono text-slate-300">scrim_matches</span>
+                <span class="status-indicator text-[10px] font-bold text-slate-500">Checking...</span>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between" id="status_user_cloud_data">
+                <span class="font-mono text-slate-300">user_cloud_data</span>
+                <span class="status-indicator text-[10px] font-bold text-slate-500">Checking...</span>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between" id="status_scrim_lobbies">
+                <span class="font-mono text-slate-300">scrim_lobbies</span>
+                <span class="status-indicator text-[10px] font-bold text-slate-500">Checking...</span>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between" id="status_tactical_rooms">
+                <span class="font-mono text-slate-300">tactical_rooms</span>
+                <span class="status-indicator text-[10px] font-bold text-slate-500">Checking...</span>
+              </div>
+            </div>
+
+            <!-- Migration Action Bar -->
+            <div class="p-3 rounded-lg bg-slate-950/80 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div>
+                <div class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>⚠️</span> Initialize or Update Cloud Schema:
+                </div>
+                <div class="text-[10px] text-slate-400 mt-0.5 leading-tight">
+                  1-click copy full schema SQL & run in Supabase SQL Editor.
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                <button id="copySqlSchemaBtn" class="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black font-sub font-black text-xs uppercase rounded-lg shadow flex items-center gap-1 transition-transform hover:scale-102">
+                  <span>📋</span>
+                  <span id="copySqlSchemaBtnText">Copy Full SQL Script</span>
+                </button>
+                <a href="${sqlEditorUrl}" target="_blank" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sub font-bold text-xs uppercase rounded-lg border border-slate-700 flex items-center gap-1">
+                  <span>SQL Editor ↗</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Configuration Form -->
           <form id="supabaseConfigForm" class="space-y-3 text-xs">
             <div>
               <label class="block text-slate-300 font-sub font-bold uppercase mb-1">
@@ -17185,85 +17388,52 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
             <div id="sbConnectMessage" class="hidden p-2.5 rounded-lg text-xs font-mono"></div>
 
             <button type="submit" id="saveSbConfigBtn" class="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-sub font-black text-xs uppercase tracking-wider rounded-xl transition-transform hover:scale-[1.02] shadow-lg shadow-emerald-950/50">
-              ⚡ Connect to Supabase Cloud
+              ⚡ Save Credentials & Refresh Connection
             </button>
           </form>
-
-          <!-- SQL Schema Quick Copy -->
-          <div class="pt-2 border-t border-slate-800 space-y-2">
-            <div class="flex items-center justify-between text-xs">
-              <span class="font-sub font-bold text-slate-300 uppercase">Database Tables Setup:</span>
-              <button id="copySqlSchemaBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono rounded flex items-center gap-1">
-                <span>📋</span>
-                <span id="copySqlSchemaBtnText">Copy SQL Schema</span>
-              </button>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-relaxed">
-              Paste the copied schema into your Supabase <strong>SQL Editor</strong> and click <strong>Run</strong> to initialize the <code>profiles</code>, <code>user_cloud_data</code>, <code>tactical_rooms</code>, and <code>scrim_lobbies</code> tables with Realtime enabled!
-            </p>
-          </div>
         </div>
       `;
 
       document.getElementById('closeSupabaseModalBtn')?.addEventListener('click', () => modal.remove());
 
-      document.getElementById('copySqlSchemaBtn')?.addEventListener('click', async () => {
-        const sql = `-- UNDERDOG ESPORTS ACADEMY SUPABASE SCHEMA
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  email TEXT UNIQUE,
-  ign TEXT NOT NULL DEFAULT 'Recruit',
-  player_uid TEXT,
-  clan_tag TEXT DEFAULT 'UDG',
-  role TEXT DEFAULT 'Rusher',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-CREATE TABLE IF NOT EXISTS public.user_cloud_data (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
-  data_type TEXT NOT NULL,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  UNIQUE(user_id, data_type)
-);
-CREATE TABLE IF NOT EXISTS public.scrim_lobbies (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  lobby_code TEXT UNIQUE NOT NULL,
-  title TEXT NOT NULL DEFAULT 'EWC Scrims Lobby',
-  teams JSONB NOT NULL DEFAULT '[]'::jsonb,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-CREATE TABLE IF NOT EXISTS public.tactical_rooms (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  room_code TEXT UNIQUE NOT NULL,
-  map_name TEXT DEFAULT 'bermuda',
-  zone_phase INTEGER DEFAULT 1,
-  safe_zone JSONB DEFAULT '{"cx": 0.5, "cy": 0.5, "r": 0.35}'::jsonb,
-  tokens JSONB DEFAULT '[]'::jsonb,
-  strokes JSONB DEFAULT '[]'::jsonb,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_cloud_data ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.scrim_lobbies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tactical_rooms ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public Profiles Access" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public User Cloud Data Access" ON public.user_cloud_data FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public Scrim Lobbies Access" ON public.scrim_lobbies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public Tactical Rooms Access" ON public.tactical_rooms FOR ALL USING (true) WITH CHECK (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE public.scrim_lobbies;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tactical_rooms;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
+      // Health Checker Function
+      const runHealthCheck = async () => {
+        if (!window.underdogSupabase) return;
+        const result = await window.underdogSupabase.checkCloudSchemaHealth();
+        const tables = ['profiles', 'scrim_matches', 'user_cloud_data', 'scrim_lobbies', 'tactical_rooms'];
 
+        tables.forEach(table => {
+          const row = document.getElementById(`status_${table}`);
+          if (row) {
+            const ind = row.querySelector('.status-indicator');
+            if (ind) {
+              if (result.tables[table]?.live) {
+                ind.textContent = 'Live 🟢';
+                ind.className = 'status-indicator text-[10px] font-bold text-emerald-400';
+              } else {
+                ind.textContent = 'Not Found 🔴';
+                ind.className = 'status-indicator text-[10px] font-bold text-rose-400';
+              }
+            }
+          }
+        });
+      };
+
+      document.getElementById('checkSchemaHealthBtn')?.addEventListener('click', runHealthCheck);
+      runHealthCheck();
+
+      // Copy Full SQL Script Handler
+      document.getElementById('copySqlSchemaBtn')?.addEventListener('click', async () => {
+        const fullSql = "-- ============================================================================\n-- UNDERDOG ESPORTS ACADEMY - OFFICIAL SUPABASE DATABASE SCHEMA (v3.0)\n-- Copy and paste this script into your Supabase Dashboard SQL Editor and click \"Run\"\n-- Dashboard Link: https://supabase.com/dashboard/project/iwggpixdxhdetncnossa/sql\n-- ============================================================================\n\n-- 1. PROFILES TABLE\n-- Stores player IGN, combat role, player UID, clan tag, and avatar\nCREATE TABLE IF NOT EXISTS public.profiles (\n  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,\n  email TEXT UNIQUE,\n  ign TEXT NOT NULL DEFAULT 'Recruit',\n  player_uid TEXT,\n  clan_tag TEXT DEFAULT 'UDG',\n  role TEXT DEFAULT 'Rusher',\n  avatar_url TEXT,\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,\n  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL\n);\n\n-- Automated Trigger: Auto-create player profile on Supabase Auth signup\nCREATE OR REPLACE FUNCTION public.handle_new_user()\nRETURNS TRIGGER AS $$\nBEGIN\n  INSERT INTO public.profiles (id, email, ign, role, clan_tag)\n  VALUES (\n    new.id,\n    new.email,\n    COALESCE(new.raw_user_meta_data->>'ign', split_part(new.email, '@', 1)),\n    COALESCE(new.raw_user_meta_data->>'role', 'Rusher'),\n    COALESCE(new.raw_user_meta_data->>'clan_tag', 'UDG')\n  )\n  ON CONFLICT (id) DO NOTHING;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql SECURITY DEFINER;\n\nDROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;\nCREATE TRIGGER on_auth_user_created\n  AFTER INSERT ON auth.users\n  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();\n\n-- 2. SCRIM MATCHES TABLE\n-- Stores individual match records, placements, kills, points & mistake debriefs\nCREATE TABLE IF NOT EXISTS public.scrim_matches (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  user_id UUID REFERENCES auth.users ON DELETE CASCADE,\n  match_num INTEGER NOT NULL DEFAULT 1,\n  map TEXT NOT NULL DEFAULT 'Bermuda',\n  placement INTEGER NOT NULL DEFAULT 1,\n  kills INTEGER NOT NULL DEFAULT 0,\n  placement_pts INTEGER NOT NULL DEFAULT 12,\n  total_pts INTEGER NOT NULL DEFAULT 12,\n  mistake_id TEXT DEFAULT 'clean',\n  fatal_mistake TEXT DEFAULT 'None (Clean Booyah / Flawless Fight)',\n  vod_url TEXT DEFAULT '',\n  debrief_notes TEXT DEFAULT '',\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL\n);\n\n-- 3. USER CLOUD DATA TABLE\n-- Generic JSONB storage for custom sensitivities, HUD coordinates, and loadouts\nCREATE TABLE IF NOT EXISTS public.user_cloud_data (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,\n  data_type TEXT NOT NULL, -- 'sensitivity', 'custom_hud', 'scrims', 'tactics_notes'\n  payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,\n  UNIQUE(user_id, data_type)\n);\n\n-- 4. SCRIM LOBBIES TABLE\n-- Stores 12-team tournament leaderboards for live broadcasts & PointCalc exports\nCREATE TABLE IF NOT EXISTS public.scrim_lobbies (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  lobby_code TEXT UNIQUE NOT NULL,\n  title TEXT NOT NULL DEFAULT 'Free Fire Max Tier-1 Scrims',\n  stage TEXT DEFAULT 'Grand Finals',\n  host_id UUID REFERENCES auth.users ON DELETE SET NULL,\n  teams JSONB NOT NULL DEFAULT '[]'::jsonb,\n  match_number INTEGER DEFAULT 1,\n  total_matches INTEGER DEFAULT 6,\n  is_live BOOLEAN DEFAULT true,\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,\n  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL\n);\n\n-- 5. TACTICAL WHITEBOARD ROOMS TABLE\n-- Stores live multiplayer whiteboard drawing strokes, safe zones & token positions\nCREATE TABLE IF NOT EXISTS public.tactical_rooms (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  room_code TEXT UNIQUE NOT NULL,\n  room_name TEXT DEFAULT 'Squad Briefing',\n  host_id UUID REFERENCES auth.users ON DELETE SET NULL,\n  map_name TEXT DEFAULT 'bermuda',\n  zone_phase INTEGER DEFAULT 1,\n  safe_zone JSONB DEFAULT '{\"cx\": 0.5, \"cy\": 0.5, \"r\": 0.35}'::jsonb,\n  blue_zone JSONB DEFAULT '{\"cx\": 0.5, \"cy\": 0.5, \"r\": 0.50}'::jsonb,\n  tokens JSONB DEFAULT '[]'::jsonb,\n  strokes JSONB DEFAULT '[]'::jsonb,\n  last_action TEXT DEFAULT 'init',\n  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL\n);\n\n-- ============================================================================\n-- ROW LEVEL SECURITY (RLS) POLICIES\n-- ============================================================================\nALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.scrim_matches ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.user_cloud_data ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.scrim_lobbies ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.tactical_rooms ENABLE ROW LEVEL SECURITY;\n\n-- Permissive public policies for fast squad room and match sharing\nDROP POLICY IF EXISTS \"Public Profiles Access\" ON public.profiles;\nCREATE POLICY \"Public Profiles Access\" ON public.profiles FOR ALL USING (true) WITH CHECK (true);\n\nDROP POLICY IF EXISTS \"Public Scrim Matches Access\" ON public.scrim_matches;\nCREATE POLICY \"Public Scrim Matches Access\" ON public.scrim_matches FOR ALL USING (true) WITH CHECK (true);\n\nDROP POLICY IF EXISTS \"Public User Cloud Data Access\" ON public.user_cloud_data;\nCREATE POLICY \"Public User Cloud Data Access\" ON public.user_cloud_data FOR ALL USING (true) WITH CHECK (true);\n\nDROP POLICY IF EXISTS \"Public Scrim Lobbies Access\" ON public.scrim_lobbies;\nCREATE POLICY \"Public Scrim Lobbies Access\" ON public.scrim_lobbies FOR ALL USING (true) WITH CHECK (true);\n\nDROP POLICY IF EXISTS \"Public Tactical Rooms Access\" ON public.tactical_rooms;\nCREATE POLICY \"Public Tactical Rooms Access\" ON public.tactical_rooms FOR ALL USING (true) WITH CHECK (true);\n\n-- ============================================================================\n-- REALTIME REPLICATION CONFIGURATION\n-- ============================================================================\n-- Safely add tables to publication if publication exists\nDO $$\nBEGIN\n  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN\n    ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;\n    ALTER PUBLICATION supabase_realtime ADD TABLE public.scrim_matches;\n    ALTER PUBLICATION supabase_realtime ADD TABLE public.scrim_lobbies;\n    ALTER PUBLICATION supabase_realtime ADD TABLE public.tactical_rooms;\n    ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;\n  END IF;\nEXCEPTION\n  WHEN duplicate_object THEN\n    NULL;\nEND $$;\n\n-- High-speed indexes for query performance\nCREATE INDEX IF NOT EXISTS idx_tactical_rooms_code ON public.tactical_rooms(room_code);\nCREATE INDEX IF NOT EXISTS idx_scrim_lobbies_code ON public.scrim_lobbies(lobby_code);\nCREATE INDEX IF NOT EXISTS idx_scrim_matches_user ON public.scrim_matches(user_id);\nCREATE INDEX IF NOT EXISTS idx_user_cloud_data_lookup ON public.user_cloud_data(user_id, data_type);\n";
         try {
-          await navigator.clipboard.writeText(sql);
+          await navigator.clipboard.writeText(fullSql);
           const btnText = document.getElementById('copySqlSchemaBtnText');
           if (btnText) {
-            btnText.innerText = 'COPIED TO CLIPBOARD! ✅';
-            setTimeout(() => { btnText.innerText = 'Copy SQL Schema'; }, 2500);
+            btnText.innerText = 'COPIED FULL SQL! ✅';
+            setTimeout(() => { btnText.innerText = 'Copy Full SQL Script'; }, 2500);
           }
         } catch (err) {
-          alert('Schema is saved as supabase_schema.sql in your workspace folder!');
+          alert('Full SQL is saved at backend/supabase_schema.sql!');
         }
       });
 
@@ -17278,12 +17448,17 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.user_cloud_data;`;
         if (window.underdogSupabase) {
           const success = window.underdogSupabase.saveConfig(url, key);
           if (success && msg) {
-            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-emerald-950/80 border border-emerald-500 text-emerald-300 block';
-            msg.innerText = 'Connected successfully! Supabase Cloud & Realtime are now active. 🟢';
-            setTimeout(() => modal.remove(), 1200);
+            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-emerald-950/60 border border-emerald-500/50 text-emerald-300';
+            msg.innerHTML = '⚡ Connected successfully to Supabase! Realtime enabled.';
+            msg.classList.remove('hidden');
+            setTimeout(() => {
+              modal.remove();
+              this.renderTabContent();
+            }, 1200);
           } else if (msg) {
-            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-rose-950/80 border border-rose-500 text-rose-300 block';
-            msg.innerText = 'Failed to initialize Supabase. Check URL and Key.';
+            msg.className = 'p-2.5 rounded-lg text-xs font-mono bg-rose-950/60 border border-rose-500/50 text-rose-300';
+            msg.innerHTML = 'Failed to connect. Check Project URL and Anon Key.';
+            msg.classList.remove('hidden');
           }
         }
       });
