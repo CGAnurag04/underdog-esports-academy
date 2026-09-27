@@ -1689,6 +1689,11 @@
         else if (action === 'laser_ping') desc = 'pinged tactical objective 🎯';
         else if (action === 'undo') desc = 'undid previous stroke';
         else if (action === 'clear') desc = 'cleared whiteboard';
+        else if (action === 'vod_action') {
+          const tSec = typeof data?.time === 'number' ? data.time : null;
+          const tStr = tSec !== null ? ` @ ${Math.floor(tSec / 60)}:${String(Math.floor(tSec % 60)).padStart(2, '0')}` : '';
+          desc = `synced VOD playback (${data?.type || 'scrub'}${tStr})`;
+        }
 
         ticker.textContent = `⚡ [${role}] ${sender}: ${desc}`;
         ticker.className = 'text-[11px] font-mono text-cyan-300 animate-pulse';
@@ -1774,6 +1779,10 @@
             this.syncZonePhaseUI(data.zone_phase);
           }
           this.redrawAll();
+        }
+      } else if (action === 'vod_action') {
+        if (window.app && typeof window.app.handleRemoteVodAction === 'function') {
+          window.app.handleRemoteVodAction(data, sender, role);
         }
       }
     }
@@ -6422,6 +6431,101 @@ this.ffSelectedLoadout = {
       this.ffCharacterFilter = 'all';
       this.ffCharacterSearch = '';
 
+      // VOD Review Canvas with Video Scrubbing & Tactical Sync State
+      this.vodReview = {
+        active: false,
+        sourceType: 'preset', // 'preset' | 'youtube' | 'mp4' | 'blob'
+        selectedPresetId: 'ffws_finals',
+        videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        youtubeId: 'b81K31y4qH4',
+        currentTime: 0,
+        duration: 720,
+        isPlaying: false,
+        playbackRate: 1.0,
+        selectedBookmarkId: 'bm_1',
+        bookmarks: [
+          {
+            id: 'bm_1',
+            time: 65, // 01:05
+            title: 'Drop & Initial Loot Split',
+            tag: 'drop',
+            notes: 'Squad 2-2 split between Central Compound and Warehouse. High risk if early flank occurs.',
+            map: 'bermuda',
+            zonePhase: 1,
+            elements: [
+              { type: 'token', normX: 0.48, normY: 0.44, label: 'IGL', color: '#00f0ff' },
+              { type: 'token', normX: 0.52, normY: 0.48, label: 'RUS', color: '#ef4444' },
+              { type: 'arrow', fromNormX: 0.35, fromNormY: 0.38, toNormX: 0.46, toNormY: 0.42, color: '#f59e0b', width: 4 }
+            ]
+          },
+          {
+            id: 'bm_2',
+            time: 225, // 03:45
+            title: 'Phase 2 Hard Shift Gatekeep',
+            tag: 'rotation',
+            notes: 'Blue zone pushes south teams into bottleneck. IGL positions sniper on ridge with 360° sightline.',
+            map: 'bermuda',
+            zonePhase: 2,
+            elements: [
+              { type: 'token', normX: 0.55, normY: 0.52, label: 'SNP', color: '#a855f7' },
+              { type: 'arrow', fromNormX: 0.64, fromNormY: 0.60, toNormX: 0.56, toNormY: 0.53, color: '#ef4444', width: 4 },
+              { type: 'text', normX: 0.56, normY: 0.49, text: 'CROSSFIRE AMBUSH', color: '#10b981' }
+            ]
+          },
+          {
+            id: 'bm_3',
+            time: 440, // 07:20
+            title: 'Double Gloo Wall Final Push',
+            tag: 'clutch',
+            notes: '2v4 Underdog clutch. Coordinated double gloo wall chain across open field to eliminate defending champions.',
+            map: 'bermuda',
+            zonePhase: 4,
+            elements: [
+              { type: 'utility', normX: 0.51, normY: 0.51, utilityType: 'gloo' },
+              { type: 'utility', normX: 0.52, normY: 0.50, utilityType: 'gloo' },
+              { type: 'token', normX: 0.50, normY: 0.52, label: 'RUS', color: '#00f0ff' },
+              { type: 'text', normX: 0.50, normY: 0.56, text: 'CHAMPIONSHIP BOOYAH!', color: '#fbbf24' }
+            ]
+          }
+        ]
+      };
+
+      this.vodPresets = [
+        {
+          id: 'ffws_finals',
+          title: 'FFWS Grand Finals: Bermuda Championship Decider',
+          game: 'freefire',
+          map: 'bermuda',
+          duration: 720,
+          videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          youtubeId: 'b81K31y4qH4',
+          thumbnailBadge: 'FFWS 2025',
+          description: 'Tier-1 tournament Grand Finals match breakdown focusing on early Peak compound split and late zone rotations.'
+        },
+        {
+          id: 'bgis_erangel',
+          title: 'BGIS Erangel: Military Bridge Choke & Crash',
+          game: 'bgmi',
+          map: 'erangel',
+          duration: 840,
+          videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+          youtubeId: 'dQw4w9WgXcQ',
+          thumbnailBadge: 'BGIS Semis',
+          description: 'Complete analysis of military base bridge gatekeeping, car crash protocols, and smoke screen pushes.'
+        },
+        {
+          id: 'purgatory_scrims',
+          title: 'Tier-1 Scrims: Purgatory 2-2 Split Defense',
+          game: 'freefire',
+          map: 'purgatory',
+          duration: 660,
+          videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+          youtubeId: 'L_LUpnjgPso',
+          thumbnailBadge: 'Pro Scrims',
+          description: 'How pro squads exploit high-ground zip lines and defend Brazilian crossfires in Phase 3 shifts.'
+        }
+      ];
+
       this.init();
     }
 
@@ -8924,12 +9028,304 @@ this.ffSelectedLoadout = {
       }
     }
 
-    // --- TACTICAL WHITEBOARD TAB (WITH PRO ROTATIONS) ---
+    // --- TACTICAL WHITEBOARD TAB (WITH PRO ROTATIONS & VOD REVIEW MODE) ---
     renderWhiteboardTab(container) {
       // Filter pro rotations for the current game
       const gameRotations = Object.values(PRO_ROTATIONS).filter(r => r.game === this.activeGame);
       const defaultRotation = gameRotations[0] || Object.values(PRO_ROTATIONS)[0];
+      const isVod = !!(this.vodReview && this.vodReview.active);
 
+      if (isVod) {
+        // --- DUAL-DECK VOD REVIEW MODE (SPLIT SCREEN: VIDEO REPLAY DECK + WHITEBOARD CANVAS) ---
+        container.innerHTML = `
+          <div class="space-y-4 animate-fade-in">
+            <!-- SQUAD LIVE SYNC ROOM BAR (SUPABASE REALTIME MULTIPLAYER) -->
+            <div class="cyber-panel p-3 rounded-xl border border-purple-500/40 bg-gradient-to-r from-slate-950 via-[#130d24] to-slate-950 flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-lg shadow-purple-950/20 mb-3">
+              <div class="flex items-center gap-3">
+                <span id="tacticalRoomLiveDot" class="w-3 h-3 rounded-full bg-slate-600 transition-all"></span>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <span>📡</span>
+                      <span>Squad Live Briefing Room:</span>
+                    </span>
+                    <div id="activeTacticalRoomLabel" class="text-[10px] font-mono text-slate-400 font-bold">Status: Standalone / Offline</div>
+                  </div>
+                  <div id="tacticalRoomActivityTicker" class="text-[11px] font-mono text-purple-300 mt-0.5 truncate max-w-sm">🎬 VOD Review Mode Active — Match recording and whiteboard synchronized!</div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <input type="text" id="tacticalRoomCodeInput" placeholder="ROOM (e.g. UDG7)" maxlength="8" class="bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-1 text-xs text-purple-300 font-mono uppercase focus:outline-none w-28 text-center shadow-inner" />
+                <button id="joinTacticalRoomBtn" class="px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-500 hover:from-purple-500 hover:to-indigo-400 text-white font-sub font-bold text-xs rounded-lg uppercase tracking-wider shadow transition-all">
+                  Join Room
+                </button>
+                <button id="createTacticalRoomBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs rounded-lg uppercase transition-all" title="Generate New Room Code">
+                  ⚡ Code
+                </button>
+                <button id="shareTacticalRoomBtn" class="px-2.5 py-1 bg-purple-950/80 hover:bg-purple-900 border border-purple-500/50 text-purple-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Share Room Code on WhatsApp">
+                  <span>📲</span> WhatsApp
+                </button>
+                <button id="manualSyncCloudBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Persist Briefing to Supabase Cloud">
+                  <span id="tacticalCloudSyncDot" class="w-2 h-2 rounded-full bg-purple-400/40"></span> Cloud Sync
+                </button>
+                <button id="toggleVodReviewBtn" class="px-3.5 py-1 bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:from-rose-500 hover:to-pink-500 text-white font-sub font-black text-xs rounded-lg uppercase tracking-wider flex items-center gap-1.5 shadow-lg shadow-pink-500/30 border border-pink-400/80 transition-all" title="Exit VOD Review Mode and return to full canvas">
+                  <span>⏹️</span> Exit VOD Mode
+                </button>
+              </div>
+            </div>
+
+            <!-- DUAL-DECK SPLIT VIEW CONTAINER -->
+            <div id="vodSplitDeckContainer" class="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+              <!-- LEFT DECK: Video Replay & Scrubbing -->
+              <div class="cyber-panel p-4 rounded-2xl border border-purple-500/40 bg-gradient-to-b from-slate-950 via-[#0d1020] to-slate-950 space-y-3.5 shadow-2xl">
+                <!-- Replay Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-500/20 pb-3">
+                  <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-purple-400 animate-pulse"></span>
+                    <div>
+                      <h4 class="text-sm font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>🎬</span> Match Recording Replay Deck
+                      </h4>
+                      <span class="text-[10px] text-slate-400 font-mono">Synchronized frame-scrubbing & coaching keyframes</span>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-1.5">
+                    <label class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-purple-500/40 rounded text-xs text-purple-300 font-sub flex items-center gap-1 cursor-pointer transition-all" title="Load your squad's local MP4/WebM match recording">
+                      <span>📂</span> Load File
+                      <input type="file" id="vodLocalFileInput" accept="video/mp4,video/webm,video/ogg" class="hidden">
+                    </label>
+                    <button id="vodToggleUrlInputBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 font-sub flex items-center gap-1">
+                      <span>🔗</span> URL / YouTube
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Custom URL Input Bar -->
+                <div id="vodCustomUrlBar" class="hidden flex items-center gap-2 p-2 bg-slate-900/90 rounded-xl border border-purple-500/30">
+                  <input type="text" id="vodCustomUrlInput" placeholder="Paste direct .mp4/.webm URL or YouTube link..." class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-purple-200 font-mono flex-1 focus:outline-none focus:border-purple-400">
+                  <button id="vodLoadCustomUrlBtn" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-sub font-bold text-xs rounded-lg uppercase">
+                    Load
+                  </button>
+                </div>
+
+                <!-- Tier-1 Match Preset Pills -->
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-[10px] font-mono font-bold text-purple-300 uppercase mr-1">Presets:</span>
+                  ${this.vodPresets.map(preset => `
+                    <button class="vod-preset-pill px-2.5 py-1 rounded text-xs font-sub font-bold transition-all ${this.vodReview.selectedPresetId === preset.id ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow' : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'}" data-preset-id="${preset.id}">
+                      ${preset.thumbnailBadge} : ${preset.title.split(':')[0]}
+                    </button>
+                  `).join('')}
+                </div>
+
+                <!-- Video Player Viewport -->
+                <div class="relative w-full aspect-video rounded-xl overflow-hidden bg-black border border-purple-500/40 shadow-2xl flex items-center justify-center group">
+                  <video id="vodVideoElement" class="w-full h-full object-contain ${this.vodReview.sourceType === 'youtube' ? 'hidden' : ''}" playsinline preload="metadata">
+                    <source src="${this.vodReview.videoUrl}" type="video/mp4">
+                    Your browser does not support HTML5 video.
+                  </video>
+
+                  <div id="vodYoutubeWrapper" class="${this.vodReview.sourceType === 'youtube' ? '' : 'hidden'} w-full h-full">
+                    <iframe id="vodYoutubeIframe" class="w-full h-full" src="https://www.youtube-nocookie.com/embed/${this.vodReview.youtubeId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                  </div>
+
+                  <!-- Watermark Overlay -->
+                  <div class="absolute top-2 left-2 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded bg-black/80 backdrop-blur border border-purple-500/40 text-[10px] font-mono text-purple-300">
+                    <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                    <span id="vodVideoBadgeTitle">${(this.vodPresets.find(p => p.id === this.vodReview.selectedPresetId) || {}).title || 'VOD Match Replay'}</span>
+                  </div>
+
+                  <!-- HUD Time Pill -->
+                  <div class="absolute top-2 right-2 pointer-events-none px-2.5 py-1 rounded bg-black/80 backdrop-blur border border-cyan-500/40 text-xs font-mono font-black text-cyan-300">
+                    <span id="vodHudTime">00:00</span>
+                  </div>
+                </div>
+
+                <!-- Cyber Scrubber & Controls -->
+                <div class="space-y-1.5 bg-slate-900/70 p-3 rounded-xl border border-slate-800">
+                  <div class="flex items-center justify-between text-xs font-mono">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-cyan-400 font-bold" id="vodCurrentTimeDisplay">00:00</span>
+                      <span class="text-slate-500">/</span>
+                      <span class="text-slate-400" id="vodDurationDisplay">12:00</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span id="vodSyncStatusBadge" class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
+                        SQUAD SYNC READY
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Range Slider -->
+                  <div class="relative py-1">
+                    <input type="range" id="vodScrubber" min="0" max="${this.vodReview.duration || 720}" value="${this.vodReview.currentTime || 0}" step="0.5" class="w-full accent-cyan-400 h-2 bg-slate-800 rounded-lg cursor-pointer transition-all">
+                  </div>
+
+                  <!-- Control Buttons -->
+                  <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div class="flex items-center gap-1">
+                      <button id="vodStepBack5" class="px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded text-xs font-mono" title="Rewind 5s">⏪ -5s</button>
+                      <button id="vodStepBack1" class="px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded text-xs font-mono" title="Frame back 1s">◀ -1s</button>
+                      <button id="vodPlayPauseBtn" class="px-3.5 py-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-sub font-bold text-xs rounded uppercase tracking-wider flex items-center gap-1 shadow">
+                        <span id="vodPlayIcon">▶</span>
+                        <span id="vodPlayText">Play</span>
+                      </button>
+                      <button id="vodStepFwd1" class="px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded text-xs font-mono" title="Frame advance 1s">+1s ▶</button>
+                      <button id="vodStepFwd5" class="px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded text-xs font-mono" title="Fast forward 5s">+5s ⏩</button>
+                    </div>
+
+                    <!-- Playback Speed -->
+                    <div class="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                      <span class="text-[9px] font-mono text-slate-400 px-1 uppercase">Speed:</span>
+                      ${['0.25', '0.5', '1.0', '1.5', '2.0'].map(spd => `
+                        <button class="vod-speed-btn px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${this.vodReview.playbackRate === parseFloat(spd) ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}" data-speed="${spd}">
+                          ${spd}x
+                        </button>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Coaching Keyframe Bookmarks List -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1">
+                        <span>🔖</span> Coaching Keyframe Bookmarks (${this.vodReview.bookmarks.length})
+                      </span>
+                    </div>
+                    <button id="vodAddBookmarkBtn" class="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow flex items-center gap-1">
+                      <span>➕</span> Bookmark Frame
+                    </button>
+                  </div>
+
+                  <div id="vodBookmarksContainer" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    ${this.renderVodBookmarkCards()}
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT DECK: Synchronized Tactical Whiteboard -->
+              <div class="space-y-3">
+                <!-- Map Selector & Quick Controls -->
+                <div class="cyber-panel p-3 rounded-xl border border-slate-800 bg-slate-950/80 flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-heading font-bold text-white uppercase tracking-wider flex items-center gap-1">
+                      <span>🗺️</span> Whiteboard:
+                    </span>
+                    <select id="mapSelect" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-primary font-sub font-bold outline-none">
+                      <optgroup label="🔴 FREE FIRE & FF MAX MAPS">
+                        <option value="bermuda" ${this.activeGame === 'freefire' ? 'selected' : ''}>Bermuda (Free Fire)</option>
+                        <option value="nexterra">NeXTerra (Zero-G Arena)</option>
+                        <option value="solara">Solara (Helios Solar Fields)</option>
+                        <option value="purgatory">Purgatory (Free Fire)</option>
+                        <option value="kalahari">Kalahari (Refinery Gantry)</option>
+                      </optgroup>
+                      <optgroup label="🟡 BGMI / PUBG MOBILE MAPS">
+                        <option value="erangel" ${this.activeGame === 'bgmi' ? 'selected' : ''}>Erangel (BGMI)</option>
+                      </optgroup>
+                      <optgroup label="🔵 HONOR OF KINGS MAPS">
+                        <option value="hok_gorge" ${this.activeGame === 'hok' ? 'selected' : ''}>Gorge of Kings (HoK)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button id="wbMapStyleBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-amber-500/40 rounded text-xs text-amber-300 font-sub flex items-center gap-1">
+                      <span>🛰️</span> Satellite Map
+                    </button>
+                    <button id="wbClearBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-rose-300 font-sub">Clear</button>
+                    <button id="wbUndoBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 font-sub">Undo</button>
+                    <button id="wbExportBtn" class="px-3 py-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-sub font-bold rounded text-xs uppercase">Export</button>
+                  </div>
+                </div>
+
+                <!-- Quick Zone Shift Controls Bar -->
+                <div class="cyber-panel p-2.5 rounded-xl border border-blue-500/40 bg-gradient-to-r from-slate-950 via-[#0b162c] to-slate-950 flex flex-wrap items-center justify-between gap-2 shadow-inner">
+                  <div class="flex items-center gap-1 bg-slate-900/90 p-0.5 rounded-lg border border-slate-800">
+                    <span class="text-[10px] font-mono font-bold text-blue-400 px-1 uppercase">Zone:</span>
+                    <button class="wb-zone-phase-btn active px-2 py-0.5 rounded text-[10px] font-sub font-bold transition-all bg-blue-600 text-white shadow" data-phase="1">Z1</button>
+                    <button class="wb-zone-phase-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="2">Z2</button>
+                    <button class="wb-zone-phase-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="3">Z3</button>
+                    <button class="wb-zone-phase-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="4">Z4</button>
+                    <button class="wb-zone-phase-btn px-2 py-0.5 rounded text-[10px] font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white" data-phase="5">Z5</button>
+                  </div>
+                  <div class="flex items-center gap-1 bg-slate-900/90 p-0.5 rounded-lg border border-slate-800">
+                    <span class="text-[10px] font-mono font-bold text-amber-400 px-1 uppercase">Shift:</span>
+                    <button class="wb-zone-shift-btn px-1.5 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="N" title="Hard Shift North">⬆️ N</button>
+                    <button class="wb-zone-shift-btn px-1.5 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="S" title="Hard Shift South">⬇️ S</button>
+                    <button class="wb-zone-shift-btn px-1.5 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="W" title="Hard Shift West">⬅️ W</button>
+                    <button class="wb-zone-shift-btn px-1.5 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="E" title="Hard Shift East">➡️ E</button>
+                    <button class="wb-zone-shift-btn px-1.5 py-0.5 rounded text-[10px] font-sub font-bold bg-slate-800 hover:bg-slate-700 text-slate-200" data-shift="CENTER" title="Center">🎯 C</button>
+                  </div>
+                  <button id="wbSimulateShrinkBtn" class="px-2.5 py-0.5 bg-blue-600 hover:bg-blue-500 text-white font-sub font-bold text-[10px] rounded uppercase tracking-wider flex items-center gap-1 shadow">
+                    <span>▶</span>
+                    <span id="wbSimulateShrinkBtnText">Shrink</span>
+                  </button>
+                </div>
+
+                <!-- Whiteboard Drawing Tools Bar -->
+                <div class="cyber-panel p-2 rounded-xl border border-cyan-500/30 flex flex-wrap items-center justify-between gap-1.5 bg-slate-950">
+                  <div class="flex flex-wrap items-center gap-1">
+                    <button class="wb-tool-btn active px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="freedraw">Brush</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="arrow">Arrow</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="circle">Circle</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="token">Pin</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="utility">Smoke</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-amber-300" data-tool="gloo">Gloo</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-cyan-300" data-tool="text">Note</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs text-white" data-tool="line">Line</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-slate-900 border border-rose-600/60 rounded text-xs text-rose-300" data-tool="eraser">🧹 Eraser</button>
+                    <button class="wb-tool-btn px-2 py-0.5 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-400/60 rounded text-xs text-cyan-300 font-bold flex items-center gap-1 shadow-sm transition-all" data-tool="laser"><span>⚡</span> Ping</button>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1 bg-slate-900 p-0.5 rounded border border-slate-800">
+                      <button class="wb-col-btn w-3.5 h-3.5 rounded-full border border-white" style="background:#00f0ff" data-color="#00f0ff"></button>
+                      <button class="wb-col-btn w-3.5 h-3.5 rounded-full" style="background:#f59e0b" data-color="#f59e0b"></button>
+                      <button class="wb-col-btn w-3.5 h-3.5 rounded-full" style="background:#ef4444" data-color="#ef4444"></button>
+                      <button class="wb-col-btn w-3.5 h-3.5 rounded-full" style="background:#10b981" data-color="#10b981"></button>
+                      <button class="wb-col-btn w-3.5 h-3.5 rounded-full" style="background:#ffffff" data-color="#ffffff"></button>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-900/90 border border-slate-700/80 px-1.5 py-0.5 rounded">
+                      <span class="text-[9px] text-slate-400 font-sub">ROLE:</span>
+                      <select id="wbPinRoleSelect" class="bg-transparent text-[10px] text-cyan-300 font-mono font-bold outline-none cursor-pointer">
+                        <option value="IGL">IGL</option>
+                        <option value="RUS">RUS</option>
+                        <option value="SUP">SUP</option>
+                        <option value="SCT">SCT</option>
+                        <option value="SNP">SNP</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Whiteboard Canvas -->
+                <div class="cyber-panel p-2.5 rounded-2xl border border-cyan-500/40 w-full overflow-hidden shadow-2xl bg-slate-950 flex justify-center items-center">
+                  <canvas id="whiteboardCanvas" class="block rounded-xl shadow-2xl cursor-crosshair"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        this.whiteboard = new TacticalWhiteboard('whiteboardCanvas');
+        this.bindWhiteboardControls(container);
+        this.bindVodReviewEvents(container);
+
+        // Adjust canvas dimensions for the split-column deck
+        requestAnimationFrame(() => {
+          if (this.whiteboard) {
+            this.whiteboard.initCanvasSize('square');
+            this.whiteboard.redrawAll();
+          }
+        });
+        return;
+      }
+
+      // --- STANDARD FULL-CANVAS WHITEBOARD MODE ---
       container.innerHTML = `
         <div class="space-y-4 animate-fade-in">
           <!-- SQUAD LIVE SYNC ROOM BAR (SUPABASE REALTIME MULTIPLAYER) -->
@@ -8961,6 +9357,9 @@ this.ffSelectedLoadout = {
               </button>
               <button id="manualSyncCloudBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Persist Briefing to Supabase Cloud">
                 <span id="tacticalCloudSyncDot" class="w-2 h-2 rounded-full bg-emerald-400/40"></span> Cloud Sync
+              </button>
+              <button id="toggleVodReviewBtn" class="px-3 py-1 bg-gradient-to-r from-purple-700 via-pink-600 to-rose-600 hover:from-purple-600 hover:to-pink-500 text-white font-sub font-bold text-xs rounded-lg uppercase tracking-wider flex items-center gap-1.5 shadow transition-all" title="Toggle Side-by-Side Match Video Replay and Annotation Canvas">
+                <span>🎬</span> VOD Review Mode
               </button>
             </div>
           </div>
@@ -9164,6 +9563,10 @@ this.ffSelectedLoadout = {
         this.whiteboard.loadPreset(defaultRotation.id);
       }
 
+      this.bindWhiteboardControls(container);
+    }
+
+    bindWhiteboardControls(container) {
       // Bind pro rotation buttons
       container.querySelectorAll('.pro-rotation-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -9179,6 +9582,11 @@ this.ffSelectedLoadout = {
             this.whiteboard.loadPreset(rotId);
           }
         });
+      });
+
+      // Bind VOD Mode toggle button
+      document.getElementById('toggleVodReviewBtn')?.addEventListener('click', () => {
+        this.toggleVodReviewMode();
       });
 
       // Bind canvas UI controls
@@ -9261,7 +9669,6 @@ this.ffSelectedLoadout = {
       document.getElementById('wbToggleSafeZoneBtn')?.addEventListener('click', () => {
         if (this.whiteboard) this.whiteboard.toggleSafeZone();
       });
-
 
       document.getElementById('wbPinRoleSelect')?.addEventListener('change', (e) => {
         if (this.whiteboard) this.whiteboard.selectedPinRole = e.target.value;
@@ -9376,6 +9783,653 @@ this.ffSelectedLoadout = {
           }
         }
       });
+    }
+
+    // --- VOD REVIEW CANVAS HELPER METHODS ---
+    toggleVodReviewMode() {
+      const savedElements = this.whiteboard ? JSON.parse(JSON.stringify(this.whiteboard.userElements)) : null;
+      const savedMap = this.whiteboard ? this.whiteboard.currentMap : null;
+      const savedSafeZone = this.whiteboard ? JSON.parse(JSON.stringify(this.whiteboard.safeZone)) : null;
+
+      this.vodReview.active = !this.vodReview.active;
+      const container = document.getElementById('mainTabContainer') || document.getElementById('tabContent');
+      if (container) {
+        this.renderWhiteboardTab(container);
+        if (this.whiteboard) {
+          if (savedMap) this.whiteboard.setMap(savedMap, false);
+          if (savedElements && savedElements.length > 0) {
+            this.whiteboard.userElements = savedElements;
+          }
+          if (savedSafeZone) {
+            this.whiteboard.safeZone = Object.assign(this.whiteboard.safeZone, savedSafeZone);
+          }
+          this.whiteboard.initCanvasSize('square');
+          this.whiteboard.redrawAll();
+        }
+      }
+    }
+
+    renderVodBookmarkCards() {
+      if (!this.vodReview.bookmarks || this.vodReview.bookmarks.length === 0) {
+        return `<div class="p-4 text-center text-xs text-slate-500 font-mono">No keyframe bookmarks added yet. Click "➕ Bookmark Frame" to save a tactical callout at current timestamp.</div>`;
+      }
+
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const tagStyles = {
+        rotation: { badge: 'bg-amber-950 text-amber-300 border-amber-500/40', icon: '🔄 ROTATION' },
+        drop: { badge: 'bg-cyan-950 text-cyan-300 border-cyan-500/40', icon: '🪂 DROP POI' },
+        utility: { badge: 'bg-emerald-950 text-emerald-300 border-emerald-500/40', icon: '🛡️ GLOO/UTILITY' },
+        blunder: { badge: 'bg-rose-950 text-rose-300 border-rose-500/40', icon: '⚠️ BLUNDER' },
+        clutch: { badge: 'bg-purple-950 text-purple-300 border-purple-500/40', icon: '🏆 CLUTCH' }
+      };
+
+      return this.vodReview.bookmarks.map(bm => {
+        const style = tagStyles[bm.tag] || tagStyles.rotation;
+        const isCurrent = this.vodReview.selectedBookmarkId === bm.id;
+        return `
+          <div class="vod-bookmark-card p-2.5 rounded-xl border transition-all ${isCurrent ? 'border-cyan-400 bg-cyan-950/30 shadow-md' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'} flex items-start justify-between gap-2 cursor-pointer group" data-bm-id="${bm.id}">
+            <div class="flex items-start gap-2.5 flex-1 min-w-0">
+              <button class="vod-bm-jump-btn px-2 py-1 rounded bg-black/60 border border-cyan-500/50 text-cyan-300 font-mono text-xs font-bold hover:bg-cyan-500 hover:text-black transition-all flex items-center gap-1 shrink-0" data-bm-id="${bm.id}" title="Jump video & whiteboard to ${formatTime(bm.time)}">
+                <span>⏱️</span>
+                <span>${formatTime(bm.time)}</span>
+              </button>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold border ${style.badge}">
+                    ${style.icon}
+                  </span>
+                  <span class="text-xs font-heading font-bold text-white group-hover:text-cyan-300 transition-colors truncate">
+                    ${bm.title}
+                  </span>
+                </div>
+                ${bm.notes ? `<p class="text-[11px] text-slate-300 mt-1 line-clamp-2 leading-tight">${bm.notes}</p>` : ''}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1 shrink-0">
+              <button class="vod-bm-jump-btn px-2 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 text-[10px] font-sub font-bold rounded border border-cyan-500/30 uppercase transition-all" data-bm-id="${bm.id}">
+                Jump
+              </button>
+              <button class="vod-bm-delete-btn p-1 text-slate-500 hover:text-rose-400 rounded transition-all" data-bm-id="${bm.id}" title="Delete bookmark">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    showVodAddBookmarkModal() {
+      const existing = document.getElementById('vodBookmarkModal');
+      if (existing) existing.remove();
+
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const video = document.getElementById('vodVideoElement');
+      const curTime = video ? video.currentTime : (this.vodReview.currentTime || 0);
+
+      const modal = document.createElement('div');
+      modal.id = 'vodBookmarkModal';
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel p-5 max-w-md w-full rounded-2xl border border-purple-500/60 bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 shadow-2xl space-y-4">
+          <div class="flex items-center justify-between border-b border-purple-500/30 pb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">🔖</span>
+              <div>
+                <h3 class="text-base font-heading font-black text-white uppercase tracking-wider">Add Coaching Keyframe</h3>
+                <p class="text-xs text-slate-400 font-mono">Timestamp: <span class="text-cyan-400 font-bold" id="bmModalTimeDisplay">${formatTime(curTime)}</span></p>
+              </div>
+            </div>
+            <button id="closeBmModalBtn" class="text-slate-400 hover:text-white text-lg">✕</button>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs font-sub font-bold text-slate-300 uppercase">Keyframe Title</label>
+              <input type="text" id="bmModalTitle" placeholder="e.g. Phase 2 Hard Shift Gatekeep" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white mt-1 focus:outline-none focus:border-purple-400">
+            </div>
+
+            <div>
+              <label class="text-xs font-sub font-bold text-slate-300 uppercase">Category Tag</label>
+              <select id="bmModalTag" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-purple-300 font-mono mt-1 focus:outline-none">
+                <option value="rotation">🔄 ROTATION (Map path & zone timing)</option>
+                <option value="drop">🪂 DROP POI (Loot split & early duel)</option>
+                <option value="utility">🛡️ UTILITY / GLOO (Wall placement & grenade)</option>
+                <option value="blunder">⚠️ BLUNDER / MISTAKE (Positioning error)</option>
+                <option value="clutch">🏆 CLUTCH / FIGHT (2v4 or trade knock execution)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="text-xs font-sub font-bold text-slate-300 uppercase">Coach Tactical Notes</label>
+              <textarea id="bmModalNotes" rows="3" placeholder="Key coaching breakdown or squad feedback for this exact second..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 mt-1 focus:outline-none focus:border-purple-400"></textarea>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 bg-purple-950/40 rounded-lg border border-purple-500/30">
+              <input type="checkbox" id="bmModalSaveAnnotations" checked class="accent-purple-500">
+              <label for="bmModalSaveAnnotations" class="text-[11px] text-slate-300 cursor-pointer">
+                Capture current whiteboard drawings & pins for this keyframe
+              </label>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <button id="cancelBmModalBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-sub text-xs rounded-lg uppercase">
+              Cancel
+            </button>
+            <button id="saveBmModalBtn" class="px-4 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow">
+              Save Keyframe
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      const closeModal = () => modal.remove();
+      modal.querySelector('#closeBmModalBtn')?.addEventListener('click', closeModal);
+      modal.querySelector('#cancelBmModalBtn')?.addEventListener('click', closeModal);
+
+      modal.querySelector('#saveBmModalBtn')?.addEventListener('click', () => {
+        const title = modal.querySelector('#bmModalTitle')?.value || '';
+        const tag = modal.querySelector('#bmModalTag')?.value || 'rotation';
+        const notes = modal.querySelector('#bmModalNotes')?.value || '';
+        const saveAnnotations = modal.querySelector('#bmModalSaveAnnotations')?.checked;
+
+        const snapshot = (saveAnnotations && this.whiteboard) 
+          ? JSON.parse(JSON.stringify(this.whiteboard.userElements)) 
+          : [];
+
+        const newBookmark = {
+          id: 'bm_' + Date.now(),
+          time: Math.round(curTime),
+          title: title.trim() || `Bookmark @ ${formatTime(curTime)}`,
+          tag: tag,
+          notes: notes.trim(),
+          map: this.whiteboard?.currentMap || 'bermuda',
+          zonePhase: this.whiteboard?.safeZone?.phase || 1,
+          elements: snapshot
+        };
+
+        this.vodReview.bookmarks.push(newBookmark);
+        this.vodReview.selectedBookmarkId = newBookmark.id;
+
+        const bmsCont = document.getElementById('vodBookmarksContainer');
+        if (bmsCont) {
+          bmsCont.innerHTML = this.renderVodBookmarkCards();
+          this.bindVodBookmarkListEvents();
+        }
+
+        this.broadcastVodAction({
+          type: 'new_bookmark',
+          bookmark: newBookmark
+        });
+
+        closeModal();
+      });
+    }
+
+    bindVodReviewEvents(container) {
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const video = document.getElementById('vodVideoElement');
+      const scrubber = document.getElementById('vodScrubber');
+      const curDisplay = document.getElementById('vodCurrentTimeDisplay');
+      const durDisplay = document.getElementById('vodDurationDisplay');
+      const hudTime = document.getElementById('vodHudTime');
+      const playBtn = document.getElementById('vodPlayPauseBtn');
+      const customUrlBar = document.getElementById('vodCustomUrlBar');
+      const toggleUrlBtn = document.getElementById('vodToggleUrlInputBtn');
+      const loadUrlBtn = document.getElementById('vodLoadCustomUrlBtn');
+      const urlInput = document.getElementById('vodCustomUrlInput');
+      const localFileInput = document.getElementById('vodLocalFileInput');
+      const ytWrapper = document.getElementById('vodYoutubeWrapper');
+
+      // 1. Preset Buttons
+      container.querySelectorAll('.vod-preset-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const presetId = btn.getAttribute('data-preset-id');
+          this.loadVodPreset(presetId);
+        });
+      });
+
+      // 2. Toggle Custom URL Bar
+      if (toggleUrlBtn && customUrlBar) {
+        toggleUrlBtn.addEventListener('click', () => {
+          customUrlBar.classList.toggle('hidden');
+          if (!customUrlBar.classList.contains('hidden') && urlInput) {
+            urlInput.focus();
+          }
+        });
+      }
+
+      // 3. Load Custom Video URL or YouTube
+      if (loadUrlBtn && urlInput) {
+        loadUrlBtn.addEventListener('click', () => {
+          const url = urlInput.value.trim();
+          if (!url) return;
+          this.loadCustomVodUrl(url);
+        });
+      }
+
+      // 4. Local File Input
+      if (localFileInput) {
+        localFileInput.addEventListener('change', (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const objectUrl = URL.createObjectURL(file);
+          this.vodReview.sourceType = 'mp4';
+          this.vodReview.videoUrl = objectUrl;
+          if (video) {
+            video.classList.remove('hidden');
+            if (ytWrapper) ytWrapper.classList.add('hidden');
+            video.src = objectUrl;
+            video.load();
+            video.play().catch(() => {});
+          }
+          const badgeTitle = document.getElementById('vodVideoBadgeTitle');
+          if (badgeTitle) badgeTitle.textContent = `Local: ${file.name}`;
+          this.vodReview.currentTime = 0;
+        });
+      }
+
+      // 5. Video Element Metadata & Playback Listeners
+      if (video) {
+        video.addEventListener('loadedmetadata', () => {
+          const d = Math.round(video.duration || 720);
+          this.vodReview.duration = d;
+          if (scrubber) scrubber.max = d;
+          if (durDisplay) durDisplay.textContent = formatTime(d);
+        });
+
+        video.addEventListener('timeupdate', () => {
+          const t = video.currentTime;
+          this.vodReview.currentTime = t;
+          if (scrubber && document.activeElement !== scrubber) {
+            scrubber.value = t;
+          }
+          if (curDisplay) curDisplay.textContent = formatTime(t);
+          if (hudTime) hudTime.textContent = formatTime(t);
+        });
+
+        video.addEventListener('play', () => {
+          this.vodReview.isPlaying = true;
+          this.updateVodPlayPauseUI(true);
+        });
+
+        video.addEventListener('pause', () => {
+          this.vodReview.isPlaying = false;
+          this.updateVodPlayPauseUI(false);
+        });
+
+        video.addEventListener('ended', () => {
+          this.vodReview.isPlaying = false;
+          this.updateVodPlayPauseUI(false);
+        });
+      }
+
+      // 6. Play / Pause Button
+      if (playBtn) {
+        playBtn.addEventListener('click', () => {
+          this.toggleVodPlayPause();
+        });
+      }
+
+      // 7. Scrubber Drag / Input
+      if (scrubber) {
+        scrubber.addEventListener('input', (e) => {
+          const val = parseFloat(e.target.value);
+          this.seekVodToTime(val, false);
+        });
+        scrubber.addEventListener('change', (e) => {
+          const val = parseFloat(e.target.value);
+          this.seekVodToTime(val, true);
+        });
+      }
+
+      // 8. Frame Stepping Buttons (-5s, -1s, +1s, +5s)
+      document.getElementById('vodStepBack5')?.addEventListener('click', () => this.stepVodFrames(-5));
+      document.getElementById('vodStepBack1')?.addEventListener('click', () => this.stepVodFrames(-1));
+      document.getElementById('vodStepFwd1')?.addEventListener('click', () => this.stepVodFrames(1));
+      document.getElementById('vodStepFwd5')?.addEventListener('click', () => this.stepVodFrames(5));
+
+      // 9. Speed Buttons
+      container.querySelectorAll('.vod-speed-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const spd = parseFloat(btn.getAttribute('data-speed'));
+          this.setVodPlaybackRate(spd);
+        });
+      });
+
+      // 10. Bookmark Frame Button
+      document.getElementById('vodAddBookmarkBtn')?.addEventListener('click', () => {
+        this.showVodAddBookmarkModal();
+      });
+
+      // 11. Bind Bookmark Item Click and Delete
+      this.bindVodBookmarkListEvents();
+    }
+
+    bindVodBookmarkListEvents() {
+      const container = document.getElementById('vodBookmarksContainer');
+      if (!container) return;
+
+      container.querySelectorAll('.vod-bookmark-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.vod-bm-delete-btn')) return;
+          const bmId = card.getAttribute('data-bm-id');
+          this.jumpToVodBookmark(bmId);
+        });
+      });
+
+      container.querySelectorAll('.vod-bm-jump-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bmId = btn.getAttribute('data-bm-id');
+          this.jumpToVodBookmark(bmId);
+        });
+      });
+
+      container.querySelectorAll('.vod-bm-delete-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bmId = btn.getAttribute('data-bm-id');
+          this.vodReview.bookmarks = this.vodReview.bookmarks.filter(b => b.id !== bmId);
+          container.innerHTML = this.renderVodBookmarkCards();
+          this.bindVodBookmarkListEvents();
+        });
+      });
+    }
+
+    loadVodPreset(presetId) {
+      const preset = this.vodPresets.find(p => p.id === presetId);
+      if (!preset) return;
+      this.vodReview.selectedPresetId = presetId;
+
+      document.querySelectorAll('.vod-preset-pill').forEach(btn => {
+        if (btn.getAttribute('data-preset-id') === presetId) {
+          btn.className = 'vod-preset-pill px-2.5 py-1 rounded text-xs font-sub font-bold transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow';
+        } else {
+          btn.className = 'vod-preset-pill px-2.5 py-1 rounded text-xs font-sub font-bold transition-all bg-slate-900 text-slate-300 hover:text-white border border-slate-800';
+        }
+      });
+
+      const video = document.getElementById('vodVideoElement');
+      const ytWrapper = document.getElementById('vodYoutubeWrapper');
+      const badgeTitle = document.getElementById('vodVideoBadgeTitle');
+      if (badgeTitle) badgeTitle.textContent = preset.title;
+
+      this.vodReview.sourceType = 'preset';
+      this.vodReview.videoUrl = preset.videoUrl;
+      this.vodReview.duration = preset.duration;
+
+      if (video) {
+        video.classList.remove('hidden');
+        if (ytWrapper) ytWrapper.classList.add('hidden');
+        video.src = preset.videoUrl;
+        video.load();
+      }
+
+      const scrubber = document.getElementById('vodScrubber');
+      if (scrubber) {
+        scrubber.max = preset.duration;
+        scrubber.value = 0;
+      }
+      this.seekVodToTime(0, true);
+
+      if (preset.map && this.whiteboard && this.whiteboard.currentMap !== preset.map) {
+        this.whiteboard.setMap(preset.map, true);
+        const mapSelect = document.getElementById('mapSelect');
+        if (mapSelect) mapSelect.value = preset.map;
+      }
+    }
+
+    loadCustomVodUrl(url) {
+      const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+      const match = url.match(regExp);
+      const ytId = (match && match[2].length === 11) ? match[2] : null;
+
+      const video = document.getElementById('vodVideoElement');
+      const ytWrapper = document.getElementById('vodYoutubeWrapper');
+      const ytIframe = document.getElementById('vodYoutubeIframe');
+      const badgeTitle = document.getElementById('vodVideoBadgeTitle');
+
+      if (ytId) {
+        this.vodReview.sourceType = 'youtube';
+        this.vodReview.youtubeId = ytId;
+        if (video) video.classList.add('hidden');
+        if (ytWrapper) ytWrapper.classList.remove('hidden');
+        if (ytIframe) ytIframe.src = `https://www.youtube-nocookie.com/embed/${ytId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
+        if (badgeTitle) badgeTitle.textContent = `YouTube Match Stream: ${ytId}`;
+      } else {
+        this.vodReview.sourceType = 'mp4';
+        this.vodReview.videoUrl = url;
+        if (ytWrapper) ytWrapper.classList.add('hidden');
+        if (video) {
+          video.classList.remove('hidden');
+          video.src = url;
+          video.load();
+          video.play().catch(() => {});
+        }
+        if (badgeTitle) badgeTitle.textContent = `VOD Stream: ${url.split('/').pop()}`;
+      }
+    }
+
+    toggleVodPlayPause() {
+      const video = document.getElementById('vodVideoElement');
+      if (!video) return;
+      if (video.paused) {
+        video.play().catch(e => console.log('Autoplay prevented:', e));
+        this.vodReview.isPlaying = true;
+        this.updateVodPlayPauseUI(true);
+        this.broadcastVodAction({ type: 'play', time: video.currentTime });
+      } else {
+        video.pause();
+        this.vodReview.isPlaying = false;
+        this.updateVodPlayPauseUI(false);
+        this.broadcastVodAction({ type: 'pause', time: video.currentTime });
+      }
+    }
+
+    updateVodPlayPauseUI(isPlaying) {
+      const icon = document.getElementById('vodPlayIcon');
+      const txt = document.getElementById('vodPlayText');
+      if (icon) icon.textContent = isPlaying ? '⏸' : '▶';
+      if (txt) txt.textContent = isPlaying ? 'Pause' : 'Play';
+    }
+
+    seekVodToTime(timeSec, broadcast = true) {
+      const video = document.getElementById('vodVideoElement');
+      const t = Math.max(0, parseFloat(timeSec) || 0);
+      this.vodReview.currentTime = t;
+      if (video && Math.abs(video.currentTime - t) > 0.3) {
+        video.currentTime = t;
+      }
+      const curDisplay = document.getElementById('vodCurrentTimeDisplay');
+      const hudTime = document.getElementById('vodHudTime');
+      const scrubber = document.getElementById('vodScrubber');
+
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      if (curDisplay) curDisplay.textContent = formatTime(t);
+      if (hudTime) hudTime.textContent = formatTime(t);
+      if (scrubber && document.activeElement !== scrubber) scrubber.value = t;
+
+      if (broadcast) {
+        this.broadcastVodAction({ type: 'seek', time: t });
+      }
+    }
+
+    stepVodFrames(deltaSec) {
+      const video = document.getElementById('vodVideoElement');
+      const cur = video ? video.currentTime : (this.vodReview.currentTime || 0);
+      const target = Math.max(0, Math.min(this.vodReview.duration || 720, cur + deltaSec));
+      this.seekVodToTime(target, true);
+    }
+
+    setVodPlaybackRate(rate) {
+      this.vodReview.playbackRate = rate;
+      const video = document.getElementById('vodVideoElement');
+      if (video) video.playbackRate = rate;
+
+      document.querySelectorAll('.vod-speed-btn').forEach(btn => {
+        const r = parseFloat(btn.getAttribute('data-speed'));
+        if (r === rate) {
+          btn.className = 'vod-speed-btn px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all bg-purple-600 text-white';
+        } else {
+          btn.className = 'vod-speed-btn px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all text-slate-400 hover:text-white';
+        }
+      });
+    }
+
+    jumpToVodBookmark(bmId) {
+      const bm = this.vodReview.bookmarks.find(b => b.id === bmId);
+      if (!bm) return;
+      this.vodReview.selectedBookmarkId = bm.id;
+
+      const video = document.getElementById('vodVideoElement');
+      if (video) {
+        video.currentTime = bm.time;
+      }
+      this.vodReview.currentTime = bm.time;
+
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const scrubber = document.getElementById('vodScrubber');
+      if (scrubber) scrubber.value = bm.time;
+      const curDisplay = document.getElementById('vodCurrentTimeDisplay');
+      if (curDisplay) curDisplay.textContent = formatTime(bm.time);
+      const hudTime = document.getElementById('vodHudTime');
+      if (hudTime) hudTime.textContent = formatTime(bm.time);
+
+      if (this.whiteboard) {
+        if (bm.map && bm.map !== this.whiteboard.currentMap) {
+          this.whiteboard.setMap(bm.map, false);
+          const mapSelect = document.getElementById('mapSelect');
+          if (mapSelect) mapSelect.value = bm.map;
+        }
+        if (bm.zonePhase) {
+          this.whiteboard.setZonePhase(bm.zonePhase);
+        }
+        if (Array.isArray(bm.elements)) {
+          this.whiteboard.userElements = JSON.parse(JSON.stringify(bm.elements));
+          this.whiteboard.redrawAll();
+        }
+      }
+
+      document.querySelectorAll('.vod-bookmark-card').forEach(card => {
+        if (card.getAttribute('data-bm-id') === bmId) {
+          card.classList.add('border-cyan-400', 'bg-cyan-950/30', 'shadow-md');
+          card.classList.remove('border-slate-800', 'bg-slate-900/70');
+        } else {
+          card.classList.remove('border-cyan-400', 'bg-cyan-950/30', 'shadow-md');
+          card.classList.add('border-slate-800', 'bg-slate-900/70');
+        }
+      });
+
+      this.broadcastVodAction({
+        type: 'bookmark_jump',
+        bookmarkId: bm.id,
+        time: bm.time,
+        map: bm.map,
+        zonePhase: bm.zonePhase,
+        elements: bm.elements
+      });
+    }
+
+    broadcastVodAction(data) {
+      const roomCode = window.underdogSupabase?.activeTacticalRoomCode;
+      if (!roomCode || !window.underdogSupabase) return;
+      window.underdogSupabase.broadcastTacticalAction('vod_action', data);
+    }
+
+    handleRemoteVodAction(data, sender, role) {
+      if (!data) return;
+      const video = document.getElementById('vodVideoElement');
+      const scrubber = document.getElementById('vodScrubber');
+      const timeDisplay = document.getElementById('vodCurrentTimeDisplay');
+      const hudTime = document.getElementById('vodHudTime');
+
+      const formatTime = (secs) => {
+        if (isNaN(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      if (data.type === 'seek' || data.type === 'bookmark_jump') {
+        const t = Math.max(0, parseFloat(data.time) || 0);
+        this.vodReview.currentTime = t;
+        if (video) {
+          video.currentTime = t;
+        }
+        if (scrubber) scrubber.value = t;
+        if (timeDisplay) timeDisplay.textContent = formatTime(t);
+        if (hudTime) hudTime.textContent = formatTime(t);
+
+        if (data.type === 'bookmark_jump') {
+          if (data.map && this.whiteboard && this.whiteboard.currentMap !== data.map) {
+            this.whiteboard.setMap(data.map, false);
+            const mapSelect = document.getElementById('mapSelect');
+            if (mapSelect) mapSelect.value = data.map;
+          }
+          if (data.zonePhase && this.whiteboard) {
+            this.whiteboard.setZonePhase(data.zonePhase);
+          }
+          if (Array.isArray(data.elements) && this.whiteboard) {
+            this.whiteboard.userElements = JSON.parse(JSON.stringify(data.elements));
+            this.whiteboard.redrawAll();
+          }
+        }
+      } else if (data.type === 'play') {
+        if (video && video.paused) {
+          video.play().catch(e => console.log('Autoplay prevented:', e));
+        }
+        this.vodReview.isPlaying = true;
+        this.updateVodPlayPauseUI(true);
+      } else if (data.type === 'pause') {
+        if (video && !video.paused) {
+          video.pause();
+        }
+        this.vodReview.isPlaying = false;
+        this.updateVodPlayPauseUI(false);
+      } else if (data.type === 'new_bookmark') {
+        if (data.bookmark) {
+          this.vodReview.bookmarks.push(data.bookmark);
+          const bmsCont = document.getElementById('vodBookmarksContainer');
+          if (bmsCont) {
+            bmsCont.innerHTML = this.renderVodBookmarkCards();
+            this.bindVodBookmarkListEvents();
+          }
+        }
+      }
     }
 
     // --- MAP ATLAS & POIS TAB (STRICTLY SEPARATED BY GAME) ---
