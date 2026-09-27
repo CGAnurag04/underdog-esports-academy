@@ -1,36 +1,83 @@
 -- ============================================================================
--- UNDERDOG ESPORTS ACADEMY - OFFICIAL SUPABASE DATABASE SCHEMA (v3.0)
+-- UNDERDOG ESPORTS ACADEMY - OFFICIAL SUPABASE DATABASE SCHEMA (v3.2)
+-- Multi-Channel Authentication: Phone SMS OTP, Google OAuth & Profiles Storage
 -- Copy and paste this script into your Supabase Dashboard SQL Editor and click "Run"
 -- Dashboard Link: https://supabase.com/dashboard/project/iwggpixdxhdetncnossa/sql
 -- ============================================================================
 
 -- 1. PROFILES TABLE
--- Stores player IGN, combat role, player UID, clan tag, and avatar
+-- Stores player IGN, combat role, player UID, clan tag, phone, avatar, and auth provider
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE,
+  phone TEXT UNIQUE,
+  phone_verified BOOLEAN DEFAULT false,
   ign TEXT NOT NULL DEFAULT 'Recruit',
   player_uid TEXT,
   clan_tag TEXT DEFAULT 'UDG',
   role TEXT DEFAULT 'Rusher',
   avatar_url TEXT,
+  auth_provider TEXT DEFAULT 'email', -- 'phone', 'google', 'discord', 'email', 'guest'
+  metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Automated Trigger: Auto-create player profile on Supabase Auth signup
+-- Backwards-compatible migrations for existing deployments
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'email';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
+-- Automated Trigger: Auto-create player profile on Supabase Auth signup (Phone, Google, Email)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_ign TEXT;
+  v_phone TEXT;
+  v_provider TEXT;
 BEGIN
-  INSERT INTO public.profiles (id, email, ign, role, clan_tag)
+  -- Determine provider (google, phone, email, etc.)
+  v_provider := COALESCE(new.raw_app_meta_data->>'provider', 'email');
+  IF new.phone IS NOT NULL AND new.phone != '' THEN
+    v_provider := 'phone';
+  END IF;
+
+  -- Determine IGN: try user_metadata ign, then full_name, then name, then email prefix, then phone
+  v_ign := COALESCE(
+    new.raw_user_meta_data->>'ign',
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'name',
+    CASE 
+      WHEN new.email IS NOT NULL AND new.email != '' THEN split_part(new.email, '@', 1)
+      WHEN new.phone IS NOT NULL AND new.phone != '' THEN 'Player_' || right(new.phone, 4)
+      ELSE 'Recruit'
+    END
+  );
+
+  v_phone := COALESCE(new.phone, new.raw_user_meta_data->>'phone');
+
+  INSERT INTO public.profiles (id, email, phone, phone_verified, ign, role, clan_tag, avatar_url, auth_provider, metadata)
   VALUES (
     new.id,
     new.email,
-    COALESCE(new.raw_user_meta_data->>'ign', split_part(new.email, '@', 1)),
+    v_phone,
+    CASE WHEN new.phone IS NOT NULL AND new.phone != '' THEN true ELSE false END,
+    v_ign,
     COALESCE(new.raw_user_meta_data->>'role', 'Rusher'),
-    COALESCE(new.raw_user_meta_data->>'clan_tag', 'UDG')
+    COALESCE(new.raw_user_meta_data->>'clan_tag', 'UDG'),
+    COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', ''),
+    v_provider,
+    COALESCE(new.raw_user_meta_data, '{}'::jsonb)
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    phone = COALESCE(EXCLUDED.phone, public.profiles.phone),
+    phone_verified = COALESCE(EXCLUDED.phone_verified, public.profiles.phone_verified),
+    ign = CASE WHEN public.profiles.ign = 'Recruit' THEN EXCLUDED.ign ELSE public.profiles.ign END,
+    avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), public.profiles.avatar_url),
+    auth_provider = COALESCE(EXCLUDED.auth_provider, public.profiles.auth_provider),
+    updated_at = timezone('utc'::text, now());
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
