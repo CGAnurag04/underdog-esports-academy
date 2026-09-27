@@ -721,14 +721,55 @@ h1, h2, h3, .font-heading {
       this.activeTacticalRoomCode = null;
     }
 
-    // --- REALTIME SCRIM LOBBY ---
-    joinScrimLobby(lobbyCode, onScoreUpdate) {
-      if (!this.client) return null;
+    // --- REALTIME SCRIM LOBBY (COLLABORATIVE MULTIPLAYER LEADERBOARD) ---
+    async joinScrimLobby(lobbyCode, onScoreUpdate, onLobbyLoaded, onPresenceChange) {
+      if (!this.client) {
+        console.warn('Supabase client not connected. Running in offline scrim lobby mode.');
+        return null;
+      }
+      const code = (lobbyCode || 'SCRIM1').trim().toUpperCase();
+      this.activeScrimLobbyCode = code;
+
       if (this.scrimChannel) {
-        this.client.removeChannel(this.scrimChannel);
+        try { this.client.removeChannel(this.scrimChannel); } catch (e) {}
       }
 
-      const channelName = `scrim_lobby_${lobbyCode.toUpperCase()}`;
+      // 1. Query public.scrim_lobbies from cloud to restore existing tournament state
+      try {
+        const { data, error } = await this.client
+          .from('scrim_lobbies')
+          .select('*')
+          .eq('lobby_code', code)
+          .single();
+
+        if (!error && data) {
+          console.log('✅ Loaded scrim lobby from Supabase cloud:', data.lobby_code);
+          if (typeof onLobbyLoaded === 'function') {
+            onLobbyLoaded(data);
+          }
+        } else if (error && (error.code === 'PGRST116' || error.status === 406)) {
+          // Lobby does not exist yet; initialize it
+          const teams = window.app?.ffLobbyTeams || [];
+          const meta = window.app?.ffTourneyMeta || {};
+          await this.client.from('scrim_lobbies').upsert({
+            lobby_code: code,
+            title: meta.title || 'Free Fire Max Tier-1 Scrims',
+            stage: meta.stage || 'Grand Finals',
+            teams: teams,
+            match_number: 1,
+            total_matches: 6,
+            is_live: true,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'lobby_code' });
+        }
+      } catch (err) {
+        console.warn('Scrim lobby cloud fetch note:', err.message);
+      }
+
+      // 2. Subscribe to Supabase Realtime Broadcast Channel
+      const channelName = `scrim_lobby_${code}`;
+      console.log(`⚡ Connecting to Supabase Scrim Realtime Channel: ${channelName}`);
+
       this.scrimChannel = this.client.channel(channelName, {
         config: { broadcast: { self: false } }
       });
@@ -739,24 +780,98 @@ h1, h2, h3, .font-heading {
             onScoreUpdate(payload.payload);
           }
         })
+        .on('broadcast', { event: 'peer_joined' }, (payload) => {
+          const peer = payload.payload || {};
+          console.log('👤 Peer connected to scrim lobby:', peer);
+          const ticker = document.getElementById('scrimLobbyActivityTicker');
+          if (ticker) {
+            ticker.textContent = `🟢 [${peer.role || 'Squad'}] ${peer.ign || 'Teammate'} connected!`;
+            setTimeout(() => {
+              if (ticker && ticker.textContent.includes('connected')) {
+                ticker.textContent = `Room ${code} • Realtime sync active`;
+              }
+            }, 3000);
+          }
+          if (typeof onPresenceChange === 'function') {
+            onPresenceChange(peer);
+          }
+        })
         .subscribe((status) => {
-          console.log(`Scrim lobby [${lobbyCode}] status:`, status);
+          console.log(`Scrim lobby [${code}] status:`, status);
+          if (status === 'SUBSCRIBED') {
+            this.broadcastScrimUpdate('peer_joined', {
+              ign: window.app?.currentUser?.ign || 'Underdog IGL',
+              role: window.app?.currentUser?.role || 'IGL',
+              joinedAt: Date.now()
+            });
+          }
         });
 
       return this.scrimChannel;
     }
 
-    broadcastScrimUpdate(lobbyData) {
+    broadcastScrimUpdate(actionType, data) {
       if (!this.scrimChannel) return;
+      const user = window.app?.currentUser || {};
+      const payload = {
+        actionType: actionType || 'score_update',
+        data: data || {},
+        sender: user.ign || 'Coach Duker',
+        senderRole: user.role || 'IGL',
+        timestamp: Date.now(),
+        roomCode: this.activeScrimLobbyCode || 'SCRIM1'
+      };
+
       this.scrimChannel.send({
         type: 'broadcast',
         event: 'scrim_update',
-        payload: {
-          lobby: lobbyData,
-          sender: window.app?.currentUser?.ign || 'Host',
-          timestamp: Date.now()
-        }
+        payload: payload
       }).catch(err => console.error('Broadcast scrim update error:', err));
+    }
+
+    saveScrimLobbyToCloud(lobbyCode, state) {
+      if (!this.client || !lobbyCode) return;
+      clearTimeout(this._scrimCloudDebounce);
+      this._scrimCloudDebounce = setTimeout(async () => {
+        try {
+          const code = lobbyCode.trim().toUpperCase();
+          const { error } = await this.client
+            .from('scrim_lobbies')
+            .upsert({
+              lobby_code: code,
+              title: state.title || 'Free Fire Max Tier-1 Scrims',
+              stage: state.stage || 'Grand Finals',
+              teams: state.teams || [],
+              match_number: state.matchNumber || 1,
+              total_matches: state.totalMatches || 6,
+              is_live: true,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'lobby_code' });
+
+          if (!error) {
+            console.log('☁️ Scrim lobby state auto-saved to Supabase Postgres:', code);
+            const indicator = document.getElementById('scrimCloudSyncIndicator');
+            if (indicator) {
+              indicator.textContent = 'Synced ☁️';
+              setTimeout(() => {
+                if (indicator) indicator.textContent = 'Cloud Active 🟢';
+              }, 2000);
+            }
+          } else {
+            console.warn('Scrim lobby auto-save error:', error.message);
+          }
+        } catch (err) {
+          console.warn('Scrim lobby save exception:', err);
+        }
+      }, 1000);
+    }
+
+    leaveScrimLobby() {
+      if (this.scrimChannel && this.client) {
+        try { this.client.removeChannel(this.scrimChannel); } catch (e) {}
+        this.scrimChannel = null;
+      }
+      this.activeScrimLobbyCode = null;
     }
 
     // --- CLOUD USER DATA PERSISTENCE ---
@@ -6767,28 +6882,15 @@ this.ffSelectedLoadout = {
         { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
         { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
       ];
-      // 12-Team Tournament Lobby & PointCalc Generator State
-      this.ffScrimMode = 'scorekeeper'; // 'lobby' (PointCalc style) or 'my_squad'
-      this.ffTourneyMeta = {
-        title: 'FREE FIRE MAX TIER-1 SCRIMS',
-        stage: 'GRAND FINALS • MATCH 1 TO 6',
-        organizer: 'UNDERDOG ESPORTS',
-        date: 'SEPTEMBER 2026'
+      // Real-time Scrim Tournament Lobby Room State
+      this.scrimLobbyRoom = {
+        code: 'SCRIM1',
+        connected: false,
+        isHost: true,
+        presenceCount: 1,
+        lastUpdatedTeamId: null,
+        recentActivity: 'Ready for real-time tournament leaderboard broadcast...'
       };
-      this.ffLobbyTeams = [
-        { id: 'tg', name: 'Total Gaming Esports', tag: 'TG', matches: 6, booyahs: 2, placementPts: 42, kills: 34, totalPts: 76 },
-        { id: 'og', name: 'Orangutan', tag: 'OG', matches: 6, booyahs: 1, placementPts: 38, kills: 31, totalPts: 69 },
-        { id: 'hind', name: 'Team Hind / Apex', tag: 'HIND', matches: 6, booyahs: 1, placementPts: 32, kills: 28, totalPts: 60 },
-        { id: 's8ul', name: 'S8UL Esports', tag: 'S8UL', matches: 6, booyahs: 1, placementPts: 28, kills: 26, totalPts: 54 },
-        { id: 'falcons', name: 'Team Falcons', tag: 'FLCN', matches: 6, booyahs: 1, placementPts: 26, kills: 25, totalPts: 51 },
-        { id: 'buriram', name: 'Buriram United', tag: 'BRU', matches: 6, booyahs: 0, placementPts: 24, kills: 24, totalPts: 48 },
-        { id: 'fluxo', name: 'Fluxo W7M', tag: 'FLUX', matches: 6, booyahs: 0, placementPts: 22, kills: 21, totalPts: 43 },
-        { id: 'godl', name: 'GodLike Esports', tag: 'GODL', matches: 6, booyahs: 0, placementPts: 18, kills: 22, totalPts: 40 },
-        { id: 'horaa', name: 'Horaa Esports', tag: 'HORA', matches: 6, booyahs: 0, placementPts: 16, kills: 19, totalPts: 35 },
-        { id: 'rnt', name: 'Revenant Esports', tag: 'RNT', matches: 6, booyahs: 0, placementPts: 14, kills: 16, totalPts: 30 },
-        { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
-        { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
-      ];
       this.ffScrimMatches = this.loadFFScrimMatches();
       this.ffActiveTargetSlot = 'active'; // 'active', 'p1', 'p2', 'p3', 'pet', 'loadout'
       this.ffCharacterFilter = 'all';
@@ -14348,14 +14450,55 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           <!-- ============================================================ -->
           <!-- MODE 5: 12-TEAM LOBBY LEADERBOARD & BROADCAST EXPORTER -->
           <!-- ============================================================ -->
+          <!-- ============================================================ -->
+          <!-- MODE 5: 12-TEAM LOBBY LEADERBOARD & REALTIME BROADCAST ENGINE -->
+          <!-- ============================================================ -->
           ${this.ffScrimMode === 'lobby' ? `
-            <div class="space-y-6">
+            <div class="space-y-6 animate-fade-in" id="scrimLobbyBroadcastContainer">
+              <!-- Scrim Lobby Collaboration Bar -->
+              <div class="cyber-panel p-3.5 px-4 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-slate-950 via-[#1e1308] to-slate-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
+                <div class="flex items-center gap-3">
+                  <span id="scrimLobbyLiveDot" class="w-3 h-3 rounded-full ${this.scrimLobbyRoom?.connected ? 'bg-amber-400 animate-ping' : 'bg-slate-600'} transition-all"></span>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>📡</span>
+                        <span>Live Scrim Tournament Lobby:</span>
+                      </span>
+                      <div id="activeScrimLobbyLabel" class="text-[10px] font-mono ${this.scrimLobbyRoom?.connected ? 'text-amber-400 font-bold' : 'text-slate-400 font-bold'}">
+                        ${this.scrimLobbyRoom?.connected ? `LIVE SYNC [${this.scrimLobbyRoom.code}] 🟢` : 'Status: Standalone / Offline'}
+                      </div>
+                    </div>
+                    <div id="scrimLobbyActivityTicker" class="text-[11px] font-mono text-slate-400 mt-0.5 truncate max-w-sm">
+                      ${this.scrimLobbyRoom?.recentActivity || 'Ready for real-time tournament leaderboard broadcast...'}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <input type="text" id="scrimLobbyCodeInput" value="${this.scrimLobbyRoom?.code || 'SCRIM1'}" placeholder="CODE (e.g. SCRIM7)" maxlength="8" class="bg-slate-900 border border-amber-500/40 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-mono uppercase focus:outline-none w-28 text-center shadow-inner" />
+                  <button id="joinScrimLobbyBtn" class="px-3 py-1 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-black font-sub font-bold text-xs rounded-lg uppercase tracking-wider shadow transition-all">
+                    ${this.scrimLobbyRoom?.connected ? 'Disconnect' : 'Join Lobby'}
+                  </button>
+                  <button id="createScrimLobbyBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-sub text-xs rounded-lg uppercase transition-all" title="Generate New Scrim Room Code">
+                    ⚡ Code
+                  </button>
+                  <button id="shareScrimLobbyBtn" class="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Share Leaderboard on WhatsApp">
+                    <span>📲</span> WhatsApp
+                  </button>
+                  <button id="manualSyncScrimCloudBtn" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-sub text-xs rounded-lg uppercase flex items-center gap-1 transition-all" title="Save Leaderboard to Supabase Cloud">
+                    <span id="scrimCloudSyncDot" class="w-2 h-2 rounded-full ${this.scrimLobbyRoom?.connected ? 'bg-amber-400' : 'bg-slate-600'}"></span>
+                    <span id="scrimCloudSyncIndicator">Cloud Sync</span>
+                  </button>
+                </div>
+              </div>
+
               <!-- Action Toolbar & Metadata Controls -->
               <div class="cyber-panel p-4 rounded-2xl border border-amber-500/30 bg-slate-950/80 space-y-4">
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
                   <div>
                     <h4 class="text-xs font-heading font-bold uppercase text-amber-400 tracking-wider">Tournament Identity & Broadcast Settings</h4>
-                    <p class="text-[11px] text-slate-400">These details will appear on the exported broadcast leaderboard image.</p>
+                    <p class="text-[11px] text-slate-400">These details will appear on the exported broadcast leaderboard image and live squad broadcast.</p>
                   </div>
 
                   <!-- Export Buttons -->
@@ -14408,7 +14551,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
               </div>
 
               <!-- Top 3 Podium Highlights -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="scrimPodiumContainer">
                 <div class="cyber-panel p-3.5 rounded-xl border border-amber-500/40 bg-gradient-to-b from-amber-950/20 to-slate-950 flex items-center justify-between">
                   <div class="flex items-center gap-3">
                     <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center text-lg font-black text-amber-400">#1</div>
@@ -14452,9 +14595,9 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                 </div>
               </div>
 
-              <!-- 12-Team Table -->
+              <!-- 12-Team Table with Realtime Fast Action Steppers -->
               <div class="cyber-panel p-4 rounded-2xl border border-slate-800 bg-slate-950 overflow-x-auto">
-                <table class="w-full text-left text-xs text-slate-300">
+                <table class="w-full text-left text-xs text-slate-300" id="scrimLobbyTeamsTable">
                   <thead class="text-[10px] font-sub uppercase font-bold text-slate-400 border-b border-slate-800 bg-slate-900/60">
                     <tr>
                       <th class="p-3">#</th>
@@ -14465,12 +14608,12 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                       <th class="p-3 text-center">Place Pts</th>
                       <th class="p-3 text-center">Kills ⚔️</th>
                       <th class="p-3 text-center font-bold text-white">Total Pts</th>
-                      <th class="p-3 text-right">Edit</th>
+                      <th class="p-3 text-right">Quick Actions</th>
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-slate-800/60">
+                  <tbody class="divide-y divide-slate-800/60" id="scrimLobbyTableBody">
                     ${sortedTeams.map((team, idx) => `
-                      <tr class="hover:bg-slate-900/40 transition-colors">
+                      <tr id="scrimTeamRow_${team.id}" class="scrim-team-row hover:bg-slate-900/40 transition-all ${this.scrimLobbyRoom?.lastUpdatedTeamId === team.id ? 'bg-amber-500/20 ring-1 ring-amber-400' : ''}">
                         <td class="p-3 font-mono font-bold ${idx < 3 ? 'text-amber-400' : 'text-slate-500'}">#${team.rank}</td>
                         <td class="p-3 font-bold text-white">${team.name}</td>
                         <td class="p-3 font-mono text-slate-400">${team.tag}</td>
@@ -14480,14 +14623,79 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                         <td class="p-3 text-center font-mono text-cyan-400">${team.kills}</td>
                         <td class="p-3 text-center font-mono font-bold text-rose-400 text-sm">${team.totalPts}</td>
                         <td class="p-3 text-right">
-                          <button class="edit-team-score-btn text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-900 border border-slate-700" data-team-id="${team.id}">
-                            ✏️ Edit
-                          </button>
+                          <div class="flex items-center justify-end gap-1.5">
+                            <button class="quick-frag-btn px-2 py-1 rounded bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold transition-transform hover:scale-105" data-team-id="${team.id}" title="+1 Kill Frag">
+                              +Frag
+                            </button>
+                            <button class="quick-booyah-btn px-2 py-1 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold transition-transform hover:scale-105" data-team-id="${team.id}" title="+1 Booyah (12 Pts)">
+                              +👑
+                            </button>
+                            <button class="edit-team-score-btn text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded bg-slate-900 border border-slate-700 hover:border-slate-500 transition-all" data-team-id="${team.id}">
+                              ✏️ Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
+              </div>
+
+              <!-- Team Score Edit Modal -->
+              <div id="scrimTeamScoreModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div class="cyber-panel p-6 rounded-2xl border-2 border-amber-500/60 bg-gradient-to-b from-slate-950 via-[#1b1208] to-slate-950 max-w-md w-full shadow-2xl space-y-4">
+                  <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xl">✏️</span>
+                      <h4 id="editModalTeamTitle" class="text-base font-heading font-black text-white uppercase tracking-wider">
+                        Edit Team Scores
+                      </h4>
+                    </div>
+                    <button id="closeScoreModalBtn" class="text-slate-400 hover:text-white font-mono text-sm">✕</button>
+                  </div>
+
+                  <input type="hidden" id="editModalTeamId" value="" />
+
+                  <div class="space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Matches Played</label>
+                        <input type="number" id="editModalMatches" min="0" max="20" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-mono text-white outline-none focus:border-amber-400" />
+                      </div>
+                      <div>
+                        <label class="block text-[10px] font-sub uppercase font-bold text-amber-400 mb-1">Booyahs Won 👑</label>
+                        <input type="number" id="editModalBooyahs" min="0" max="20" class="w-full bg-slate-900 border border-amber-500/40 rounded-lg p-2 text-xs font-mono text-amber-300 outline-none focus:border-amber-400" />
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-[10px] font-sub uppercase font-bold text-slate-400 mb-1">Placement Pts</label>
+                        <input type="number" id="editModalPlacementPts" min="0" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-mono text-white outline-none focus:border-amber-400" />
+                      </div>
+                      <div>
+                        <label class="block text-[10px] font-sub uppercase font-bold text-cyan-400 mb-1">Team Kills ⚔️</label>
+                        <input type="number" id="editModalKills" min="0" max="100" class="w-full bg-slate-900 border border-cyan-500/40 rounded-lg p-2 text-xs font-mono text-cyan-300 outline-none focus:border-cyan-400" />
+                      </div>
+                    </div>
+
+                    <!-- Computed Total Preview -->
+                    <div class="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 flex items-center justify-between">
+                      <span class="text-xs font-sub uppercase font-bold text-slate-300">Live Calculated Total:</span>
+                      <span id="editModalTotalPtsPreview" class="text-xl font-heading font-black text-amber-400">0 pts</span>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button id="cancelScoreModalBtn" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-sub text-xs uppercase">
+                      Cancel
+                    </button>
+                    <button id="saveScoreModalBtn" class="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-black font-sub font-bold text-xs uppercase shadow flex items-center gap-1.5 transition-transform hover:scale-105">
+                      <span>💾</span>
+                      <span>Save & Sync 🚀</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           ` : ''}
@@ -15019,6 +15227,56 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
         });
       }
 
+      // Scrim Lobby Collaboration Bar Listeners
+      const joinLobbyBtn = container.querySelector('#joinScrimLobbyBtn');
+      if (joinLobbyBtn) {
+        joinLobbyBtn.addEventListener('click', () => {
+          if (this.scrimLobbyRoom?.connected) {
+            this.leaveCurrentScrimLobby();
+          } else {
+            const codeInput = container.querySelector('#scrimLobbyCodeInput');
+            const code = codeInput ? codeInput.value : 'SCRIM1';
+            this.joinCurrentScrimLobby(code);
+          }
+        });
+      }
+
+      const createLobbyBtn = container.querySelector('#createScrimLobbyBtn');
+      if (createLobbyBtn) {
+        createLobbyBtn.addEventListener('click', () => {
+          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          let randomCode = 'SCR';
+          for (let i = 0; i < 3; i++) {
+            randomCode += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          const codeInput = container.querySelector('#scrimLobbyCodeInput');
+          if (codeInput) codeInput.value = randomCode;
+          this.joinCurrentScrimLobby(randomCode);
+        });
+      }
+
+      const shareLobbyBtn = container.querySelector('#shareScrimLobbyBtn');
+      if (shareLobbyBtn) {
+        shareLobbyBtn.addEventListener('click', () => {
+          const sorted = this.getSortedLobbyTeams();
+          const t1 = sorted[0] || { name: 'N/A', totalPts: 0, booyahs: 0, kills: 0 };
+          const t2 = sorted[1] || { name: 'N/A', totalPts: 0, booyahs: 0, kills: 0 };
+          const t3 = sorted[2] || { name: 'N/A', totalPts: 0, booyahs: 0, kills: 0 };
+          const code = this.scrimLobbyRoom?.code || 'SCRIM1';
+          const msg = `📊 *LIVE TOURNAMENT SCRIM LEADERBOARD* 📊\n🏆 *Title:* ${this.ffTourneyMeta.title}\n📍 *Stage:* ${this.ffTourneyMeta.stage}\n🔑 *Lobby Code:* ${code}\n\n👑 *Current Top 3 Standing:*\n🥇 1. ${t1.name}: ${t1.totalPts} pts (${t1.booyahs} 🏆, ${t1.kills} ⚔️)\n🥈 2. ${t2.name}: ${t2.totalPts} pts (${t2.booyahs} 🏆, ${t2.kills} ⚔️)\n🥉 3. ${t3.name}: ${t3.totalPts} pts (${t3.booyahs} 🏆, ${t3.kills} ⚔️)\n\n⚡ Open Underdog Esports Academy > Scrims > 12-Team Broadcast > Join Code: *${code}* to watch real-time!`;
+          const waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(msg);
+          window.open(waUrl, '_blank');
+          this.playRadioBeep();
+        });
+      }
+
+      const syncCloudBtn = container.querySelector('#manualSyncScrimCloudBtn');
+      if (syncCloudBtn) {
+        syncCloudBtn.addEventListener('click', () => {
+          this.saveCurrentScrimLobbyToCloud(true);
+        });
+      }
+
       const fillProBtn = container.querySelector('#fillProLobbyBtn');
       if (fillProBtn) {
         fillProBtn.addEventListener('click', () => {
@@ -15036,7 +15294,8 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
             { id: 'blind', name: 'Blind Esports', tag: 'BLND', matches: 6, booyahs: 0, placementPts: 12, kills: 14, totalPts: 26 },
             { id: 'udg', name: 'Underdog Challenger', tag: 'UDG', matches: 6, booyahs: 0, placementPts: 10, kills: 12, totalPts: 22 }
           ];
-          this.renderTabContent();
+          this.broadcastCurrentScrimState('batch_scores', { teams: this.ffLobbyTeams });
+          this.updateScrimLobbyUI();
           this.playChimeSound('stage_complete');
         });
       }
@@ -15052,7 +15311,8 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
               t.kills = 0;
               t.totalPts = 0;
             });
-            this.renderTabContent();
+            this.broadcastCurrentScrimState('reset_scores', { teams: this.ffLobbyTeams });
+            this.updateScrimLobbyUI();
             this.playChimeSound('stage_complete');
           }
         });
@@ -15061,16 +15321,28 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       // Metadata inputs
       const titleInp = container.querySelector('#tourneyTitleInput');
       if (titleInp) {
-        titleInp.addEventListener('change', (e) => { this.ffTourneyMeta.title = e.target.value; });
+        titleInp.addEventListener('change', (e) => {
+          this.ffTourneyMeta.title = e.target.value;
+          this.broadcastCurrentScrimState('metadata_update', { meta: this.ffTourneyMeta });
+        });
       }
       const stageInp = container.querySelector('#tourneyStageInput');
       if (stageInp) {
-        stageInp.addEventListener('change', (e) => { this.ffTourneyMeta.stage = e.target.value; });
+        stageInp.addEventListener('change', (e) => {
+          this.ffTourneyMeta.stage = e.target.value;
+          this.broadcastCurrentScrimState('metadata_update', { meta: this.ffTourneyMeta });
+        });
       }
       const orgInp = container.querySelector('#tourneyOrganizerInput');
       if (orgInp) {
-        orgInp.addEventListener('change', (e) => { this.ffTourneyMeta.organizer = e.target.value; });
+        orgInp.addEventListener('change', (e) => {
+          this.ffTourneyMeta.organizer = e.target.value;
+          this.broadcastCurrentScrimState('metadata_update', { meta: this.ffTourneyMeta });
+        });
       }
+
+      // Bind Table Quick Action Buttons & Modal
+      this.bindScrimLobbyTableEvents(container);
 
       // 11. Watch VOD Modal Events
       document.querySelectorAll('.watch-vod-btn').forEach(btn => {
@@ -15104,6 +15376,398 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           const container = document.getElementById('vodPlayerContainer');
           if (container) container.innerHTML = '';
         });
+      }
+    }
+
+    // --- REALTIME SCRIM LOBBY & MULTIPLAYER LEADERBOARD HELPERS ---
+    bindScrimLobbyTableEvents(container) {
+      if (!container) return;
+
+      // Quick Frag (+1 Frag / Kill)
+      container.querySelectorAll('.quick-frag-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tId = btn.getAttribute('data-team-id');
+          this.quickAdjustTeamScore(tId, 1, 0, 0);
+        });
+      });
+
+      // Quick Booyah (+1 Booyah, +12 Pts, +1 Match)
+      container.querySelectorAll('.quick-booyah-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tId = btn.getAttribute('data-team-id');
+          this.quickAdjustTeamScore(tId, 0, 1, 12);
+        });
+      });
+
+      // Detailed Score Edit Modal
+      container.querySelectorAll('.edit-team-score-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tId = btn.getAttribute('data-team-id');
+          this.openScrimTeamScoreModal(tId);
+        });
+      });
+
+      // Modal Close / Cancel Buttons
+      const closeBtn = container.querySelector('#closeScoreModalBtn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => this.closeScrimTeamScoreModal());
+      }
+      const cancelBtn = container.querySelector('#cancelScoreModalBtn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => this.closeScrimTeamScoreModal());
+      }
+
+      // Modal Save Button
+      const saveBtn = container.querySelector('#saveScoreModalBtn');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => this.saveScoreModalData());
+      }
+
+      // Live Modal Points Calculation Preview
+      const updateModalTotalPreview = () => {
+        const p = parseInt(container.querySelector('#editModalPlacementPts')?.value || '0', 10);
+        const k = parseInt(container.querySelector('#editModalKills')?.value || '0', 10);
+        const prev = container.querySelector('#editModalTotalPtsPreview');
+        if (prev) prev.textContent = `${p + k} pts`;
+      };
+      container.querySelector('#editModalPlacementPts')?.addEventListener('input', updateModalTotalPreview);
+      container.querySelector('#editModalKills')?.addEventListener('input', updateModalTotalPreview);
+    }
+
+    async joinCurrentScrimLobby(roomCode) {
+      const code = (roomCode || this.scrimLobbyRoom?.code || 'SCRIM1').trim().toUpperCase();
+      if (!this.scrimLobbyRoom) this.scrimLobbyRoom = {};
+      this.scrimLobbyRoom.code = code;
+      this.scrimLobbyRoom.recentActivity = `Connecting to scrim lobby [${code}]...`;
+      this.renderScrimLobbyCollaborationBar();
+
+      if (!window.underdogSupabase) return;
+
+      await window.underdogSupabase.joinScrimLobby(
+        code,
+        // onScoreUpdate
+        (payload) => {
+          this.handleRemoteScrimAction(payload);
+        },
+        // onLobbyLoaded
+        (cloudData) => {
+          if (cloudData) {
+            if (Array.isArray(cloudData.teams) && cloudData.teams.length > 0) {
+              this.ffLobbyTeams = cloudData.teams;
+            }
+            if (cloudData.title) this.ffTourneyMeta.title = cloudData.title;
+            if (cloudData.stage) this.ffTourneyMeta.stage = cloudData.stage;
+            this.scrimLobbyRoom.recentActivity = `Restored lobby [${code}] from Supabase cloud!`;
+            this.updateScrimLobbyUI();
+          }
+        },
+        // onPresenceChange
+        (peer) => {
+          if (this.scrimLobbyRoom) {
+            this.scrimLobbyRoom.presenceCount = (this.scrimLobbyRoom.presenceCount || 1) + 1;
+            const label = document.getElementById('activeScrimLobbyLabel');
+            if (label) {
+              label.textContent = `LIVE SYNC [${code}] 🟢 (${this.scrimLobbyRoom.presenceCount} online)`;
+            }
+          }
+        }
+      );
+
+      this.scrimLobbyRoom.connected = true;
+      this.scrimLobbyRoom.recentActivity = `Connected to room [${code}]. Sub-100ms sync active!`;
+      this.playChimeSound('stage_complete');
+      this.updateScrimLobbyUI();
+    }
+
+    leaveCurrentScrimLobby() {
+      if (window.underdogSupabase) {
+        window.underdogSupabase.leaveScrimLobby();
+      }
+      if (this.scrimLobbyRoom) {
+        this.scrimLobbyRoom.connected = false;
+        this.scrimLobbyRoom.recentActivity = 'Disconnected from room. Operating in local mode.';
+      }
+      this.updateScrimLobbyUI();
+    }
+
+    handleRemoteScrimAction(payload) {
+      if (!payload) return;
+      const { actionType, data, sender, senderRole, roomCode } = payload;
+      console.log('⚡ Remote scrim update received:', actionType, data, sender);
+
+      if (actionType === 'score_update') {
+        const teamData = data?.teamData;
+        if (teamData) {
+          const idx = this.ffLobbyTeams.findIndex(t => t.id === teamData.id);
+          if (idx !== -1) {
+            this.ffLobbyTeams[idx] = { ...this.ffLobbyTeams[idx], ...teamData };
+          } else {
+            this.ffLobbyTeams.push(teamData);
+          }
+          if (this.scrimLobbyRoom) {
+            this.scrimLobbyRoom.lastUpdatedTeamId = teamData.id;
+            this.scrimLobbyRoom.recentActivity = `⚡ ${teamData.name} updated (${teamData.totalPts} pts) by ${sender} (${senderRole || 'Squad'})`;
+          }
+          this.playChimeSound('stage_complete');
+          this.updateScrimLobbyUI(teamData.id);
+        }
+      } else if (actionType === 'batch_scores' || actionType === 'reset_scores') {
+        if (Array.isArray(data?.teams)) {
+          this.ffLobbyTeams = data.teams;
+          if (this.scrimLobbyRoom) {
+            this.scrimLobbyRoom.recentActivity = `🔄 Tournament standings updated by ${sender}`;
+          }
+          this.playChimeSound('stage_complete');
+          this.updateScrimLobbyUI();
+        }
+      } else if (actionType === 'metadata_update') {
+        if (data?.meta) {
+          Object.assign(this.ffTourneyMeta, data.meta);
+          if (this.scrimLobbyRoom) {
+            this.scrimLobbyRoom.recentActivity = `📝 Tournament info updated by ${sender}`;
+          }
+          this.updateScrimLobbyUI();
+        }
+      }
+    }
+
+    broadcastCurrentScrimState(actionType, data) {
+      if (this.scrimLobbyRoom?.connected && window.underdogSupabase) {
+        window.underdogSupabase.broadcastScrimUpdate(actionType, data);
+        window.underdogSupabase.saveScrimLobbyToCloud(this.scrimLobbyRoom.code, {
+          title: this.ffTourneyMeta.title,
+          stage: this.ffTourneyMeta.stage,
+          teams: this.ffLobbyTeams
+        });
+      }
+    }
+
+    saveCurrentScrimLobbyToCloud(manual = false) {
+      if (!window.underdogSupabase || !this.scrimLobbyRoom?.code) return;
+      window.underdogSupabase.saveScrimLobbyToCloud(this.scrimLobbyRoom.code, {
+        title: this.ffTourneyMeta.title,
+        stage: this.ffTourneyMeta.stage,
+        teams: this.ffLobbyTeams
+      });
+      if (manual) {
+        const ind = document.getElementById('scrimCloudSyncIndicator');
+        if (ind) {
+          ind.textContent = 'Saving... ⏳';
+          setTimeout(() => { if (ind) ind.textContent = 'Saved to Cloud ✅'; }, 1000);
+          setTimeout(() => { if (ind) ind.textContent = 'Cloud Sync'; }, 3000);
+        }
+        this.playChimeSound('stage_complete');
+      }
+    }
+
+    quickAdjustTeamScore(teamId, deltaKills, deltaBooyahs, deltaPlacement) {
+      const team = this.ffLobbyTeams.find(t => t.id === teamId);
+      if (!team) return;
+
+      team.kills = Math.max(0, (team.kills || 0) + deltaKills);
+      team.booyahs = Math.max(0, (team.booyahs || 0) + deltaBooyahs);
+      if (deltaBooyahs > 0) {
+        team.matches = (team.matches || 0) + 1;
+      }
+      team.placementPts = Math.max(0, (team.placementPts || 0) + deltaPlacement);
+      team.totalPts = team.placementPts + team.kills;
+
+      if (this.scrimLobbyRoom) {
+        this.scrimLobbyRoom.lastUpdatedTeamId = team.id;
+        const myIgn = window.app?.currentUser?.ign || 'Underdog IGL';
+        const actionDesc = deltaBooyahs > 0 ? '+1 Booyah (12 pts)' : `+${deltaKills} Frag`;
+        this.scrimLobbyRoom.recentActivity = `⚡ ${team.name} ${actionDesc} logged by ${myIgn}`;
+      }
+
+      this.playChimeSound('stage_complete');
+      this.broadcastCurrentScrimState('score_update', { teamId: team.id, teamData: team });
+      this.updateScrimLobbyUI(team.id);
+    }
+
+    openScrimTeamScoreModal(teamId) {
+      const team = this.ffLobbyTeams.find(t => t.id === teamId);
+      if (!team) return;
+
+      const modal = document.getElementById('scrimTeamScoreModal');
+      if (!modal) return;
+      if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
+      }
+      const title = document.getElementById('editModalTeamTitle');
+      const idInp = document.getElementById('editModalTeamId');
+      const matchesInp = document.getElementById('editModalMatches');
+      const booyahsInp = document.getElementById('editModalBooyahs');
+      const placeInp = document.getElementById('editModalPlacementPts');
+      const killsInp = document.getElementById('editModalKills');
+      const preview = document.getElementById('editModalTotalPtsPreview');
+
+      if (!modal) return;
+
+      if (title) title.textContent = `Edit Scores: ${team.name} [${team.tag}]`;
+      if (idInp) idInp.value = team.id;
+      if (matchesInp) matchesInp.value = team.matches || 0;
+      if (booyahsInp) booyahsInp.value = team.booyahs || 0;
+      if (placeInp) placeInp.value = team.placementPts || 0;
+      if (killsInp) killsInp.value = team.kills || 0;
+      if (preview) preview.textContent = `${(team.placementPts || 0) + (team.kills || 0)} pts`;
+
+      modal.classList.remove('hidden');
+    }
+
+    closeScrimTeamScoreModal() {
+      const modal = document.getElementById('scrimTeamScoreModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    saveScoreModalData() {
+      const idInp = document.getElementById('editModalTeamId');
+      if (!idInp) return;
+      const teamId = idInp.value;
+      const team = this.ffLobbyTeams.find(t => t.id === teamId);
+      if (!team) return;
+
+      const matches = parseInt(document.getElementById('editModalMatches')?.value || '0', 10);
+      const booyahs = parseInt(document.getElementById('editModalBooyahs')?.value || '0', 10);
+      const placementPts = parseInt(document.getElementById('editModalPlacementPts')?.value || '0', 10);
+      const kills = parseInt(document.getElementById('editModalKills')?.value || '0', 10);
+
+      team.matches = matches;
+      team.booyahs = booyahs;
+      team.placementPts = placementPts;
+      team.kills = kills;
+      team.totalPts = placementPts + kills;
+
+      if (this.scrimLobbyRoom) {
+        this.scrimLobbyRoom.lastUpdatedTeamId = team.id;
+        const myIgn = window.app?.currentUser?.ign || 'Coach Duker';
+        this.scrimLobbyRoom.recentActivity = `💾 ${team.name} score adjusted (${team.totalPts} pts) by ${myIgn}`;
+      }
+
+      this.closeScrimTeamScoreModal();
+      this.playChimeSound('stage_complete');
+      this.broadcastCurrentScrimState('score_update', { teamId: team.id, teamData: team });
+      this.updateScrimLobbyUI(team.id);
+    }
+
+    updateScrimLobbyUI(highlightTeamId = null) {
+      if (this.ffScrimMode !== 'lobby') return;
+      const container = document.getElementById('scrimLobbyBroadcastContainer');
+      if (!container) {
+        this.renderTabContent();
+        return;
+      }
+
+      // 1. Update Collaboration Bar
+      this.renderScrimLobbyCollaborationBar();
+
+      // 2. Re-sort teams
+      const sortedTeams = this.getSortedLobbyTeams();
+      const top1 = sortedTeams[0] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+      const top2 = sortedTeams[1] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+      const top3 = sortedTeams[2] || { name: 'No Team', totalPts: 0, booyahs: 0, kills: 0 };
+
+      // 3. Update Podium HTML
+      const podiumEl = document.getElementById('scrimPodiumContainer');
+      if (podiumEl) {
+        podiumEl.innerHTML = `
+          <div class="cyber-panel p-3.5 rounded-xl border border-amber-500/40 bg-gradient-to-b from-amber-950/20 to-slate-950 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center text-lg font-black text-amber-400">#1</div>
+              <div>
+                <div class="text-[10px] font-sub uppercase font-bold text-amber-400">Lobby Leader</div>
+                <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top1.name}</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-xl font-heading font-black text-amber-400">${top1.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+              <div class="text-[10px] text-slate-400">${top1.booyahs} 🏆 • ${top1.kills} ⚔️</div>
+            </div>
+          </div>
+
+          <div class="cyber-panel p-3.5 rounded-xl border border-slate-400/30 bg-gradient-to-b from-slate-900/40 to-slate-950 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-slate-700/30 border border-slate-400/50 flex items-center justify-center text-lg font-black text-slate-300">#2</div>
+              <div>
+                <div class="text-[10px] font-sub uppercase font-bold text-slate-300">2nd Position</div>
+                <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top2.name}</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-xl font-heading font-black text-slate-300">${top2.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+              <div class="text-[10px] text-slate-400">${top2.booyahs} 🏆 • ${top2.kills} ⚔️</div>
+            </div>
+          </div>
+
+          <div class="cyber-panel p-3.5 rounded-xl border border-amber-700/30 bg-gradient-to-b from-amber-950/10 to-slate-950 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-amber-900/20 border border-amber-700/40 flex items-center justify-center text-lg font-black text-amber-600">#3</div>
+              <div>
+                <div class="text-[10px] font-sub uppercase font-bold text-slate-400">3rd Position</div>
+                <div class="text-sm font-heading font-black text-white truncate max-w-[140px]">${top3.name}</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-xl font-heading font-black text-amber-500">${top3.totalPts} <span class="text-[10px] font-mono text-slate-400">pts</span></div>
+              <div class="text-[10px] text-slate-400">${top3.booyahs} 🏆 • ${top3.kills} ⚔️</div>
+            </div>
+          </div>
+        `;
+      }
+
+      // 4. Update Table Rows
+      const tbody = document.getElementById('scrimLobbyTableBody');
+      if (tbody) {
+        tbody.innerHTML = sortedTeams.map((team, idx) => `
+          <tr id="scrimTeamRow_${team.id}" class="scrim-team-row hover:bg-slate-900/40 transition-all ${highlightTeamId === team.id ? 'bg-amber-500/20 ring-1 ring-amber-400' : ''}">
+            <td class="p-3 font-mono font-bold ${idx < 3 ? 'text-amber-400' : 'text-slate-500'}">#${team.rank}</td>
+            <td class="p-3 font-bold text-white">${team.name}</td>
+            <td class="p-3 font-mono text-slate-400">${team.tag}</td>
+            <td class="p-3 text-center font-mono">${team.matches}</td>
+            <td class="p-3 text-center font-mono text-amber-400 font-bold">${team.booyahs}</td>
+            <td class="p-3 text-center font-mono">${team.placementPts}</td>
+            <td class="p-3 text-center font-mono text-cyan-400">${team.kills}</td>
+            <td class="p-3 text-center font-mono font-bold text-rose-400 text-sm">${team.totalPts}</td>
+            <td class="p-3 text-right">
+              <div class="flex items-center justify-end gap-1.5">
+                <button class="quick-frag-btn px-2 py-1 rounded bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold transition-transform hover:scale-105" data-team-id="${team.id}" title="+1 Kill Frag">
+                  +Frag
+                </button>
+                <button class="quick-booyah-btn px-2 py-1 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold transition-transform hover:scale-105" data-team-id="${team.id}" title="+1 Booyah (12 Pts)">
+                  +👑
+                </button>
+                <button class="edit-team-score-btn text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded bg-slate-900 border border-slate-700 hover:border-slate-500 transition-all" data-team-id="${team.id}">
+                  ✏️ Edit
+                </button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+
+        this.bindScrimLobbyTableEvents(container);
+      }
+    }
+
+    renderScrimLobbyCollaborationBar() {
+      const dot = document.getElementById('scrimLobbyLiveDot');
+      const label = document.getElementById('activeScrimLobbyLabel');
+      const ticker = document.getElementById('scrimLobbyActivityTicker');
+      const joinBtn = document.getElementById('joinScrimLobbyBtn');
+
+      if (dot) {
+        dot.className = `w-3 h-3 rounded-full ${this.scrimLobbyRoom?.connected ? 'bg-amber-400 animate-ping' : 'bg-slate-600'} transition-all`;
+      }
+      if (label) {
+        label.className = `text-[10px] font-mono ${this.scrimLobbyRoom?.connected ? 'text-amber-400 font-bold' : 'text-slate-400 font-bold'}`;
+        label.textContent = this.scrimLobbyRoom?.connected ? `LIVE SYNC [${this.scrimLobbyRoom.code}] 🟢` : 'Status: Standalone / Offline';
+      }
+      if (ticker) {
+        ticker.textContent = this.scrimLobbyRoom?.recentActivity || 'Ready for real-time tournament leaderboard broadcast...';
+      }
+      if (joinBtn) {
+        joinBtn.textContent = this.scrimLobbyRoom?.connected ? 'Disconnect' : 'Join Lobby';
       }
     }
 
@@ -19297,6 +19961,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
   }
 
 })();
+
 
   </script>
 
