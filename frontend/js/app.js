@@ -6539,9 +6539,16 @@ this.ffSelectedLoadout = {
       this.initPwaInstall();
       this.renderGameContext();
       this.renderTabContent();
+      this.initUserWallet();
+      this.renderWalletBadge();
     }
 
     bindCloudStatusBadge() {
+      const walletHeaderBtn = document.getElementById('headerWalletBtn');
+      if (walletHeaderBtn) {
+        walletHeaderBtn.onclick = () => this.showEsportsWalletModal();
+      }
+
       const voiceHeaderBtn = document.getElementById('headerVoiceRoomBtn');
       if (voiceHeaderBtn) {
         voiceHeaderBtn.addEventListener('click', () => {
@@ -14831,9 +14838,14 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                     <!-- 1-Click Copy Booking Format Button -->
                     <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-3">
                       <span class="text-[10px] font-mono text-cyan-400">${org.discordTag}</span>
-                      <button class="copy-scrim-template-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md" data-template="${encodeURIComponent(org.bookingTemplate)}">
-                        Copy Slot Booking Format 📋
-                      </button>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <button class="pay-scrim-fee-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md flex items-center gap-1" data-scrim-id="${org.id}" data-scrim-name="${encodeURIComponent(org.name)}" data-entry-fee="50">
+                          <span>🎟️</span> Pay Slot Fee (₹50)
+                        </button>
+                        <button class="copy-scrim-template-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md" data-template="${encodeURIComponent(org.bookingTemplate)}">
+                          Format 📋
+                        </button>
+                      </div>
                     </div>
                   </div>
                 `).join('')}
@@ -15573,6 +15585,16 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           }
         });
       }
+
+      // 6. Famous Scrims: Pay Slot Entry Fee
+      container.querySelectorAll('.pay-scrim-fee-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const scrimId = btn.getAttribute('data-scrim-id');
+          const scrimName = decodeURIComponent(btn.getAttribute('data-scrim-name') || 'Esports Scrims');
+          const fee = parseFloat(btn.getAttribute('data-entry-fee') || '50');
+          this.bookTournamentSlotWithWallet(scrimId, scrimName, fee);
+        });
+      });
 
       // 6. Famous Scrims: Copy Registration Template
       container.querySelectorAll('.copy-scrim-template-btn').forEach(btn => {
@@ -20529,6 +20551,711 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       document.getElementById('closeInstallGuideBtn')?.addEventListener('click', () => modal.remove());
       document.getElementById('gotItInstallBtn')?.addEventListener('click', () => modal.remove());
     }
+
+    // =========================================================================
+    // PHASE 3: ESPORTS WALLET & PAYMENT GATEWAY (UPI, RAZORPAY & PASSBOOK)
+    // =========================================================================
+
+    initUserWallet() {
+      try {
+        const saved = localStorage.getItem('underdog_user_wallet');
+        if (saved) {
+          this.userWallet = JSON.parse(saved);
+        }
+      } catch (e) {
+        console.warn('Failed to parse saved wallet, resetting:', e);
+      }
+
+      if (!this.userWallet) {
+        this.userWallet = {
+          balance: 500.00,
+          locked: 0.00,
+          totalWon: 1200.00,
+          totalDeposited: 500.00,
+          vpa: 'anurag@okaxis',
+          kycVerified: true,
+          transactions: [
+            {
+              id: 'TXN_98410',
+              type: 'deposit',
+              amount: 500.00,
+              status: 'completed',
+              method: 'upi',
+              reference: 'UPI/428910481239/Topup',
+              timestamp: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+              meta: { upiApp: 'Google Pay' }
+            },
+            {
+              id: 'TXN_98411',
+              type: 'payout',
+              amount: 1200.00,
+              status: 'completed',
+              method: 'prize_pool',
+              reference: 'Eagle Esports Daily Scrims Booyah #1',
+              timestamp: new Date(Date.now() - 3600000 * 18).toISOString(),
+              meta: { match: 'Bermuda Round 6', clan: '[UDG]' }
+            },
+            {
+              id: 'TXN_98412',
+              type: 'withdrawal',
+              amount: 1200.00,
+              status: 'completed',
+              method: 'upi',
+              reference: 'Payout to anurag@okaxis',
+              timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
+              meta: { upiId: 'anurag@okaxis', utr: 'UTR891428019' }
+            }
+          ]
+        };
+        this.saveUserWallet();
+      }
+    }
+
+    saveUserWallet() {
+      try {
+        localStorage.setItem('underdog_user_wallet', JSON.stringify(this.userWallet));
+      } catch (e) {
+        console.warn('Failed to save wallet to localStorage:', e);
+      }
+      this.renderWalletBadge();
+    }
+
+    renderWalletBadge() {
+      const el = document.getElementById('headerWalletBalance');
+      if (el && this.userWallet) {
+        el.textContent = `₹${parseFloat(this.userWallet.balance).toFixed(2)}`;
+      }
+    }
+
+    playCashChime() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 arpeggio
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.12, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.36);
+        });
+      } catch (e) {}
+    }
+
+    showEsportsWalletModal(defaultTab = 'deposit') {
+      const existing = document.getElementById('esportsWalletModal');
+      if (existing) existing.remove();
+
+      let activeTab = defaultTab; // 'deposit' | 'withdraw' | 'ledger'
+      let selectedAmount = 100;
+      let activeFilter = 'all';
+
+      const modal = document.createElement('div');
+      modal.id = 'esportsWalletModal';
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto';
+
+      const renderModal = () => {
+        const user = this.currentUser || {};
+        const ign = user.ign || 'Captain Anurag';
+        const clan = user.clan || '[UDG] Underdog';
+        const balance = parseFloat(this.userWallet?.balance || 0).toFixed(2);
+        const locked = parseFloat(this.userWallet?.locked || 0).toFixed(2);
+        const totalWon = parseFloat(this.userWallet?.totalWon || 0).toFixed(2);
+
+        modal.innerHTML = `
+          <div class="cyber-panel p-5 sm:p-6 max-w-2xl w-full rounded-2xl border border-emerald-500/50 bg-gradient-to-b from-slate-950 via-[#0a1a17] to-slate-950 shadow-2xl space-y-5 my-auto">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between border-b border-emerald-500/20 pb-3">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">💳</span>
+                <div>
+                  <h3 class="text-base sm:text-lg font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    Underdog Esports Cyber Wallet
+                    <span class="text-[9px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-950 border border-emerald-500/50 text-emerald-300">UPI & RAZORPAY</span>
+                  </h3>
+                  <p class="text-xs text-slate-400 font-mono">Instant UPI Intent &bull; Scrim Entry Fees &bull; Tournament Prize Payouts</p>
+                </div>
+              </div>
+              <button id="closeWalletModalBtn" class="text-slate-400 hover:text-white text-xl p-1">✕</button>
+            </div>
+
+            <!-- Holographic Cyber Card -->
+            <div class="relative overflow-hidden rounded-2xl border border-emerald-400/60 bg-gradient-to-br from-emerald-950/90 via-slate-900 to-slate-950 p-5 shadow-2xl space-y-4">
+              <div class="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none"></div>
+
+              <div class="flex items-center justify-between relative z-10">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest">${clan}</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-mono">TIER-1 PRO PASS</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">📶</span>
+                  <div class="w-8 h-6 rounded bg-amber-400/80 border border-amber-300 flex items-center justify-center font-bold text-black text-[9px]">CHIP</div>
+                </div>
+              </div>
+
+              <!-- Available Balance -->
+              <div class="relative z-10">
+                <span class="text-[10px] font-sub uppercase tracking-wider text-slate-400">Available Wallet Balance</span>
+                <div class="text-3xl sm:text-4xl font-heading font-black text-emerald-300 tracking-tight mt-0.5 flex items-baseline gap-2">
+                  <span>₹${balance}</span>
+                  <span class="text-xs font-mono text-emerald-500/80 font-normal">INR</span>
+                </div>
+              </div>
+
+              <!-- Card Sub-metrics -->
+              <div class="grid grid-cols-3 gap-2 pt-2 border-t border-emerald-500/20 text-xs relative z-10">
+                <div>
+                  <span class="text-[9px] font-sub text-slate-400 uppercase block">Cardholder</span>
+                  <span class="font-bold text-white truncate block">${ign}</span>
+                </div>
+                <div>
+                  <span class="text-[9px] font-sub text-slate-400 uppercase block">Locked In Scrims</span>
+                  <span class="font-mono font-bold text-amber-300">₹${locked}</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-[9px] font-sub text-slate-400 uppercase block">Total Won</span>
+                  <span class="font-mono font-bold text-emerald-400">₹${totalWon}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <div class="flex items-center gap-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+              <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'deposit' ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-black shadow' : 'text-slate-400 hover:text-white'}" data-tab="deposit">
+                🟢 Add Funds (UPI/Rzp)
+              </button>
+              <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'withdraw' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow' : 'text-slate-400 hover:text-white'}" data-tab="withdraw">
+                ⚡ Withdraw Winnings
+              </button>
+              <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'ledger' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}" data-tab="ledger">
+                📜 Passbook (${this.userWallet.transactions.length})
+              </button>
+            </div>
+
+            <!-- TAB 1: ADD FUNDS -->
+            ${activeTab === 'deposit' ? `
+              <div class="space-y-4 animate-fade-in">
+                <!-- Amount Chooser -->
+                <div class="space-y-2">
+                  <label class="text-xs font-sub uppercase font-bold text-slate-300">Select Top-Up Amount:</label>
+                  <div class="grid grid-cols-5 gap-2">
+                    ${[50, 100, 250, 500, 1000].map(amt => `
+                      <button class="wallet-amount-pill py-2 rounded-xl border font-mono font-bold text-xs transition-all ${selectedAmount === amt ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 shadow-md ring-1 ring-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'}" data-amount="${amt}">
+                        ₹${amt}
+                      </button>
+                    `).join('')}
+                  </div>
+                  <div class="flex items-center gap-2 mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5">
+                    <span class="text-slate-400 font-mono">₹</span>
+                    <input type="number" id="customAmountInput" value="${selectedAmount}" min="10" max="10000" class="bg-transparent text-xs text-white font-mono flex-1 outline-none font-bold" placeholder="Custom amount">
+                  </div>
+                </div>
+
+                <!-- Payment Methods Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                  <!-- Mode A: Mobile UPI Apps -->
+                  <div class="p-3.5 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2.5">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">📱 Instant UPI Apps</span>
+                      <span class="text-[9px] font-mono text-emerald-400">1-Tap Intent</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Opens GPay, PhonePe, or Paytm app directly on your phone:</p>
+                    <div class="grid grid-cols-2 gap-1.5">
+                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="gpay">
+                        <span>🔵</span> Google Pay
+                      </button>
+                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-purple-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="phonepe">
+                        <span>🟣</span> PhonePe
+                      </button>
+                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="paytm">
+                        <span>🔷</span> Paytm
+                      </button>
+                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="bhim">
+                        <span>🇮🇳</span> BHIM UPI
+                      </button>
+                    </div>
+                    <button id="instantCreditTestBtn" class="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow">
+                      ⚡ Confirm & Add ₹${selectedAmount} (Instant Credit)
+                    </button>
+                  </div>
+
+                  <!-- Mode B: Dynamic QR & Razorpay -->
+                  <div class="p-3.5 rounded-xl bg-slate-900/80 border border-blue-500/30 space-y-2.5">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">💳 Razorpay Gateway</span>
+                      <span class="text-[9px] font-mono text-blue-400">Cards / Netbanking</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Pay securely via Credit/Debit card, RuPay, Netbanking, or dynamic QR code:</p>
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-3">
+                      <!-- Dynamic UPI QR Code Placeholder Graphic -->
+                      <div class="w-16 h-16 rounded bg-white p-1 flex items-center justify-center shrink-0 shadow">
+                        <svg viewBox="0 0 100 100" class="w-full h-full text-black">
+                          <rect width="100" height="100" fill="white" />
+                          <rect x="10" y="10" width="25" height="25" fill="black" />
+                          <rect x="65" y="10" width="25" height="25" fill="black" />
+                          <rect x="10" y="65" width="25" height="25" fill="black" />
+                          <rect x="15" y="15" width="15" height="15" fill="white" />
+                          <rect x="70" y="15" width="15" height="15" fill="white" />
+                          <rect x="15" y="70" width="15" height="15" fill="white" />
+                          <rect x="42" y="15" width="8" height="25" fill="black" />
+                          <rect x="42" y="55" width="15" height="8" fill="black" />
+                          <rect x="70" y="55" width="15" height="20" fill="black" />
+                          <rect x="42" y="75" width="8" height="15" fill="black" />
+                        </svg>
+                      </div>
+                      <div class="text-[11px] text-slate-300 space-y-0.5">
+                        <div class="font-bold text-white">Scan & Pay ₹${selectedAmount}</div>
+                        <div class="text-[10px] text-slate-400 font-mono">underdogesports@upi</div>
+                        <div class="text-[9px] text-emerald-400 font-mono">Zero Platform Fees</div>
+                      </div>
+                    </div>
+                    <button id="openRazorpayBtn" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow">
+                      💳 Pay ₹${selectedAmount} via Razorpay
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- TAB 2: WITHDRAW WINNINGS -->
+            ${activeTab === 'withdraw' ? `
+              <div class="space-y-4 animate-fade-in">
+                <div class="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/40 space-y-1">
+                  <span class="text-xs text-purple-300 font-bold uppercase">⚡ Instant Payout to Bank via UPI:</span>
+                  <p class="text-xs text-slate-300 leading-relaxed">
+                    Withdraw your match winnings directly to your personal UPI ID (Google Pay, PhonePe, Paytm, or BHIM). Standard payout latency: under 60 seconds!
+                  </p>
+                </div>
+
+                <div class="space-y-3">
+                  <div>
+                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Withdrawal Amount (Min ₹50):</label>
+                    <div class="flex items-center gap-2 mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2">
+                      <span class="text-slate-400 font-mono">₹</span>
+                      <input type="number" id="withdrawAmountInput" value="${Math.min(500, Math.floor(this.userWallet.balance))}" min="50" max="${this.userWallet.balance}" class="bg-transparent text-sm text-white font-mono flex-1 outline-none font-bold" placeholder="Amount to withdraw">
+                      <button id="maxWithdrawBtn" class="px-2 py-0.5 rounded bg-purple-950 border border-purple-500/40 text-purple-300 text-[10px] font-mono font-bold">
+                        MAX (₹${balance})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Your UPI VPA / ID:</label>
+                    <input type="text" id="withdrawVpaInput" value="${this.userWallet.vpa || 'anurag@okaxis'}" placeholder="e.g. yourname@okaxis or 9876543210@paytm" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono mt-1 focus:border-purple-400 outline-none">
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                    <div class="flex justify-between">
+                      <span>Available for Payout:</span>
+                      <span class="font-mono text-emerald-400 font-bold">₹${balance}</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Withdrawal Processing Fee:</span>
+                      <span class="font-mono text-slate-400">₹0.00 (Free)</span>
+                    </div>
+                  </div>
+
+                  <button id="submitWithdrawalBtn" class="w-full py-2.5 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:to-pink-500 text-white font-sub font-black text-xs rounded-xl uppercase tracking-wider shadow-lg">
+                    ⚡ Request Instant UPI Withdrawal
+                  </button>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- TAB 3: PASSBOOK LEDGER -->
+            ${activeTab === 'ledger' ? `
+              <div class="space-y-3 animate-fade-in">
+                <!-- Filter Pills -->
+                <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  ${[
+                    { id: 'all', label: 'All' },
+                    { id: 'deposit', label: 'Deposits 🟢' },
+                    { id: 'entry_fee', label: 'Entry Fees 🎟️' },
+                    { id: 'payout', label: 'Prizes 🏆' },
+                    { id: 'withdrawal', label: 'Withdrawals ⚡' }
+                  ].map(f => `
+                    <button class="ledger-filter-btn px-2.5 py-1 rounded-lg text-[10px] font-sub font-bold uppercase tracking-wider transition-all ${activeFilter === f.id ? 'bg-blue-600 text-white shadow' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}" data-filter="${f.id}">
+                      ${f.label}
+                    </button>
+                  `).join('')}
+                </div>
+
+                <!-- Ledger Rows -->
+                <div class="max-h-72 overflow-y-auto space-y-2 pr-1" id="ledgerListContainer">
+                  ${this.renderTransactionsList(activeFilter)}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+
+        // Bind events inside modal
+        modal.querySelector('#closeWalletModalBtn')?.addEventListener('click', () => modal.remove());
+
+        // Tab switcher
+        modal.querySelectorAll('.wallet-tab-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            activeTab = btn.getAttribute('data-tab');
+            renderModal();
+          });
+        });
+
+        // Deposit amount pills
+        modal.querySelectorAll('.wallet-amount-pill').forEach(btn => {
+          btn.addEventListener('click', () => {
+            selectedAmount = parseInt(btn.getAttribute('data-amount'), 10);
+            renderModal();
+          });
+        });
+
+        const customInput = modal.querySelector('#customAmountInput');
+        if (customInput) {
+          customInput.addEventListener('input', (e) => {
+            const v = parseInt(e.target.value, 10);
+            if (!isNaN(v) && v > 0) selectedAmount = v;
+          });
+        }
+
+        // Instant UPI Apps Buttons
+        modal.querySelectorAll('.upi-app-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const app = btn.getAttribute('data-app');
+            const uri = `upi://pay?pa=underdogesports@upi&pn=UnderdogEsports&am=${selectedAmount}&cu=INR&tn=WalletTopup`;
+            window.location.href = uri;
+          });
+        });
+
+        // Instant Credit Simulator Button
+        modal.querySelector('#instantCreditTestBtn')?.addEventListener('click', () => {
+          this.handleUpiDeposit(selectedAmount, 'Google Pay (UPI)');
+          renderModal();
+        });
+
+        // Open Razorpay Checkout Button
+        modal.querySelector('#openRazorpayBtn')?.addEventListener('click', () => {
+          modal.remove();
+          this.showRazorpayCheckout(selectedAmount);
+        });
+
+        // Withdrawal max button
+        modal.querySelector('#maxWithdrawBtn')?.addEventListener('click', () => {
+          const wInput = modal.querySelector('#withdrawAmountInput');
+          if (wInput) wInput.value = Math.floor(this.userWallet.balance);
+        });
+
+        // Submit Withdrawal
+        modal.querySelector('#submitWithdrawalBtn')?.addEventListener('click', () => {
+          const amt = parseFloat(modal.querySelector('#withdrawAmountInput')?.value || 0);
+          const vpa = modal.querySelector('#withdrawVpaInput')?.value?.trim();
+          if (isNaN(amt) || amt < 50) {
+            alert('Minimum withdrawal amount is ₹50.');
+            return;
+          }
+          if (amt > this.userWallet.balance) {
+            alert('Insufficient wallet balance for this withdrawal.');
+            return;
+          }
+          if (!vpa || !vpa.includes('@')) {
+            alert('Please enter a valid UPI ID (e.g. yourname@okaxis).');
+            return;
+          }
+          this.handleWithdrawal(amt, vpa);
+          renderModal();
+        });
+
+        // Ledger filter buttons
+        modal.querySelectorAll('.ledger-filter-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            activeFilter = btn.getAttribute('data-filter');
+            const cont = modal.querySelector('#ledgerListContainer');
+            if (cont) cont.innerHTML = this.renderTransactionsList(activeFilter);
+            modal.querySelectorAll('.ledger-filter-btn').forEach(b => {
+              b.className = b.getAttribute('data-filter') === activeFilter
+                ? 'ledger-filter-btn px-2.5 py-1 rounded-lg text-[10px] font-sub font-bold uppercase tracking-wider transition-all bg-blue-600 text-white shadow'
+                : 'ledger-filter-btn px-2.5 py-1 rounded-lg text-[10px] font-sub font-bold uppercase tracking-wider transition-all bg-slate-900 text-slate-400 border border-slate-800 hover:text-white';
+            });
+          });
+        });
+      };
+
+      document.body.appendChild(modal);
+      renderModal();
+    }
+
+    renderTransactionsList(filter = 'all') {
+      const txns = this.userWallet?.transactions || [];
+      const filtered = (filter === 'all') ? txns : txns.filter(t => t.type === filter);
+
+      if (filtered.length === 0) {
+        return `<div class="p-6 text-center text-xs text-slate-500 font-mono">No transactions recorded in this category yet.</div>`;
+      }
+
+      return filtered.map(t => {
+        const isCredit = t.type === 'deposit' || t.type === 'payout';
+        const typeBadge = {
+          deposit: { label: 'DEPOSIT', bg: 'bg-emerald-950 text-emerald-300 border-emerald-500/40', icon: '🟢' },
+          entry_fee: { label: 'ENTRY FEE', bg: 'bg-amber-950 text-amber-300 border-amber-500/40', icon: '🎟️' },
+          payout: { label: 'PRIZE WIN', bg: 'bg-purple-950 text-purple-300 border-purple-500/40', icon: '🏆' },
+          withdrawal: { label: 'WITHDRAWAL', bg: 'bg-rose-950 text-rose-300 border-rose-500/40', icon: '⚡' }
+        }[t.type] || { label: 'TXN', bg: 'bg-slate-900 text-slate-300', icon: '💳' };
+
+        const dateStr = new Date(t.timestamp).toLocaleDateString('en-IN', {
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        });
+
+        return `
+          <div class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 flex items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="text-base">${typeBadge.icon}</span>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${typeBadge.bg}">
+                    ${typeBadge.label}
+                  </span>
+                  <span class="font-bold text-white truncate">${t.reference}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-mono mt-0.5">
+                  ${dateStr} &bull; ID: ${t.id}
+                </div>
+              </div>
+            </div>
+
+            <div class="text-right shrink-0">
+              <div class="font-mono font-black text-sm ${isCredit ? 'text-emerald-400' : 'text-rose-400'}">
+                ${isCredit ? '+' : '-'}₹${parseFloat(t.amount).toFixed(2)}
+              </div>
+              <div class="text-[9px] font-mono ${t.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'}">
+                ${t.status === 'completed' ? '✅ COMPLETED' : '⏳ PENDING'}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    handleUpiDeposit(amount, appName = 'UPI') {
+      const amt = parseFloat(amount);
+      if (isNaN(amt) || amt <= 0) return;
+
+      const newTxn = {
+        id: 'TXN_' + Math.floor(100000 + Math.random() * 900000),
+        type: 'deposit',
+        amount: amt,
+        status: 'completed',
+        method: 'upi',
+        reference: `Deposit via ${appName}`,
+        timestamp: new Date().toISOString(),
+        meta: { upiApp: appName }
+      };
+
+      this.userWallet.balance += amt;
+      this.userWallet.totalDeposited += amt;
+      this.userWallet.transactions.unshift(newTxn);
+      this.saveUserWallet();
+      this.playCashChime();
+
+      alert(`🎉 Payment of ₹${amt.toFixed(2)} Successful! Funds credited to your Underdog Esports Wallet.`);
+    }
+
+    showRazorpayCheckout(amount) {
+      const existing = document.getElementById('razorpayOverlayModal');
+      if (existing) existing.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'razorpayOverlayModal';
+      modal.className = 'fixed inset-0 z-60 flex items-center justify-center p-3 bg-black/90 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="bg-slate-900 border border-blue-500/60 max-w-sm w-full rounded-2xl p-5 shadow-2xl space-y-4 text-white">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div class="flex items-center gap-2">
+              <span class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-base">R</span>
+              <div>
+                <h4 class="text-sm font-bold">Razorpay Secure Checkout</h4>
+                <p class="text-[10px] text-blue-300">Underdog Esports Academy</p>
+              </div>
+            </div>
+            <button id="closeRzpBtn" class="text-slate-400 hover:text-white text-lg">✕</button>
+          </div>
+
+          <div class="bg-blue-950/40 p-3 rounded-xl border border-blue-500/30 flex items-center justify-between">
+            <span class="text-xs text-slate-300">Total Amount Payable:</span>
+            <span class="text-lg font-mono font-black text-emerald-400">₹${parseFloat(amount).toFixed(2)}</span>
+          </div>
+
+          <div class="space-y-2 text-xs">
+            <label class="text-[11px] font-sub uppercase font-bold text-slate-400">Select Payment Mode:</label>
+            <div class="space-y-1.5">
+              <label class="flex items-center gap-2 p-2 rounded-lg bg-slate-950 border border-blue-500/40 cursor-pointer">
+                <input type="radio" name="rzpMode" value="upi" checked class="accent-blue-500">
+                <span>📱 Instant UPI (GPay / PhonePe / Paytm / Any UPI)</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg bg-slate-950 border border-slate-800 cursor-pointer">
+                <input type="radio" name="rzpMode" value="card" class="accent-blue-500">
+                <span>💳 Debit / Credit Card (Visa, MasterCard, RuPay)</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg bg-slate-950 border border-slate-800 cursor-pointer">
+                <input type="radio" name="rzpMode" value="netbanking" class="accent-blue-500">
+                <span>🏦 Net Banking (SBI, HDFC, ICICI, Axis)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button id="rzpPayNowBtn" class="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-sub font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5">
+              <span>🔒</span>
+              <span id="rzpPayNowText">Pay ₹${parseFloat(amount).toFixed(2)} Securely</span>
+            </button>
+          </div>
+          <div class="text-[9px] text-center text-slate-500 font-mono">
+            🛡️ 256-Bit SSL Encrypted &bull; Razorpay Certified Gateway
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      modal.querySelector('#closeRzpBtn')?.addEventListener('click', () => modal.remove());
+
+      modal.querySelector('#rzpPayNowBtn')?.addEventListener('click', () => {
+        const btnText = modal.querySelector('#rzpPayNowText');
+        if (btnText) btnText.textContent = 'Processing Payment...';
+        setTimeout(() => {
+          modal.remove();
+          this.handleUpiDeposit(amount, 'Razorpay Secure');
+        }, 800);
+      });
+    }
+
+    handleWithdrawal(amount, vpa) {
+      const amt = parseFloat(amount);
+      if (isNaN(amt) || amt <= 0 || amt > this.userWallet.balance) return;
+
+      this.userWallet.vpa = vpa;
+      this.userWallet.balance -= amt;
+
+      const newTxn = {
+        id: 'TXN_' + Math.floor(100000 + Math.random() * 900000),
+        type: 'withdrawal',
+        amount: amt,
+        status: 'completed',
+        method: 'upi',
+        reference: `Payout to ${vpa}`,
+        timestamp: new Date().toISOString(),
+        meta: { upiId: vpa, utr: 'UTR' + Math.floor(100000000 + Math.random() * 900000000) }
+      };
+
+      this.userWallet.transactions.unshift(newTxn);
+      this.saveUserWallet();
+      this.playCashChime();
+
+      alert(`⚡ Instant Payout of ₹${amt.toFixed(2)} dispatched to ${vpa}! Reference UTR: ${newTxn.meta.utr}`);
+    }
+
+    bookTournamentSlotWithWallet(scrimId, scrimName, entryFee = 50) {
+      if (this.userWallet.balance < entryFee) {
+        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nCurrent Balance: ₹${this.userWallet.balance.toFixed(2)}\nEntry Fee Required: ₹${entryFee.toFixed(2)}\n\nWould you like to top up your wallet via UPI / Razorpay now?`)) {
+          this.showEsportsWalletModal('deposit');
+        }
+        return;
+      }
+
+      this.userWallet.balance -= entryFee;
+      const slotNum = Math.floor(1 + Math.random() * 12);
+      const receiptId = 'SLOT_' + Math.floor(10000 + Math.random() * 90000);
+
+      const newTxn = {
+        id: 'TXN_' + Math.floor(100000 + Math.random() * 900000),
+        type: 'entry_fee',
+        amount: entryFee,
+        status: 'completed',
+        method: 'wallet',
+        reference: `${scrimName} - Slot #${slotNum}`,
+        timestamp: new Date().toISOString(),
+        meta: { scrimId, slot: slotNum, receiptId }
+      };
+
+      this.userWallet.transactions.unshift(newTxn);
+      this.saveUserWallet();
+      this.playCashChime();
+
+      this.showSlotBookingReceipt({
+        id: receiptId,
+        scrimName,
+        slotNumber: slotNum,
+        amount: entryFee,
+        txnId: newTxn.id
+      });
+    }
+
+    showSlotBookingReceipt(receipt) {
+      const existing = document.getElementById('slotReceiptModal');
+      if (existing) existing.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'slotReceiptModal';
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="cyber-panel p-5 sm:p-6 max-w-md w-full rounded-2xl border border-emerald-500/60 bg-gradient-to-b from-slate-950 via-[#0a1e1b] to-slate-950 shadow-2xl space-y-4 text-white">
+          <div class="text-center space-y-1">
+            <span class="text-3xl">🎟️</span>
+            <h3 class="text-base font-heading font-black uppercase text-emerald-400 tracking-wider">
+              Scrim Slot Confirmed & Paid
+            </h3>
+            <p class="text-xs text-slate-400 font-mono">Receipt: ${receipt.id} &bull; TXN: ${receipt.txnId}</p>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs">
+            <div class="flex justify-between border-b border-slate-800 pb-1.5">
+              <span class="text-slate-400">Tournament / Scrim:</span>
+              <span class="font-bold text-white text-right">${receipt.scrimName}</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-1.5">
+              <span class="text-slate-400">Assigned Slot:</span>
+              <span class="font-mono font-black text-amber-400 text-sm">SLOT #${receipt.slotNumber} (CONFIRMED)</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-1.5">
+              <span class="text-slate-400">Team / Clan:</span>
+              <span class="font-bold text-emerald-300">Underdog Esports [UDG]</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-1.5">
+              <span class="text-slate-400">Entry Fee Debited:</span>
+              <span class="font-mono font-bold text-rose-400">-₹${receipt.amount.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between pt-0.5">
+              <span class="text-slate-400">New Wallet Balance:</span>
+              <span class="font-mono font-black text-emerald-400">₹${this.userWallet.balance.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <button id="shareReceiptWhatsAppBtn" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-black font-sub font-black text-xs uppercase rounded-xl tracking-wider shadow flex items-center justify-center gap-1">
+              <span>📲</span> Dispatch to WhatsApp
+            </button>
+            <button id="closeReceiptBtn" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sub text-xs uppercase rounded-xl">
+              Done
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      modal.querySelector('#closeReceiptBtn')?.addEventListener('click', () => modal.remove());
+
+      modal.querySelector('#shareReceiptWhatsAppBtn')?.addEventListener('click', () => {
+        const text = `🎟️ *UNDERDOG ESPORTS - TOURNAMENT ENTRY FEE PAID*\n\n🏆 *Event:* ${receipt.scrimName}\n👑 *Slot:* SLOT #${receipt.slotNumber} (Confirmed)\n💳 *Fee Paid:* ₹${receipt.amount.toFixed(2)}\n📜 *Receipt ID:* ${receipt.id}\n\n✅ Room ID & Password will be delivered 10 mins prior to match!`;
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+      });
+    }
+
   }
 
   // Auto-init on DOM ready
