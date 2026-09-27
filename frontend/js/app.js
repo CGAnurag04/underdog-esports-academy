@@ -14904,7 +14904,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
                           </div>
                           <div class="flex items-center gap-1.5 flex-wrap">
                             <button class="pay-scrim-fee-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md flex items-center gap-1" data-scrim-id="${org.id}" data-scrim-name="${encodeURIComponent(org.name)}" data-entry-fee="50" data-slot-id="${curSlot.id}" data-slot-num="${curSlot.slotNum}" data-slot-name="${curSlot.name}" data-slot-time="${curSlot.time}" data-slot-reporting="${curSlot.reportingTime}" data-slot-label="${curSlot.label}">
-                              <span>🎟️</span> Pay Slot Fee - ${curSlot.name} (${curSlot.time}) (₹50)
+                              <span>🎟️</span> Pay Slot Fee - ${curSlot.name} (${curSlot.time}) (50 UDG Coins)
                             </button>
                             <button class="copy-scrim-template-btn px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-black font-sub font-black uppercase text-xs tracking-wider transition-all shadow-md" data-template="${encodeURIComponent(formattedTmpl)}">
                               Format 📋
@@ -15698,7 +15698,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
               payBtn.setAttribute('data-slot-time', slotTime);
               payBtn.setAttribute('data-slot-reporting', slotReporting);
               payBtn.setAttribute('data-slot-label', slotLabel);
-              payBtn.innerHTML = `<span>🎟️</span> Pay Slot Fee - ${slotName} (${slotTime}) (₹50)`;
+              payBtn.innerHTML = `<span>🎟️</span> Pay Slot Fee - ${slotName} (${slotTime}) (50 UDG Coins)`;
             }
 
             // Update copy format template
@@ -20720,40 +20720,41 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
 
       if (!this.userWallet) {
         this.userWallet = {
-          balance: 500.00,
-          locked: 0.00,
-          totalWon: 1200.00,
-          totalDeposited: 500.00,
+          balance: 500,
+          locked: 0,
+          totalWon: 1200,
+          totalDeposited: 500,
           vpa: 'anurag@okaxis',
           kycVerified: true,
+          currency: 'UDG Coins',
           transactions: [
             {
               id: 'TXN_98410',
               type: 'deposit',
-              amount: 500.00,
+              amount: 500,
               status: 'completed',
-              method: 'upi',
-              reference: 'UPI/428910481239/Topup',
+              method: 'academy_grant',
+              reference: 'Welcome Bonus: 500 Practice Coins',
               timestamp: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
-              meta: { upiApp: 'Google Pay' }
+              meta: { source: 'Academy Starter Pack' }
             },
             {
               id: 'TXN_98411',
               type: 'payout',
-              amount: 1200.00,
+              amount: 1200,
               status: 'completed',
               method: 'prize_pool',
-              reference: 'Eagle Esports Daily Scrims Booyah #1',
+              reference: 'Eagle Esports Daily Scrims Booyah #1 Prize',
               timestamp: new Date(Date.now() - 3600000 * 18).toISOString(),
               meta: { match: 'Bermuda Round 6', clan: '[UDG]' }
             },
             {
               id: 'TXN_98412',
               type: 'withdrawal',
-              amount: 1200.00,
+              amount: 1200,
               status: 'completed',
-              method: 'upi',
-              reference: 'Payout to anurag@okaxis',
+              method: 'simulator',
+              reference: 'Simulated Sandbox Redemption (anurag@okaxis)',
               timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
               meta: { upiId: 'anurag@okaxis', utr: 'UTR891428019' }
             }
@@ -20775,7 +20776,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
     renderWalletBadge() {
       const el = document.getElementById('headerWalletBalance');
       if (el && this.userWallet) {
-        el.textContent = `₹${parseFloat(this.userWallet.balance).toFixed(2)}`;
+        el.textContent = `${parseInt(this.userWallet.balance, 10)} UDG`;
       }
     }
 
@@ -20824,28 +20825,37 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
         modal.innerHTML = `
           <div class="cyber-panel p-5 sm:p-6 max-w-2xl w-full rounded-2xl border border-emerald-500/50 bg-gradient-to-b from-slate-950 via-[#0a1a17] to-slate-950 shadow-2xl space-y-5 my-auto">
             <!-- Modal Header -->
-            <div class="flex items-center justify-between border-b border-emerald-500/20 pb-3">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
               <div class="flex items-center gap-3">
-                <span class="text-2xl">💳</span>
+                <span class="text-2xl">🪙</span>
                 <div>
                   <h3 class="text-base sm:text-lg font-heading font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    Underdog Esports Cyber Wallet
-                    <span class="text-[9px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-950 border border-emerald-500/50 text-emerald-300">UPI & RAZORPAY</span>
+                    Underdog Esports Practice Wallet
+                    <span class="text-[9px] px-2 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/50 text-amber-300">SIMULATED VIRTUAL CURRENCY</span>
                   </h3>
-                  <p class="text-xs text-slate-400 font-mono">Instant UPI Intent &bull; Scrim Entry Fees &bull; Tournament Prize Payouts</p>
+                  <p class="text-xs text-slate-400 font-mono">Virtual Practice Coins (UDG) &bull; Scrim Entry &bull; Zero Real Money &bull; Real Currency in Future</p>
                 </div>
               </div>
               <button id="closeWalletModalBtn" class="text-slate-400 hover:text-white text-xl p-1">✕</button>
             </div>
 
+            <!-- Disclaimer Sandbox Banner -->
+            <div class="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-[11px] text-amber-200 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span>🎮</span>
+                <span><strong>Virtual Practice Coins (Sandbox Mode):</strong> Practice scrim booking and payouts with free academy tokens. Real money transactions will launch in a future release!</span>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-amber-900/60 border border-amber-400/40 text-[9px] font-mono font-bold shrink-0">TEST ONLY</span>
+            </div>
+
             <!-- Holographic Cyber Card -->
-            <div class="relative overflow-hidden rounded-2xl border border-emerald-400/60 bg-gradient-to-br from-emerald-950/90 via-slate-900 to-slate-950 p-5 shadow-2xl space-y-4">
-              <div class="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none"></div>
+            <div class="relative overflow-hidden rounded-2xl border border-amber-500/50 bg-gradient-to-br from-amber-950/60 via-slate-900 to-slate-950 p-5 shadow-2xl space-y-4">
+              <div class="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-amber-500/10 blur-2xl pointer-events-none"></div>
 
               <div class="flex items-center justify-between relative z-10">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest">${clan}</span>
-                  <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-mono">TIER-1 PRO PASS</span>
+                  <span class="text-xs font-mono font-bold text-amber-400 uppercase tracking-widest">${clan}</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-amber-950 border border-amber-500/40 text-amber-300 font-mono">ACADEMY COIN PASS</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-lg">📶</span>
@@ -20855,26 +20865,26 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
 
               <!-- Available Balance -->
               <div class="relative z-10">
-                <span class="text-[10px] font-sub uppercase tracking-wider text-slate-400">Available Wallet Balance</span>
-                <div class="text-3xl sm:text-4xl font-heading font-black text-emerald-300 tracking-tight mt-0.5 flex items-baseline gap-2">
-                  <span>₹${balance}</span>
-                  <span class="text-xs font-mono text-emerald-500/80 font-normal">INR</span>
+                <span class="text-[10px] font-sub uppercase tracking-wider text-slate-400">Available Practice Coins</span>
+                <div class="text-3xl sm:text-4xl font-heading font-black text-amber-300 tracking-tight mt-0.5 flex items-baseline gap-2">
+                  <span>🪙 ${balance}</span>
+                  <span class="text-xs font-mono text-amber-500/90 font-normal">UDG COINS</span>
                 </div>
               </div>
 
               <!-- Card Sub-metrics -->
-              <div class="grid grid-cols-3 gap-2 pt-2 border-t border-emerald-500/20 text-xs relative z-10">
+              <div class="grid grid-cols-3 gap-2 pt-2 border-t border-amber-500/20 text-xs relative z-10">
                 <div>
-                  <span class="text-[9px] font-sub text-slate-400 uppercase block">Cardholder</span>
+                  <span class="text-[9px] font-sub text-slate-400 uppercase block">Academy Player</span>
                   <span class="font-bold text-white truncate block">${ign}</span>
                 </div>
                 <div>
                   <span class="text-[9px] font-sub text-slate-400 uppercase block">Locked In Scrims</span>
-                  <span class="font-mono font-bold text-amber-300">₹${locked}</span>
+                  <span class="font-mono font-bold text-amber-300">${locked} UDG</span>
                 </div>
                 <div class="text-right">
                   <span class="text-[9px] font-sub text-slate-400 uppercase block">Total Won</span>
-                  <span class="font-mono font-bold text-emerald-400">₹${totalWon}</span>
+                  <span class="font-mono font-bold text-emerald-400">${totalWon} UDG</span>
                 </div>
               </div>
             </div>
@@ -20882,141 +20892,128 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
             <!-- Navigation Tabs -->
             <div class="flex items-center gap-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
               <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'deposit' ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-black shadow' : 'text-slate-400 hover:text-white'}" data-tab="deposit">
-                🟢 Add Funds (UPI/Rzp)
+                🪙 Claim Coins (Free & Sandbox)
               </button>
               <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'withdraw' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow' : 'text-slate-400 hover:text-white'}" data-tab="withdraw">
-                ⚡ Withdraw Winnings
+                ⚡ Redeem Rewards (Simulator)
               </button>
               <button class="wallet-tab-btn flex-1 py-1.5 rounded-lg text-xs font-sub font-bold uppercase tracking-wider transition-all ${activeTab === 'ledger' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}" data-tab="ledger">
                 📜 Passbook (${this.userWallet.transactions.length})
               </button>
             </div>
 
-            <!-- TAB 1: ADD FUNDS -->
+            <!-- TAB 1: ADD VIRTUAL PRACTICE COINS -->
             ${activeTab === 'deposit' ? `
               <div class="space-y-4 animate-fade-in">
-                <!-- Amount Chooser -->
+                <!-- Free Daily Practice Coins Faucet -->
+                <div class="p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                  <div class="space-y-0.5">
+                    <div class="text-xs font-heading font-black text-emerald-300 flex items-center gap-1.5 uppercase tracking-wide">
+                      <span>🎁</span> Free Daily Academy Grant: +250 UDG
+                    </div>
+                    <p class="text-[11px] text-slate-300">
+                      Need coins for scrim practice? Claim your 100% free daily academy grant anytime!
+                    </p>
+                  </div>
+                  <button id="claimDailyGrantBtn" class="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black text-xs uppercase rounded-xl tracking-wider shadow shrink-0 flex items-center justify-center gap-1.5">
+                    <span>✨</span> Claim +250 Coins
+                  </button>
+                </div>
+
+                <!-- Virtual Amount Chooser -->
                 <div class="space-y-2">
-                  <label class="text-xs font-sub uppercase font-bold text-slate-300">Select Top-Up Amount:</label>
+                  <label class="text-xs font-sub uppercase font-bold text-slate-300">Select Practice Top-Up Amount:</label>
                   <div class="grid grid-cols-5 gap-2">
                     ${[50, 100, 250, 500, 1000].map(amt => `
-                      <button class="wallet-amount-pill py-2 rounded-xl border font-mono font-bold text-xs transition-all ${selectedAmount === amt ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 shadow-md ring-1 ring-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'}" data-amount="${amt}">
-                        ₹${amt}
+                      <button class="wallet-amount-pill py-2 rounded-xl border font-mono font-bold text-xs transition-all ${selectedAmount === amt ? 'bg-amber-500/20 text-amber-300 border-amber-400 shadow-md ring-1 ring-amber-400' : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'}" data-amount="${amt}">
+                        🪙 ${amt}
                       </button>
                     `).join('')}
                   </div>
                   <div class="flex items-center gap-2 mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5">
-                    <span class="text-slate-400 font-mono">₹</span>
-                    <input type="number" id="customAmountInput" value="${selectedAmount}" min="10" max="10000" class="bg-transparent text-xs text-white font-mono flex-1 outline-none font-bold" placeholder="Custom amount">
+                    <span class="text-amber-400 font-mono">🪙</span>
+                    <input type="number" id="customAmountInput" value="${selectedAmount}" min="10" max="10000" class="bg-transparent text-xs text-white font-mono flex-1 outline-none font-bold" placeholder="Custom coin amount">
+                    <span class="text-[10px] text-slate-400 font-mono">UDG Coins</span>
                   </div>
                 </div>
 
-                <!-- Payment Methods Grid -->
+                <!-- Sandbox Payment Methods Grid (Testing Mode) -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                  <!-- Mode A: Mobile UPI Apps -->
-                  <div class="p-3.5 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2.5">
+                  <!-- Mode A: Sandbox 1-Tap Simulator -->
+                  <div class="p-3.5 rounded-xl bg-slate-900/80 border border-amber-500/30 space-y-2.5">
                     <div class="flex items-center justify-between">
-                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">📱 Instant UPI Apps</span>
-                      <span class="text-[9px] font-mono text-emerald-400">1-Tap Intent</span>
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">⚡ 1-Tap Instant Simulator</span>
+                      <span class="text-[9px] font-mono text-amber-400 bg-amber-950 px-1.5 py-0.5 rounded border border-amber-500/30">Free Sandbox</span>
                     </div>
-                    <p class="text-[11px] text-slate-400">Opens GPay, PhonePe, or Paytm app directly on your phone:</p>
-                    <div class="grid grid-cols-2 gap-1.5">
-                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="gpay">
-                        <span>🔵</span> Google Pay
-                      </button>
-                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-purple-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="phonepe">
-                        <span>🟣</span> PhonePe
-                      </button>
-                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="paytm">
-                        <span>🔷</span> Paytm
-                      </button>
-                      <button class="upi-app-btn p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-400 text-slate-200 text-xs font-sub font-bold flex items-center justify-center gap-1.5 transition-all" data-app="bhim">
-                        <span>🇮🇳</span> BHIM UPI
-                      </button>
-                    </div>
-                    <button id="instantCreditTestBtn" class="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow">
-                      ⚡ Confirm & Add ₹${selectedAmount} (Instant Credit)
+                    <p class="text-[11px] text-slate-400">Instantly credit test coins to simulate real scrim entry fee transactions:</p>
+                    <button id="instantCreditTestBtn" class="w-full py-2.5 bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-500 hover:from-amber-500 hover:to-yellow-400 text-black font-sub font-black text-xs rounded-xl uppercase tracking-wider shadow">
+                      🪙 Add ${selectedAmount} UDG Practice Coins
                     </button>
+                    <div class="text-[10px] text-slate-500 font-mono text-center">
+                      Zero real cost &bull; Infinite test reloads available
+                    </div>
                   </div>
 
-                  <!-- Mode B: Dynamic QR & Razorpay -->
+                  <!-- Mode B: Sandbox Gateway UI Preview -->
                   <div class="p-3.5 rounded-xl bg-slate-900/80 border border-blue-500/30 space-y-2.5">
                     <div class="flex items-center justify-between">
-                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">💳 Razorpay Gateway</span>
-                      <span class="text-[9px] font-mono text-blue-400">Cards / Netbanking</span>
+                      <span class="text-xs font-heading font-black text-white uppercase tracking-wider">💳 Sandbox Gateway Preview</span>
+                      <span class="text-[9px] font-mono text-blue-400">Razorpay / UPI UI</span>
                     </div>
-                    <p class="text-[11px] text-slate-400">Pay securely via Credit/Debit card, RuPay, Netbanking, or dynamic QR code:</p>
-                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-3">
-                      <!-- Dynamic UPI QR Code Placeholder Graphic -->
-                      <div class="w-16 h-16 rounded bg-white p-1 flex items-center justify-center shrink-0 shadow">
-                        <svg viewBox="0 0 100 100" class="w-full h-full text-black">
-                          <rect width="100" height="100" fill="white" />
-                          <rect x="10" y="10" width="25" height="25" fill="black" />
-                          <rect x="65" y="10" width="25" height="25" fill="black" />
-                          <rect x="10" y="65" width="25" height="25" fill="black" />
-                          <rect x="15" y="15" width="15" height="15" fill="white" />
-                          <rect x="70" y="15" width="15" height="15" fill="white" />
-                          <rect x="15" y="70" width="15" height="15" fill="white" />
-                          <rect x="42" y="15" width="8" height="25" fill="black" />
-                          <rect x="42" y="55" width="15" height="8" fill="black" />
-                          <rect x="70" y="55" width="15" height="20" fill="black" />
-                          <rect x="42" y="75" width="8" height="15" fill="black" />
-                        </svg>
-                      </div>
-                      <div class="text-[11px] text-slate-300 space-y-0.5">
-                        <div class="font-bold text-white">Scan & Pay ₹${selectedAmount}</div>
-                        <div class="text-[10px] text-slate-400 font-mono">underdogesports@upi</div>
-                        <div class="text-[9px] text-emerald-400 font-mono">Zero Platform Fees</div>
-                      </div>
-                    </div>
-                    <button id="openRazorpayBtn" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-sub font-black text-xs rounded-lg uppercase tracking-wider shadow">
-                      💳 Pay ₹${selectedAmount} via Razorpay
+                    <p class="text-[11px] text-slate-400">Preview the future checkout flow (currently simulated with test tokens):</p>
+                    <button id="openRazorpayBtn" class="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-sub font-black text-xs rounded-xl uppercase tracking-wider shadow">
+                      💳 Open Sandbox Gateway Simulator (${selectedAmount} UDG)
                     </button>
+                    <div class="text-[10px] text-slate-500 font-mono text-center">
+                      Simulates gateway callback & webhook crediting
+                    </div>
                   </div>
                 </div>
               </div>
             ` : ''}
 
-            <!-- TAB 2: WITHDRAW WINNINGS -->
+            <!-- TAB 2: REDEEM REWARDS (SIMULATOR) -->
             ${activeTab === 'withdraw' ? `
               <div class="space-y-4 animate-fade-in">
                 <div class="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/40 space-y-1">
-                  <span class="text-xs text-purple-300 font-bold uppercase">⚡ Instant Payout to Bank via UPI:</span>
+                  <span class="text-xs text-purple-300 font-bold uppercase flex items-center gap-1.5">
+                    <span>⚡</span> Simulated Rewards Payout (Sandbox):
+                  </span>
                   <p class="text-xs text-slate-300 leading-relaxed">
-                    Withdraw your match winnings directly to your personal UPI ID (Google Pay, PhonePe, Paytm, or BHIM). Standard payout latency: under 60 seconds!
+                    Test your tournament earnings redemption to verify passbook ledger accounting. <em>(Real cash withdrawals to bank accounts will be officially enabled in a future release!)</em>
                   </p>
                 </div>
 
                 <div class="space-y-3">
                   <div>
-                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Withdrawal Amount (Min ₹50):</label>
+                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Redeem Coins (Min 50 UDG):</label>
                     <div class="flex items-center gap-2 mt-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2">
-                      <span class="text-slate-400 font-mono">₹</span>
-                      <input type="number" id="withdrawAmountInput" value="${Math.min(500, Math.floor(this.userWallet.balance))}" min="50" max="${this.userWallet.balance}" class="bg-transparent text-sm text-white font-mono flex-1 outline-none font-bold" placeholder="Amount to withdraw">
+                      <span class="text-amber-400 font-mono">🪙</span>
+                      <input type="number" id="withdrawAmountInput" value="${Math.min(500, Math.floor(this.userWallet.balance))}" min="50" max="${this.userWallet.balance}" class="bg-transparent text-sm text-white font-mono flex-1 outline-none font-bold" placeholder="Amount to redeem">
                       <button id="maxWithdrawBtn" class="px-2 py-0.5 rounded bg-purple-950 border border-purple-500/40 text-purple-300 text-[10px] font-mono font-bold">
-                        MAX (₹${balance})
+                        MAX (${balance} UDG)
                       </button>
                     </div>
                   </div>
 
                   <div>
-                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Your UPI VPA / ID:</label>
+                    <label class="text-xs font-sub uppercase font-bold text-slate-300">Your UPI VPA / ID (For testing):</label>
                     <input type="text" id="withdrawVpaInput" value="${this.userWallet.vpa || 'anurag@okaxis'}" placeholder="e.g. yourname@okaxis or 9876543210@paytm" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono mt-1 focus:border-purple-400 outline-none">
                   </div>
 
                   <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-1">
                     <div class="flex justify-between">
-                      <span>Available for Payout:</span>
-                      <span class="font-mono text-emerald-400 font-bold">₹${balance}</span>
+                      <span>Available Practice Coins:</span>
+                      <span class="font-mono text-amber-400 font-bold">${balance} UDG</span>
                     </div>
                     <div class="flex justify-between">
-                      <span>Withdrawal Processing Fee:</span>
-                      <span class="font-mono text-slate-400">₹0.00 (Free)</span>
+                      <span>Simulated Platform Fee:</span>
+                      <span class="font-mono text-slate-400">0 UDG (Free)</span>
                     </div>
                   </div>
 
                   <button id="submitWithdrawalBtn" class="w-full py-2.5 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:to-pink-500 text-white font-sub font-black text-xs rounded-xl uppercase tracking-wider shadow-lg">
-                    ⚡ Request Instant UPI Withdrawal
+                    ⚡ Test Simulated Payout (${Math.min(500, Math.floor(this.userWallet.balance))} UDG Coins)
                   </button>
                 </div>
               </div>
@@ -21085,6 +21082,12 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           });
         });
 
+        // Free Daily Practice Grant Button
+        modal.querySelector('#claimDailyGrantBtn')?.addEventListener('click', () => {
+          this.handleUpiDeposit(250, 'Daily Free Academy Grant');
+          renderModal();
+        });
+
         // Instant Credit Simulator Button
         modal.querySelector('#instantCreditTestBtn')?.addEventListener('click', () => {
           this.handleUpiDeposit(selectedAmount, 'Google Pay (UPI)');
@@ -21108,7 +21111,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
           const amt = parseFloat(modal.querySelector('#withdrawAmountInput')?.value || 0);
           const vpa = modal.querySelector('#withdrawVpaInput')?.value?.trim();
           if (isNaN(amt) || amt < 50) {
-            alert('Minimum withdrawal amount is ₹50.');
+            alert('Minimum redemption amount is 50 UDG Coins.');
             return;
           }
           if (amt > this.userWallet.balance) {
@@ -21182,7 +21185,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
 
             <div class="text-right shrink-0">
               <div class="font-mono font-black text-sm ${isCredit ? 'text-emerald-400' : 'text-rose-400'}">
-                ${isCredit ? '+' : '-'}₹${parseFloat(t.amount).toFixed(2)}
+                ${isCredit ? '+' : '-'}${parseFloat(t.amount).toFixed(0)} UDG
               </div>
               <div class="text-[9px] font-mono ${t.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'}">
                 ${t.status === 'completed' ? '✅ COMPLETED' : '⏳ PENDING'}
@@ -21214,7 +21217,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       this.saveUserWallet();
       this.playCashChime();
 
-      alert(`🎉 Payment of ₹${amt.toFixed(2)} Successful! Funds credited to your Underdog Esports Wallet.`);
+      alert(`🎉 Added ${amt.toFixed(0)} UDG Practice Coins to your Underdog Academy Wallet!`);
     }
 
     showRazorpayCheckout(amount) {
@@ -21308,12 +21311,12 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       this.saveUserWallet();
       this.playCashChime();
 
-      alert(`⚡ Instant Payout of ₹${amt.toFixed(2)} dispatched to ${vpa}! Reference UTR: ${newTxn.meta.utr}`);
+      alert(`⚡ Simulated redemption of ${amt.toFixed(0)} UDG Coins recorded for ${vpa}! (Sandbox test UTR: ${newTxn.meta.utr})`);
     }
 
     bookTournamentSlotWithWallet(scrimId, scrimName, entryFee = 50, slotInfo = null) {
       if (this.userWallet.balance < entryFee) {
-        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nCurrent Balance: ₹${this.userWallet.balance.toFixed(2)}\nEntry Fee Required: ₹${entryFee.toFixed(2)}\n\nWould you like to top up your wallet via UPI / Razorpay now?`)) {
+        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nCurrent Balance: ${this.userWallet.balance} UDG Coins\nEntry Fee Required: ${entryFee} UDG Coins\n\nWould you like to top up your wallet via UPI / Razorpay now?`)) {
           this.showEsportsWalletModal('deposit');
         }
         return;
@@ -21399,11 +21402,11 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
             </div>
             <div class="flex justify-between border-b border-slate-800 pb-1.5">
               <span class="text-slate-400">Entry Fee Debited:</span>
-              <span class="font-mono font-bold text-rose-400">-₹${receipt.amount.toFixed(2)}</span>
+              <span class="font-mono font-bold text-rose-400">-${receipt.amount.toFixed(0)} UDG Coins (Virtual)</span>
             </div>
             <div class="flex justify-between pt-0.5">
               <span class="text-slate-400">New Wallet Balance:</span>
-              <span class="font-mono font-black text-emerald-400">₹${this.userWallet.balance.toFixed(2)}</span>
+              <span class="font-mono font-black text-amber-400">🪙 ${parseInt(this.userWallet.balance, 10)} UDG</span>
             </div>
           </div>
 
@@ -21423,7 +21426,7 @@ ${coach.drillSchedule.map(d => `- [${d.time}] ${d.name}: ${d.desc}`).join('\n')}
       modal.querySelector('#closeReceiptBtn')?.addEventListener('click', () => modal.remove());
 
       modal.querySelector('#shareReceiptWhatsAppBtn')?.addEventListener('click', () => {
-        const text = `🎟️ *UNDERDOG ESPORTS - TOURNAMENT ENTRY FEE PAID*\n\n🏆 *Event:* ${receipt.scrimName}\n👑 *Slot:* ${receipt.slotName || 'SLOT #' + receipt.slotNumber} (Confirmed)\n⏰ *Match Start Time:* ${receipt.matchTime || '6:00 PM IST'}\n⏳ *Reporting Time:* ${receipt.reportingTime || '5:50 PM IST'} (Room ID Dispatch)\n💳 *Fee Paid:* ₹${receipt.amount.toFixed(2)}\n📜 *Receipt ID:* ${receipt.id}\n\n✅ Room ID & Password will be delivered 10 mins prior to match!`;
+        const text = `🎟️ *UNDERDOG ESPORTS - TOURNAMENT ENTRY FEE PAID*\n\n🏆 *Event:* ${receipt.scrimName}\n👑 *Slot:* ${receipt.slotName || 'SLOT #' + receipt.slotNumber} (Confirmed)\n⏰ *Match Start Time:* ${receipt.matchTime || '6:00 PM IST'}\n⏳ *Reporting Time:* ${receipt.reportingTime || '5:50 PM IST'} (Room ID Dispatch)\n💳 *Fee Paid:* ${receipt.amount.toFixed(0)} UDG Coins (Virtual Practice Currency)\n📜 *Receipt ID:* ${receipt.id}\n\n✅ Room ID & Password will be delivered 10 mins prior to match!`;
         window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
       });
     }
